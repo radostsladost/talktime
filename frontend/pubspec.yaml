@@ -1,0 +1,30 @@
+name: talktime
+description: "A new Flutter project."
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.9.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  flutter_webrtc: 1.2.1          # WebRTC for video/audio/screen share
+  provider: ^6.1.2                 # Or use Riverpod (we'll use Provider for simplicity now)
+  shared_preferences: ^2.2.2       # For storing tokens/user data
+  http: ^1.1.0                     # For API calls
+  equatable: ^2.0.5                # Clean model classes
+  uuid: ^4.3.3                     # Generate message/call IDs
+  permission_handler: ^11.3.1      # Handle mic/camera permissions
+  path_provider: ^2.1.1            # Needed for screen sharing on mobile
+  get_it: ^7.6.4                   # Service locator (optional but helpful)
+  logger: ^2.0.2                   # Logging
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
+
