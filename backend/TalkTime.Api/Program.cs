@@ -136,8 +136,8 @@ builder.Services.AddSwaggerGen(options =>
 });
 
 // Health checks
-builder.Services.AddHealthChecks()
-    .AddNpgSql(builder.Configuration.GetConnectionString("DefaultConnection")!);
+// builder.Services.AddHealthChecks()
+//     .AddNpgSql(builder.Configuration.GetConnectionString("DefaultConnection")!);
 
 var app = builder.Build();
 
