@@ -19,6 +19,7 @@ dependencies:
   path_provider: ^2.1.1            # Needed for screen sharing on mobile
   get_it: ^7.6.4                   # Service locator (optional but helpful)
   logger: ^2.0.2                   # Logging
+  web_socket_channel: ^3.0.3       # signaling
 
 dev_dependencies:
   flutter_test:

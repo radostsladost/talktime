@@ -1,0 +1,28 @@
+GET http://localhost:5000/api/Messages?conversationId={conversationId}&skip={skip}&take={take}
+Authorization: Bearer  {token}
+
+###
+
+POST http://localhost:5000/api/Messages
+Authorization: Bearer  {token}
+Content-Type: application/json
+
+{
+    "conversationId": "1234567890",
+    "content": "Encrypted content"
+}
+
+###
+
+GET http://localhost:5000/api/Messages/pending
+Authorization: Bearer  {token}
+
+###
+
+POST http://localhost:5000/api/Messages/{messageId}/delivered
+Authorization: Bearer  {token}
+
+###
+
+DELETE http://localhost:5000/api/Messages/{messageId}
+Authorization: Bearer  {token}

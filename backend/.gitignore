@@ -4,5 +4,6 @@
 [Oo]bj/
 .vs/
 .idea
-/Backend/wwwroot/Uploads/
+TalkTime.Api/wwwroot/[Uu]ploads/
+TalkTime.Api/appsettings.json
 /global.json

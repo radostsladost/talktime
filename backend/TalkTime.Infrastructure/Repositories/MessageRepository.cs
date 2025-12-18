@@ -7,24 +7,26 @@ namespace TalkTime.Infrastructure.Repositories;
 
 public class MessageRepository : IMessageRepository
 {
-    private readonly AppDbContext _context;
+    private readonly IDbContextFactory<AppDbContext> _context;
 
-    public MessageRepository(AppDbContext context)
+    public MessageRepository(IDbContextFactory<AppDbContext> contextFactory)
     {
-        _context = context;
+        _context = contextFactory;
     }
 
     public async Task<Message?> GetByIdAsync(string id)
     {
-        return await _context.Messages
-            .Include(m => m.Sender)
-            .Include(m => m.Deliveries)
-            .FirstOrDefaultAsync(m => m.Id == id);
+        await using var dbContext = _context.CreateDbContext();
+        return await dbContext.Messages
+                  .Include(m => m.Sender)
+                  .Include(m => m.Deliveries)
+                  .FirstOrDefaultAsync(m => m.Id == id);
     }
 
     public async Task<IEnumerable<Message>> GetByConversationIdAsync(string conversationId, int skip = 0, int take = 50)
     {
-        return await _context.Messages
+        await using var dbContext = _context.CreateDbContext();
+        return await dbContext.Messages
             .Include(m => m.Sender)
             .Where(m => m.ConversationId == conversationId)
             .OrderByDescending(m => m.SentAt)
@@ -35,8 +37,9 @@ public class MessageRepository : IMessageRepository
 
     public async Task<IEnumerable<Message>> GetPendingMessagesForUserAsync(string userId)
     {
+        await using var dbContext = _context.CreateDbContext();
         // Get messages where this user is a recipient but hasn't received them yet
-        return await _context.Messages
+        return await dbContext.Messages
             .Include(m => m.Sender)
             .Include(m => m.Deliveries)
             .Where(m => m.Deliveries.Any(d => d.RecipientId == userId && !d.IsDelivered))
@@ -46,37 +49,41 @@ public class MessageRepository : IMessageRepository
 
     public async Task<Message> CreateAsync(Message message)
     {
-        _context.Messages.Add(message);
-        await _context.SaveChangesAsync();
+        await using var dbContext = _context.CreateDbContext();
+        dbContext.Messages.Add(message);
+        await dbContext.SaveChangesAsync();
         return message;
     }
 
     public async Task UpdateAsync(Message message)
     {
-        _context.Messages.Update(message);
-        await _context.SaveChangesAsync();
+        await using var dbContext = _context.CreateDbContext();
+        dbContext.Messages.Update(message);
+        await dbContext.SaveChangesAsync();
     }
 
     public async Task DeleteAsync(string id)
     {
-        var message = await _context.Messages.FindAsync(id);
+        await using var dbContext = _context.CreateDbContext();
+        var message = await dbContext.Messages.FindAsync(id);
         if (message != null)
         {
-            _context.Messages.Remove(message);
-            await _context.SaveChangesAsync();
+            dbContext.Messages.Remove(message);
+            await dbContext.SaveChangesAsync();
         }
     }
 
     public async Task MarkAsDeliveredAsync(string messageId, string recipientId)
     {
-        var delivery = await _context.MessageDeliveries
+        await using var dbContext = _context.CreateDbContext();
+        var delivery = await dbContext.MessageDeliveries
             .FirstOrDefaultAsync(d => d.MessageId == messageId && d.RecipientId == recipientId);
 
         if (delivery != null && !delivery.IsDelivered)
         {
             delivery.IsDelivered = true;
             delivery.DeliveredAt = DateTime.UtcNow;
-            await _context.SaveChangesAsync();
+            await dbContext.SaveChangesAsync();
 
             // Check if all recipients have received the message
             await TryDeleteFullyDeliveredMessageAsync(messageId);
@@ -85,16 +92,17 @@ public class MessageRepository : IMessageRepository
 
     public async Task DeleteDeliveredMessagesAsync()
     {
+        await using var dbContext = _context.CreateDbContext();
         // Find messages where all deliveries are marked as delivered
-        var fullyDeliveredMessages = await _context.Messages
+        var fullyDeliveredMessages = await dbContext.Messages
             .Include(m => m.Deliveries)
             .Where(m => m.Deliveries.All(d => d.IsDelivered))
             .ToListAsync();
 
         if (fullyDeliveredMessages.Any())
         {
-            _context.Messages.RemoveRange(fullyDeliveredMessages);
-            await _context.SaveChangesAsync();
+            dbContext.Messages.RemoveRange(fullyDeliveredMessages);
+            await dbContext.SaveChangesAsync();
         }
     }
 
@@ -103,6 +111,7 @@ public class MessageRepository : IMessageRepository
     /// </summary>
     public async Task CreateDeliveryRecordsAsync(string messageId, IEnumerable<string> recipientIds)
     {
+        await using var dbContext = _context.CreateDbContext();
         var deliveries = recipientIds.Select(recipientId => new MessageDelivery
         {
             MessageId = messageId,
@@ -110,8 +119,8 @@ public class MessageRepository : IMessageRepository
             IsDelivered = false
         });
 
-        _context.MessageDeliveries.AddRange(deliveries);
-        await _context.SaveChangesAsync();
+        dbContext.MessageDeliveries.AddRange(deliveries);
+        await dbContext.SaveChangesAsync();
     }
 
     /// <summary>
@@ -119,14 +128,15 @@ public class MessageRepository : IMessageRepository
     /// </summary>
     private async Task TryDeleteFullyDeliveredMessageAsync(string messageId)
     {
-        var message = await _context.Messages
+        await using var dbContext = _context.CreateDbContext();
+        var message = await dbContext.Messages
             .Include(m => m.Deliveries)
             .FirstOrDefaultAsync(m => m.Id == messageId);
 
         if (message != null && message.Deliveries.All(d => d.IsDelivered))
         {
-            _context.Messages.Remove(message);
-            await _context.SaveChangesAsync();
+            dbContext.Messages.Remove(message);
+            await dbContext.SaveChangesAsync();
         }
     }
 }
