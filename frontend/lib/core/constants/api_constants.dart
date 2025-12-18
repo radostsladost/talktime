@@ -1,8 +1,91 @@
+import 'package:talktime/core/config/environment.dart';
+
+/// API Constants for TalkTime backend
+/// All endpoints are prefixed with /api as per the backend configuration
 class ApiConstants {
-  static const String baseUrl = 'https://api.example.com';
-  static const String auth = '/auth';
-  static const String conversations = '/conversations';
-  static const String messages = '/messages';
-  static const String users = '/users';
-  static const String signaling = '/signal';
+  // Base URL from environment configuration
+  static String get baseUrl => Environment.apiBaseUrl;
+
+  // WebSocket base URL
+  static String get wsBaseUrl => Environment.wsBaseUrl;
+
+  // API prefix - all endpoints start with /api
+  static const String apiPrefix = '/api';
+
+  // ==================== Auth Endpoints ====================
+  static const String auth = '$apiPrefix/auth';
+  static const String login = '$auth/login';
+  static const String register = '$auth/register';
+  static const String logout = '$auth/logout';
+  static const String me = '$auth/me';
+
+  // ==================== Conversation Endpoints ====================
+  static const String conversations = '$apiPrefix/conversations';
+
+  // Get conversation by ID
+  static String conversationById(String id) => '$conversations/$id';
+
+  // Add participant to conversation
+  static String addParticipant(String conversationId) =>
+      '$conversations/$conversationId/participants';
+
+  // Remove participant from conversation
+  static String removeParticipant(
+    String conversationId,
+    String participantId,
+  ) => '$conversations/$conversationId/participants/$participantId';
+
+  // ==================== Message Endpoints ====================
+  static const String messages = '$apiPrefix/messages';
+  static const String pendingMessages = '$messages/pending';
+
+  // Mark message as delivered
+  static String markMessageDelivered(String messageId) =>
+      '$messages/$messageId/delivered';
+
+  // Delete message
+  static String deleteMessage(String messageId) => '$messages/$messageId';
+
+  // ==================== User Endpoints ====================
+  static const String users = '$apiPrefix/users';
+
+  // Get user by ID
+  static String userById(String id) => '$users/$id';
+
+  // ==================== SignalR Hub Endpoint ====================
+  // WebSocket endpoint for real-time communication (calls, messages)
+  static const String signalingHub = '/hubs/talktime';
+
+  // ==================== WebSocket URLs ====================
+
+  /// Get the full SignalR WebSocket URL with authentication
+  /// The access token is passed as a query parameter for SignalR authentication
+  static String getSignalingUrl(String accessToken) {
+    return '$wsBaseUrl$signalingHub?access_token=$accessToken';
+  }
+
+  // ==================== Helper Methods ====================
+
+  /// Get full URL for any endpoint
+  static String getFullUrl(String endpoint) {
+    return '$baseUrl$endpoint';
+  }
+
+  /// Get full WebSocket URL
+  static String getFullWsUrl(String endpoint) {
+    return '$wsBaseUrl$endpoint';
+  }
+
+  // ==================== Configuration ====================
+
+  /// Print API configuration (for debugging)
+  static void printConfig() {
+    if (Environment.enableLogging) {
+      print('=== API Configuration ===');
+      print('Base URL: $baseUrl');
+      print('WebSocket URL: $wsBaseUrl');
+      print('SignalR Hub: $signalingHub');
+      print('========================');
+    }
+  }
 }

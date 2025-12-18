@@ -1,0 +1,28 @@
+POST http://localhost:5000/api/Auth/login
+Content-Type: application/json
+
+{
+    "email": "test@example.com",
+    "password": "Test1234!"
+}
+
+###
+
+POST http://localhost:5000/api/Auth/register
+Content-Type: application/json
+
+{
+    "username": "testuser",
+    "email": "test@example.com",
+    "password": "Test1234!"
+}
+
+###
+
+POST http://localhost:5000/api/Auth/logout
+Authorization: Bearer {token}
+
+###
+
+GET http://localhost:5000/api/Auth/me
+Authorization: Bearer {token}

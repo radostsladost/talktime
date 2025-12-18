@@ -1,89 +1,112 @@
+import 'package:talktime/core/network/api_client.dart';
+import 'package:talktime/core/constants/api_constants.dart';
 import 'package:talktime/shared/models/message.dart';
-import 'package:talktime/shared/models/user.dart';
+import 'package:logger/logger.dart';
 
-/*
+/// Service for managing messages
 class MessageService {
   final ApiClient _apiClient = ApiClient();
+  final Logger _logger = Logger();
 
-  Future<List<Message>> getMessages(String conversationId) async {
-    final response = await _apiClient.get(
-      '${ApiConstants.messages}?conversationId=$conversationId',
-    );
-    final List messagesJson = response['data'] as List;
-    return messagesJson.map((json) => Message.fromJson(json)).toList();
+  /// Get messages for a specific conversation
+  /// Supports pagination with skip and take parameters
+  Future<List<Message>> getMessages(
+    String conversationId, {
+    int skip = 0,
+    int take = 50,
+  }) async {
+    try {
+      _logger.i('Fetching messages for conversation: $conversationId');
+      final response = await _apiClient.get(
+        '${ApiConstants.messages}?conversationId=$conversationId&skip=$skip&take=$take',
+      );
+
+      final List messagesJson = response['data'] as List;
+      final messages = messagesJson
+          .map((json) => Message.fromJson(json as Map<String, dynamic>))
+          .toList();
+
+      _logger.i('Fetched ${messages.length} messages');
+      return messages;
+    } catch (e) {
+      _logger.e('Error fetching messages: $e');
+      rethrow;
+    }
   }
 
-  Future<Message> sendMessage(String conversationId, String content) async {
-    final response = await _apiClient.post(
-      ApiConstants.messages,
-      body: {'conversationId': conversationId, 'content': content},
-    );
-    return Message.fromJson(response['data']);
-  }
-}
-*/
+  /// Send a new message to a conversation
+  Future<Message> sendMessage(
+    String conversationId,
+    String content, {
+    String type = 'text',
+  }) async {
+    try {
+      _logger.i('Sending message to conversation: $conversationId');
+      final response = await _apiClient.post(
+        ApiConstants.messages,
+        body: {
+          'conversationId': conversationId,
+          'content': content,
+          'type': type,
+        },
+      );
 
-/* MOCK */
-class MessageService {
-  // Simulate conversation history
-  final Map<String, List<Message>> _mockMessages = {
-    '1': [
-      Message(
-        id: 'm1',
-        conversationId: '1',
-        sender: const User(id: 'u1', username: 'You'),
-        content: 'Hey Alex!',
-        sentAt: '2025-12-08T10:00:00Z',
-      ),
-      Message(
-        id: 'm2',
-        conversationId: '1',
-        sender: const User(id: 'u2', username: 'Alex'),
-        content: 'Hello! How are you?',
-        sentAt: '2025-12-08T10:01:00Z',
-      ),
-      Message(
-        id: 'm3',
-        conversationId: '1',
-        sender: const User(id: 'u1', username: 'You'),
-        content: 'Doing well! Want to hop on a quick call?',
-        sentAt: '2025-12-08T10:02:00Z',
-      ),
-    ],
-    '2': [
-      Message(
-        id: 'm10',
-        conversationId: '2',
-        sender: const User(id: 'u3', username: 'Sam'),
-        content: 'Team standup at 3?',
-        sentAt: '2025-12-08T09:00:00Z',
-      ),
-    ],
-  };
-
-  Future<List<Message>> getMessages(String conversationId) async {
-    await Future.delayed(const Duration(milliseconds: 300));
-    return _mockMessages[conversationId] ?? [];
+      final message = Message.fromJson(
+        response['data'] as Map<String, dynamic>,
+      );
+      _logger.i('Message sent successfully: ${message.id}');
+      return message;
+    } catch (e) {
+      _logger.e('Error sending message: $e');
+      rethrow;
+    }
   }
 
-  Future<Message> sendMessage(String conversationId, String content) async {
-    await Future.delayed(const Duration(milliseconds: 200));
+  /// Get pending messages (messages received while offline)
+  Future<List<Message>> getPendingMessages() async {
+    try {
+      _logger.i('Fetching pending messages');
+      final response = await _apiClient.get(ApiConstants.pendingMessages);
 
-    final newMessage = Message(
-      id: 'mock_${DateTime.now().millisecondsSinceEpoch}',
-      conversationId: conversationId,
-      sender: const User(id: 'u1', username: 'You'),
-      content: content,
-      sentAt: DateTime.now().toIso8601String(),
-    );
+      final List messagesJson = response['data'] as List;
+      final messages = messagesJson
+          .map((json) => Message.fromJson(json as Map<String, dynamic>))
+          .toList();
 
-    // Add to mock list
-    _mockMessages.update(
-      conversationId,
-      (list) => [...list, newMessage],
-      ifAbsent: () => [newMessage],
-    );
+      _logger.i('Fetched ${messages.length} pending messages');
+      return messages;
+    } catch (e) {
+      _logger.e('Error fetching pending messages: $e');
+      rethrow;
+    }
+  }
 
-    return newMessage;
+  /// Mark a message as delivered
+  Future<void> markAsDelivered(String messageId) async {
+    try {
+      _logger.i('Marking message as delivered: $messageId');
+      await _apiClient.post(ApiConstants.markMessageDelivered(messageId));
+      _logger.i('Message marked as delivered');
+    } catch (e) {
+      _logger.e('Error marking message as delivered: $e');
+      rethrow;
+    }
+  }
+
+  /// Delete a message (only sender can delete)
+  Future<void> deleteMessage(String messageId) async {
+    try {
+      _logger.i('Deleting message: $messageId');
+      await _apiClient.delete(ApiConstants.deleteMessage(messageId));
+      _logger.i('Message deleted successfully');
+    } catch (e) {
+      _logger.e('Error deleting message: $e');
+      rethrow;
+    }
+  }
+
+  /// Dispose resources
+  void dispose() {
+    _apiClient.dispose();
   }
 }

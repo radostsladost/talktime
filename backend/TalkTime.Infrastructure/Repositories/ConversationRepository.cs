@@ -7,21 +7,23 @@ namespace TalkTime.Infrastructure.Repositories;
 
 public class ConversationRepository : IConversationRepository
 {
-    private readonly AppDbContext _context;
+    private readonly IDbContextFactory<AppDbContext> _context;
 
-    public ConversationRepository(AppDbContext context)
+    public ConversationRepository(IDbContextFactory<AppDbContext> contextFactory)
     {
-        _context = context;
+        _context = contextFactory;
     }
 
     public async Task<Conversation?> GetByIdAsync(string id)
     {
-        return await _context.Conversations.FindAsync(id);
+        await using var dbContext = _context.CreateDbContext();
+        return await dbContext.Conversations.FindAsync(id);
     }
 
     public async Task<Conversation?> GetByIdWithParticipantsAsync(string id)
     {
-        return await _context.Conversations
+        await using var dbContext = _context.CreateDbContext();
+        return await dbContext.Conversations
             .Include(c => c.Participants)
                 .ThenInclude(p => p.User)
             .Include(c => c.Messages.OrderByDescending(m => m.SentAt).Take(1))
@@ -31,7 +33,8 @@ public class ConversationRepository : IConversationRepository
 
     public async Task<IEnumerable<Conversation>> GetUserConversationsAsync(string userId)
     {
-        return await _context.Conversations
+        await using var dbContext = _context.CreateDbContext();
+        return await dbContext.Conversations
             .Include(c => c.Participants)
                 .ThenInclude(p => p.User)
             .Include(c => c.Messages.OrderByDescending(m => m.SentAt).Take(1))
@@ -43,7 +46,8 @@ public class ConversationRepository : IConversationRepository
 
     public async Task<Conversation?> GetDirectConversationAsync(string userId1, string userId2)
     {
-        return await _context.Conversations
+        await using var dbContext = _context.CreateDbContext();
+        return await dbContext.Conversations
             .Include(c => c.Participants)
                 .ThenInclude(p => p.User)
             .Where(c => c.Type == Core.Enums.ConversationType.Direct)
@@ -55,30 +59,34 @@ public class ConversationRepository : IConversationRepository
 
     public async Task<Conversation> CreateAsync(Conversation conversation)
     {
-        _context.Conversations.Add(conversation);
-        await _context.SaveChangesAsync();
+        await using var dbContext = _context.CreateDbContext();
+        dbContext.Conversations.Add(conversation);
+        await dbContext.SaveChangesAsync();
         return conversation;
     }
 
     public async Task UpdateAsync(Conversation conversation)
     {
+        await using var dbContext = _context.CreateDbContext();
         conversation.UpdatedAt = DateTime.UtcNow;
-        _context.Conversations.Update(conversation);
-        await _context.SaveChangesAsync();
+        dbContext.Conversations.Update(conversation);
+        await dbContext.SaveChangesAsync();
     }
 
     public async Task DeleteAsync(string id)
     {
-        var conversation = await _context.Conversations.FindAsync(id);
+        await using var dbContext = _context.CreateDbContext();
+        var conversation = await dbContext.Conversations.FindAsync(id);
         if (conversation != null)
         {
-            _context.Conversations.Remove(conversation);
-            await _context.SaveChangesAsync();
+            dbContext.Conversations.Remove(conversation);
+            await dbContext.SaveChangesAsync();
         }
     }
 
     public async Task AddParticipantAsync(string conversationId, string userId, bool isAdmin = false)
     {
+        await using var dbContext = _context.CreateDbContext();
         var participant = new ConversationParticipant
         {
             ConversationId = conversationId,
@@ -87,31 +95,34 @@ public class ConversationRepository : IConversationRepository
             JoinedAt = DateTime.UtcNow
         };
 
-        _context.ConversationParticipants.Add(participant);
-        await _context.SaveChangesAsync();
+        dbContext.ConversationParticipants.Add(participant);
+        await dbContext.SaveChangesAsync();
     }
 
     public async Task RemoveParticipantAsync(string conversationId, string userId)
     {
-        var participant = await _context.ConversationParticipants
+        await using var dbContext = _context.CreateDbContext();
+        var participant = await dbContext.ConversationParticipants
             .FirstOrDefaultAsync(p => p.ConversationId == conversationId && p.UserId == userId);
 
         if (participant != null)
         {
-            _context.ConversationParticipants.Remove(participant);
-            await _context.SaveChangesAsync();
+            dbContext.ConversationParticipants.Remove(participant);
+            await dbContext.SaveChangesAsync();
         }
     }
 
     public async Task<bool> IsParticipantAsync(string conversationId, string userId)
     {
-        return await _context.ConversationParticipants
+        await using var dbContext = _context.CreateDbContext();
+        return await dbContext.ConversationParticipants
             .AnyAsync(p => p.ConversationId == conversationId && p.UserId == userId);
     }
 
     public async Task<IEnumerable<string>> GetParticipantIdsAsync(string conversationId)
     {
-        return await _context.ConversationParticipants
+        await using var dbContext = _context.CreateDbContext();
+        return await dbContext.ConversationParticipants
             .Where(p => p.ConversationId == conversationId)
             .Select(p => p.UserId)
             .ToListAsync();

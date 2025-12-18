@@ -1,0 +1,49 @@
+GET http://localhost:5000/api/Conversations
+Authorization: Bearer {token}
+
+###
+
+GET http://localhost:5000/api/Conversations/{id}
+Authorization: Bearer {token}
+
+###
+
+POST http://localhost:5000/api/Conversations
+Authorization: Bearer {token}
+Content-Type: application/json
+
+{
+    "type": "group",
+    "name": "My Group",
+    "participantIds": ["1234567890", "0987654321"]
+}
+
+###
+
+PUT http://localhost:5000/api/Conversations/{id}
+Authorization: Bearer {token}
+Content-Type: application/json
+
+{
+    "name": "My Updated Group"
+}
+
+###
+
+DELETE http://localhost:5000/api/Conversations/{id}
+Authorization: Bearer {token}
+
+###
+
+POST http://localhost:5000/api/Conversations/{id}/participants
+Authorization: Bearer {token}
+Content-Type: application/json
+
+{
+    "userId": "1234567890"
+}
+
+###
+
+DELETE http://localhost:5000/api/Conversations/{id}/participants/{participantId}
+Authorization: Bearer {token}
