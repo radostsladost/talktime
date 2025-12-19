@@ -9,17 +9,18 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.8
-  flutter_webrtc: 1.2.1          # WebRTC for video/audio/screen share
-  provider: ^6.1.2                 # Or use Riverpod (we'll use Provider for simplicity now)
-  shared_preferences: ^2.2.2       # For storing tokens/user data
-  http: ^1.1.0                     # For API calls
-  equatable: ^2.0.5                # Clean model classes
-  uuid: ^4.3.3                     # Generate message/call IDs
-  permission_handler: ^11.3.1      # Handle mic/camera permissions
-  path_provider: ^2.1.1            # Needed for screen sharing on mobile
-  get_it: ^7.6.4                   # Service locator (optional but helpful)
-  logger: ^2.0.2                   # Logging
-  web_socket_channel: ^3.0.3       # signaling
+  flutter_webrtc: 1.2.1 # WebRTC for video/audio/screen share
+  provider: ^6.1.2 # Or use Riverpod (we'll use Provider for simplicity now)
+  shared_preferences: ^2.2.2 # For storing tokens/user data
+  http: ^1.1.0 # For API calls
+  equatable: ^2.0.5 # Clean model classes
+  uuid: ^4.3.3 # Generate message/call IDs
+  permission_handler: ^11.3.1 # Handle mic/camera permissions
+  path_provider: ^2.1.1 # Needed for screen sharing on mobile
+  get_it: ^7.6.4 # Service locator (optional but helpful)
+  logger: ^2.0.2 # Logging
+  web_socket_channel: ^3.0.3 # signaling
+  signalr_netcore: ^1.4.4 # SignalR client for real-time communication
 
 dev_dependencies:
   flutter_test:
@@ -28,4 +29,3 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
-
