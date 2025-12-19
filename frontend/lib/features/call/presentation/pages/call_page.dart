@@ -130,26 +130,15 @@ class _CallPageState extends State<CallPage> {
       await _signalingService!.connect();
 
       // Subscribe to signaling events
-      _subscriptions.add(
-        _signalingService!.onIncomingCall.listen(_handleIncomingCall),
-      );
-      _subscriptions.add(
-        _signalingService!.onCallAccepted.listen(_handleCallAccepted),
-      );
-      _subscriptions.add(
-        _signalingService!.onCallRejected.listen(_handleCallRejected),
-      );
-      _subscriptions.add(
-        _signalingService!.onCallEnded.listen(_handleCallEnded),
-      );
-      _subscriptions.add(_signalingService!.onOffer.listen(_handleOffer));
-      _subscriptions.add(_signalingService!.onAnswer.listen(_handleAnswer));
-      _subscriptions.add(
-        _signalingService!.onIceCandidate.listen(_handleIceCandidate),
-      );
-      _subscriptions.add(
-        _signalingService!.onCallInitiated.listen(_handleCallInitiated),
-      );
+      _subscriptions
+        ..add(_signalingService!.onIncomingCall.listen(_handleIncomingCall))
+        ..add(_signalingService!.onCallAccepted.listen(_handleCallAccepted))
+        ..add(_signalingService!.onCallRejected.listen(_handleCallRejected))
+        ..add(_signalingService!.onCallEnded.listen(_handleCallEnded))
+        ..add(_signalingService!.onOffer.listen(_handleOffer))
+        ..add(_signalingService!.onAnswer.listen(_handleAnswer))
+        ..add(_signalingService!.onIceCandidate.listen(_handleIceCandidate))
+        ..add(_signalingService!.onCallInitiated.listen(_handleCallInitiated));
 
       _logger.i('SignalR service initialized successfully');
     } catch (e) {

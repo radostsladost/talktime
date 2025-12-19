@@ -12,13 +12,23 @@ class SignalingService {
 
   // Stream controllers for different signaling events
   final StreamController<IncomingCallEvent> _incomingCallController =
-      StreamController<IncomingCallEvent>.broadcast();
+      StreamController<IncomingCallEvent>.broadcast(); // OBOSLETE
   final StreamController<CallAcceptedEvent> _callAcceptedController =
-      StreamController<CallAcceptedEvent>.broadcast();
+      StreamController<CallAcceptedEvent>.broadcast(); // OBOSLETE
   final StreamController<CallRejectedEvent> _callRejectedController =
-      StreamController<CallRejectedEvent>.broadcast();
+      StreamController<CallRejectedEvent>.broadcast(); // OBOSLETE
   final StreamController<CallEndedEvent> _callEndedController =
-      StreamController<CallEndedEvent>.broadcast();
+      StreamController<CallEndedEvent>.broadcast(); // OBOSLETE
+
+  final StreamController<RoomCreatedEvent> _roomCreatedController =
+      StreamController<RoomCreatedEvent>.broadcast();
+  final StreamController<RoomJoinedEvent> _roomJoinedController =
+      StreamController<RoomJoinedEvent>.broadcast();
+  final StreamController<RoomParticipantUpdate> _participantJoinedController =
+      StreamController<RoomParticipantUpdate>.broadcast();
+  final StreamController<RoomParticipantUpdate> _participantLeftController =
+      StreamController<RoomParticipantUpdate>.broadcast();
+
   final StreamController<SignalingOfferEvent> _offerController =
       StreamController<SignalingOfferEvent>.broadcast();
   final StreamController<SignalingAnswerEvent> _answerController =
@@ -32,12 +42,20 @@ class SignalingService {
 
   // Public streams
   Stream<IncomingCallEvent> get onIncomingCall =>
-      _incomingCallController.stream;
+      _incomingCallController.stream; // OBOSLETE
   Stream<CallAcceptedEvent> get onCallAccepted =>
-      _callAcceptedController.stream;
+      _callAcceptedController.stream; // OBOSLETE
   Stream<CallRejectedEvent> get onCallRejected =>
-      _callRejectedController.stream;
-  Stream<CallEndedEvent> get onCallEnded => _callEndedController.stream;
+      _callRejectedController.stream; // OBOSLETE
+  Stream<CallEndedEvent> get onCallEnded =>
+      _callEndedController.stream; // OBOSLETE
+
+  Stream<RoomCreatedEvent> get onRoomCreated => _roomCreatedController.stream;
+  Stream<RoomJoinedEvent> get onRoomJoined => _roomJoinedController.stream;
+  Stream<RoomParticipantUpdate> get onParticipantJoined =>
+      _participantJoinedController.stream;
+  Stream<RoomParticipantUpdate> get onParticipantLeft =>
+      _participantLeftController.stream;
   Stream<SignalingOfferEvent> get onOffer => _offerController.stream;
   Stream<SignalingAnswerEvent> get onAnswer => _answerController.stream;
   Stream<SignalingIceCandidateEvent> get onIceCandidate =>
@@ -79,53 +97,31 @@ class SignalingService {
   void _registerHandlers() {
     if (_hubConnection == null) return;
 
-    // Incoming call
-    _hubConnection!.on('IncomingCall', (arguments) {
-      _logger.d('Received IncomingCall: $arguments');
+    _hubConnection!.on('RoomCreated', (arguments) {
       if (arguments != null && arguments.isNotEmpty) {
         final data = arguments[0] as Map<String, dynamic>;
-        final event = IncomingCallEvent.fromJson(data);
-        _incomingCallController.add(event);
+        _roomCreatedController.add(RoomCreatedEvent.fromJson(data));
       }
     });
 
-    // Call initiated (for outgoing calls)
-    _hubConnection!.on('CallInitiated', (arguments) {
-      _logger.d('Received CallInitiated: $arguments');
+    _hubConnection!.on('RoomJoined', (arguments) {
       if (arguments != null && arguments.isNotEmpty) {
         final data = arguments[0] as Map<String, dynamic>;
-        final callId = data['callId'] as String;
-        _callInitiatedController.add(callId);
+        _roomJoinedController.add(RoomJoinedEvent.fromJson(data));
       }
     });
 
-    // Call accepted
-    _hubConnection!.on('CallAccepted', (arguments) {
-      _logger.d('Received CallAccepted: $arguments');
+    _hubConnection!.on('ParticipantJoined', (arguments) {
       if (arguments != null && arguments.isNotEmpty) {
         final data = arguments[0] as Map<String, dynamic>;
-        final event = CallAcceptedEvent.fromJson(data);
-        _callAcceptedController.add(event);
+        _participantJoinedController.add(RoomParticipantUpdate.fromJson(data));
       }
     });
 
-    // Call rejected
-    _hubConnection!.on('CallRejected', (arguments) {
-      _logger.d('Received CallRejected: $arguments');
+    _hubConnection!.on('ParticipantLeft', (arguments) {
       if (arguments != null && arguments.isNotEmpty) {
         final data = arguments[0] as Map<String, dynamic>;
-        final event = CallRejectedEvent.fromJson(data);
-        _callRejectedController.add(event);
-      }
-    });
-
-    // Call ended
-    _hubConnection!.on('CallEnded', (arguments) {
-      _logger.d('Received CallEnded: $arguments');
-      if (arguments != null && arguments.isNotEmpty) {
-        final data = arguments[0] as Map<String, dynamic>;
-        final event = CallEndedEvent.fromJson(data);
-        _callEndedController.add(event);
+        _participantLeftController.add(RoomParticipantUpdate.fromJson(data));
       }
     });
 
@@ -239,6 +235,40 @@ class SignalingService {
     await _hubConnection!.invoke(
       'SendAnswer',
       args: [toUserId, sdp, roomId as Object],
+    );
+  }
+
+  Future<void> createRoom(String conversationId) async {
+    if (!isConnected) throw Exception('Not connected');
+    await _hubConnection!.invoke('CreateRoom', args: [conversationId]);
+  }
+
+  Future<void> joinRoom(String roomId) async {
+    if (!isConnected) throw Exception('Not connected');
+    await _hubConnection!.invoke('JoinRoom', args: [roomId]);
+  }
+
+  Future<void> leaveRoom(String roomId, {String reason = 'user_left'}) async {
+    if (!isConnected) throw Exception('Not connected');
+    await _hubConnection!.invoke('LeaveRoom', args: [roomId, reason]);
+  }
+
+  // Room-based signaling
+  Future<void> sendRoomOffer(String roomId, String sdp) async {
+    if (!isConnected) throw Exception('Not connected');
+    await _hubConnection!.invoke('SendRoomOffer', args: [roomId, sdp]);
+  }
+
+  Future<void> sendRoomIceCandidate(
+    String roomId,
+    String candidate,
+    String? sdpMid,
+    int? sdpMLineIndex,
+  ) async {
+    if (!isConnected) throw Exception('Not connected');
+    await _hubConnection!.invoke(
+      'SendRoomIceCandidate',
+      args: [roomId, candidate, sdpMid as Object, sdpMLineIndex as Object],
     );
   }
 
@@ -464,6 +494,88 @@ class UserInfo {
       id: json['id'] as String,
       username: json['username'] as String,
       avatarUrl: json['avatarUrl'] as String?,
+    );
+  }
+}
+
+class RoomCreatedEvent {
+  final String roomId;
+  final String conversationId;
+  final List<UserInfo> participants;
+  final String createdBy;
+  final DateTime createdAt;
+
+  RoomCreatedEvent({
+    required this.roomId,
+    required this.conversationId,
+    required this.participants,
+    required this.createdBy,
+    required this.createdAt,
+  });
+
+  factory RoomCreatedEvent.fromJson(Map<String, dynamic> json) {
+    final participantsJson = json['participants'] as List<dynamic>;
+    final participants = participantsJson
+        .map((p) => UserInfo.fromJson(p as Map<String, dynamic>))
+        .toList();
+
+    return RoomCreatedEvent(
+      roomId: json['roomId'] as String,
+      conversationId: json['name'] as String, // matches `roomState.Name`
+      participants: participants,
+      createdBy: json['createdBy'] as String,
+      createdAt: DateTime.parse(json['createdAt'] as String),
+    );
+  }
+}
+
+class RoomJoinedEvent {
+  final String roomId;
+  final String conversationId;
+  final List<UserInfo> participants;
+  final String createdBy;
+  final DateTime createdAt;
+
+  RoomJoinedEvent({
+    required this.roomId,
+    required this.conversationId,
+    required this.participants,
+    required this.createdBy,
+    required this.createdAt,
+  });
+
+  factory RoomJoinedEvent.fromJson(Map<String, dynamic> json) {
+    final participantsJson = json['participants'] as List<dynamic>;
+    final participants = participantsJson
+        .map((p) => UserInfo.fromJson(p as Map<String, dynamic>))
+        .toList();
+
+    return RoomJoinedEvent(
+      roomId: json['roomId'] as String,
+      conversationId: json['name'] as String,
+      participants: participants,
+      createdBy: json['createdBy'] as String,
+      createdAt: DateTime.parse(json['createdAt'] as String),
+    );
+  }
+}
+
+class RoomParticipantUpdate {
+  final String roomId;
+  final UserInfo user;
+  final String action; // 'joined' or 'left'
+
+  RoomParticipantUpdate({
+    required this.roomId,
+    required this.user,
+    required this.action,
+  });
+
+  factory RoomParticipantUpdate.fromJson(Map<String, dynamic> json) {
+    return RoomParticipantUpdate(
+      roomId: json['roomId'] as String,
+      user: UserInfo.fromJson(json['user'] as Map<String, dynamic>),
+      action: json['action'] as String,
     );
   }
 }
