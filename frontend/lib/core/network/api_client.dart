@@ -11,7 +11,7 @@ class ApiClient {
   static const String _tokenKey = 'auth_token';
 
   /// Get stored auth token
-  Future<String?> _getToken() async {
+  Future<String?> getToken() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString(_tokenKey);
   }
@@ -36,7 +36,7 @@ class ApiClient {
     };
 
     if (includeAuth) {
-      final token = await _getToken();
+      final token = await getToken();
       if (token != null && token.isNotEmpty) {
         headers['Authorization'] = 'Bearer $token';
       }

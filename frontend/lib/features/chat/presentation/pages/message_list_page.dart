@@ -189,6 +189,7 @@ class _MessageListPageState extends State<MessageListPage> {
         builder: (context) => CallPage(
           isOutgoing: true,
           peerName: widget.conversation.displayTitle,
+          peerId: widget.conversation.id, // TODO: Use actual peer user ID
           callType: CallType.video,
         ),
       ),

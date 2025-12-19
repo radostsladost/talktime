@@ -63,6 +63,7 @@ class _ChatListPageState extends State<ChatListPage> {
         },
       ),
       floatingActionButton: FloatingActionButton(
+        heroTag: "ChatsList",
         child: const Icon(Icons.edit),
         onPressed: () => _createGroup(context),
       ),
@@ -86,11 +87,11 @@ class _ChatListPageState extends State<ChatListPage> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => CallPage(
+        builder: (context) => const CallPage(
           isOutgoing: true,
           peerName: 'Alex',
+          peerId: 'user-id-here', // Replace with actual user ID
           callType: CallType.video,
-          // Pass signaling service later
         ),
       ),
     );

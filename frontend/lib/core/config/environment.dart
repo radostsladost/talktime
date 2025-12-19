@@ -24,7 +24,7 @@ class Environment {
   }
 
   /// WebSocket base URL (derived from API base URL)
-  static String get wsBaseUrl => apiBaseUrl.replaceFirst('http', 'ws');
+  static String get wsBaseUrl => apiBaseUrl;
 
   /// API timeout duration
   static Duration get apiTimeout => const Duration(seconds: 30);
