@@ -1,9 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/features/chat/data/conversation_service.dart';
 import 'package:talktime/shared/models/conversation.dart';
 import 'package:talktime/features/call/presentation/pages/call_page.dart';
 import 'package:talktime/features/chat/presentation/pages/message_list_page.dart';
+import 'package:talktime/features/chat/presentation/pages/create_chat.dart';
 
 class ChatListPage extends StatefulWidget {
   const ChatListPage({super.key});
@@ -12,13 +16,29 @@ class ChatListPage extends StatefulWidget {
   State<ChatListPage> createState() => _ChatListPageState();
 }
 
-class _ChatListPageState extends State<ChatListPage> {
+class _ChatListPageState extends State<ChatListPage>
+    with WidgetsBindingObserver {
   late Future<List<Conversation>> _conversationsFuture;
+  late Timer _timer;
 
   @override
   void initState() {
     super.initState();
     _conversationsFuture = ConversationService().getConversations();
+    WidgetsBinding.instance.addObserver(this);
+    _timer = Timer.periodic(const Duration(seconds: 30), (_) {
+      setState(() {
+        _conversationsFuture = ConversationService().getConversations();
+      });
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // App is reopened from the background
+      _conversationsFuture = ConversationService().getConversations();
+    }
   }
 
   @override
@@ -70,7 +90,18 @@ class _ChatListPageState extends State<ChatListPage> {
     );
   }
 
-  void _openChat(BuildContext context, Conversation conversation) {
+  Future<void> _openChat(
+    BuildContext context,
+    Conversation conversation,
+  ) async {
+    final auth = new AuthService();
+    final user = await auth.getCurrentUser();
+    conversation.participants?.sort((a, b) {
+      if (a.id == user.id) return 1;
+      if (b.id == user.id) return -1;
+      return 0;
+    });
+
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -81,6 +112,10 @@ class _ChatListPageState extends State<ChatListPage> {
 
   void _createGroup(BuildContext context) {
     // TODO: Show group creation dialog
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => CreateConferencePage()),
+    );
   }
 
   void _startNewCall(BuildContext context) {
@@ -95,5 +130,11 @@ class _ChatListPageState extends State<ChatListPage> {
         ),
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
   }
 }

@@ -1,0 +1,1 @@
+flutter build web --release --dart-define=ENV_PROF=production

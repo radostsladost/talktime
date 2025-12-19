@@ -35,6 +35,10 @@ class ApiConstants {
     String participantId,
   ) => '$conversations/$conversationId/participants/$participantId';
 
+  // Search user
+  static String searchUserByQuery(String userName) =>
+      '$conversations/search/user?userName=$userName';
+
   // ==================== Message Endpoints ====================
   static const String messages = '$apiPrefix/messages';
   static const String pendingMessages = '$messages/pending';

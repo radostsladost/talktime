@@ -2,7 +2,7 @@
 /// This allows easy switching between development and production settings
 class Environment {
   static const String _currentEnv = String.fromEnvironment(
-    'ENV',
+    'ENV_PROF',
     defaultValue: 'development',
   );
 
@@ -13,7 +13,10 @@ class Environment {
   static String get apiBaseUrl {
     switch (_currentEnv) {
       case 'production':
-        return 'https://api.talktime.com'; // Replace with your production URL
+        return String.fromEnvironment(
+          'API_BASE_URL',
+          defaultValue: 'https://api.example.host',
+        ); // Replace with your production URL
       case 'development':
       default:
         // For Android emulator use 10.0.2.2 instead of localhost

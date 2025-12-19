@@ -26,6 +26,36 @@ public class ConversationsController : ControllerBase
         _logger = logger;
     }
 
+    [HttpPost("Search/User")]
+    public async Task<ActionResult<UserDto>> SearchUser(string userName)
+    {
+        try
+        {
+            var userId = User.FindFirst("userId")?.Value;
+
+            if (string.IsNullOrEmpty(userId))
+            {
+                return Unauthorized(new { message = "User not authenticated" });
+            }
+            var user = await _userRepository.GetByEmailAsync(userName);
+            var user2 = await _userRepository.GetByUsernameAsync(userName);
+
+            return Ok(new
+            {
+                data = (new User[] { user, user2 }).Where(u => u != null).Select(p => new UserDto(
+                    p.Id,
+                    p.Username,
+                    p.AvatarUrl
+                ))
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error creating conversation");
+            return StatusCode(500, new { message = "An error occurred" });
+        }
+    }
+
     [HttpGet]
     public async Task<ActionResult<ConversationsResponseDto>> GetConversations()
     {

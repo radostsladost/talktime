@@ -1,12 +1,34 @@
 import 'package:talktime/core/network/api_client.dart';
 import 'package:talktime/core/constants/api_constants.dart';
 import 'package:talktime/shared/models/conversation.dart';
+import 'package:talktime/shared/models/user.dart';
 import 'package:logger/logger.dart';
 
 /// Service for managing conversations (chats)
 class ConversationService {
   final ApiClient _apiClient = ApiClient();
   final Logger _logger = Logger();
+
+  /// Search user
+  Future<List<User>> searchUser(String query) async {
+    try {
+      _logger.i('Fetching conversations');
+      final response = await _apiClient.post(
+        ApiConstants.searchUserByQuery(query),
+      );
+
+      final List usersJson = response['data'] as List;
+      final users = usersJson
+          .map((json) => User.fromJson(json as Map<String, dynamic>))
+          .toList();
+
+      _logger.i('Fetched ${users.length} conversations');
+      return users;
+    } catch (e) {
+      _logger.e('Error fetching conversations: $e');
+      rethrow;
+    }
+  }
 
   /// Get all conversations for the current user
   Future<List<Conversation>> getConversations() async {
