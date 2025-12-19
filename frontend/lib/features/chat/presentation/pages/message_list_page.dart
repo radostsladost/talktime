@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:talktime/features/call/presentation/pages/call_page.dart';
+import 'package:talktime/features/call/presentation/pages/conference_page.dart';
 import 'package:talktime/features/chat/data/message_service.dart';
 import 'package:talktime/shared/models/conversation.dart';
 import 'package:talktime/shared/models/message.dart';
@@ -186,11 +187,11 @@ class _MessageListPageState extends State<MessageListPage> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => CallPage(
-          isOutgoing: true,
-          peerName: widget.conversation.displayTitle,
-          peerId: widget.conversation.id, // TODO: Use actual peer user ID
-          callType: CallType.video,
+        builder: (context) => ConferencePage(
+          roomId: widget.conversation.id,
+          conversationId: widget.conversation.id,
+          initialParticipants: [],
+          isCreator: false,
         ),
       ),
     );

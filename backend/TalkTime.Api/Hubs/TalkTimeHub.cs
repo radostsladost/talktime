@@ -183,6 +183,12 @@ public class TalkTimeHub : Hub
             await Clients.Caller.SendAsync("Error", new { message = "Not a participant of this conversation" });
             return;
         }
+        var existRoom = ConferenceRooms.FirstOrDefault(x => x.Value.Name == roomName);
+        if (existRoom.Value != null)
+        {
+            await JoinRoom(existRoom.Value.RoomId);
+            return;
+        }
 
         var roomId = Guid.NewGuid().ToString();
         var roomState = new RoomState
@@ -226,6 +232,11 @@ public class TalkTimeHub : Hub
         if (!await _conversationRepository.IsParticipantAsync(roomState.Name, userId))
         {
             await Clients.Caller.SendAsync("Error", new { message = "Not a participant of this conversation" });
+            return;
+        }
+
+        if (roomState.Participants.ContainsKey(userId))
+        {
             return;
         }
 
@@ -354,21 +365,25 @@ public class TalkTimeHub : Hub
     {
         // Find and end all active calls for this user
         var userCalls = ActiveCalls.Values
-            .Where(c => c.CallerId == userId || c.CalleeId == userId)
+            .Where(c => c.CallerId == userId || c.Participants.Contains(userId))
             .ToList();
 
         foreach (var call in userCalls)
         {
             if (ActiveCalls.TryRemove(call.CallId, out _))
             {
-                var otherUserId = call.CallerId == userId ? call.CalleeId : call.CallerId;
-                if (ConnectedUsers.TryGetValue(otherUserId, out var connectionId))
+                var otherUserIds = call.Participants.Where(i => i != userId);
+                foreach (var otherUserId in otherUserIds)
                 {
-                    await Clients.Client(connectionId).SendAsync("CallEnded", new CallEnded(
-                        call.CallId,
-                        userId,
-                        "disconnected"
-                    ));
+                    if (ConnectedUsers.TryGetValue(otherUserId, out var connectionId))
+                    {
+                        await Clients.Client(connectionId).SendAsync("CallEnded", new CallEnded(
+                            call.CallId,
+                            userId,
+                            "disconnected"
+                        ));
+                    }
+
                 }
             }
         }

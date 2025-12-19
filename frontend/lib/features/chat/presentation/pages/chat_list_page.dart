@@ -25,12 +25,12 @@ class _ChatListPageState extends State<ChatListPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Messages'),
+        title: const Text('Talktime'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.video_call),
-            onPressed: () => _startNewCall(context),
-          ),
+          // IconButton(
+          //   icon: const Icon(Icons.video_call),
+          //   onPressed: () => _startNewCall(context),
+          // ),
         ],
       ),
       body: FutureBuilder<List<Conversation>>(
