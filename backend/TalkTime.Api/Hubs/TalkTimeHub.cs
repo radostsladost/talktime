@@ -164,215 +164,12 @@ public class TalkTimeHub : Hub
 
     #endregion
 
-    #region WebRTC Signaling - Direct Calls
-
-    /// <summary>
-    /// Initiate a call to another user
-    /// </summary>
-    public async Task InitiateCall(string calleeId, string callType)
-    {
-        var callerId = GetUserId();
-        if (string.IsNullOrEmpty(callerId)) return;
-
-        var caller = await _userRepository.GetByIdAsync(callerId);
-        if (caller == null) return;
-
-        // Check if callee is online
-        if (!ConnectedUsers.TryGetValue(calleeId, out var calleeConnectionId))
-        {
-            await Clients.Caller.SendAsync("CallFailed", new { reason = "User is offline" });
-            return;
-        }
-
-        var callId = Guid.NewGuid().ToString();
-        var callInfo = new CallInfo
-        {
-            CallId = callId,
-            CallerId = callerId,
-            CalleeId = calleeId,
-            CallType = callType,
-            StartedAt = DateTime.UtcNow
-        };
-
-        ActiveCalls[callId] = callInfo;
-
-        // Notify callee about incoming call
-        await Clients.Client(calleeConnectionId).SendAsync("IncomingCall", new IncomingCall(
-            callId,
-            new UserDto(caller.Id, caller.Username, caller.AvatarUrl),
-            callType,
-            null
-        ));
-
-        // Send call ID back to caller
-        await Clients.Caller.SendAsync("CallInitiated", new { callId, calleeId, callType });
-
-        _logger.LogInformation("Call {CallId} initiated from {CallerId} to {CalleeId}", callId, callerId, calleeId);
-    }
-
-    /// <summary>
-    /// Accept an incoming call
-    /// </summary>
-    public async Task AcceptCall(string callId)
-    {
-        var userId = GetUserId();
-        if (string.IsNullOrEmpty(userId)) return;
-
-        if (!ActiveCalls.TryGetValue(callId, out var callInfo))
-        {
-            await Clients.Caller.SendAsync("Error", new { message = "Call not found" });
-            return;
-        }
-
-        if (callInfo.CalleeId != userId)
-        {
-            await Clients.Caller.SendAsync("Error", new { message = "Not authorized" });
-            return;
-        }
-
-        callInfo.IsAccepted = true;
-
-        // Notify caller that call was accepted
-        if (ConnectedUsers.TryGetValue(callInfo.CallerId, out var callerConnectionId))
-        {
-            await Clients.Client(callerConnectionId).SendAsync("CallAccepted", new CallResponse(
-                callId,
-                userId,
-                true,
-                null
-            ));
-        }
-
-        _logger.LogInformation("Call {CallId} accepted by {UserId}", callId, userId);
-    }
-
-    /// <summary>
-    /// Reject an incoming call
-    /// </summary>
-    public async Task RejectCall(string callId, string? reason)
-    {
-        var userId = GetUserId();
-        if (string.IsNullOrEmpty(userId)) return;
-
-        if (!ActiveCalls.TryRemove(callId, out var callInfo))
-        {
-            return;
-        }
-
-        // Notify caller that call was rejected
-        if (ConnectedUsers.TryGetValue(callInfo.CallerId, out var callerConnectionId))
-        {
-            await Clients.Client(callerConnectionId).SendAsync("CallRejected", new CallResponse(
-                callId,
-                userId,
-                false,
-                reason ?? "rejected"
-            ));
-        }
-
-        _logger.LogInformation("Call {CallId} rejected by {UserId}: {Reason}", callId, userId, reason);
-    }
-
-    /// <summary>
-    /// End an active call
-    /// </summary>
-    public async Task EndCall(string callId, string reason)
-    {
-        var userId = GetUserId();
-        if (string.IsNullOrEmpty(userId)) return;
-
-        if (!ActiveCalls.TryRemove(callId, out var callInfo))
-        {
-            return;
-        }
-
-        var otherUserId = callInfo.CallerId == userId ? callInfo.CalleeId : callInfo.CallerId;
-
-        // Notify the other party
-        if (ConnectedUsers.TryGetValue(otherUserId, out var otherConnectionId))
-        {
-            await Clients.Client(otherConnectionId).SendAsync("CallEnded", new CallEnded(
-                callId,
-                userId,
-                reason
-            ));
-        }
-
-        _logger.LogInformation("Call {CallId} ended by {UserId}: {Reason}", callId, userId, reason);
-    }
-
-    /// <summary>
-    /// Send WebRTC offer
-    /// </summary>
-    public async Task SendOffer(string toUserId, string sdp, string? roomId)
-    {
-        var fromUserId = GetUserId();
-        if (string.IsNullOrEmpty(fromUserId)) return;
-
-        if (ConnectedUsers.TryGetValue(toUserId, out var connectionId))
-        {
-            await Clients.Client(connectionId).SendAsync("ReceiveOffer", new SignalingOffer(
-                fromUserId,
-                toUserId,
-                roomId,
-                sdp
-            ));
-        }
-
-        _logger.LogDebug("Offer sent from {FromUserId} to {ToUserId}", fromUserId, toUserId);
-    }
-
-    /// <summary>
-    /// Send WebRTC answer
-    /// </summary>
-    public async Task SendAnswer(string toUserId, string sdp, string? roomId)
-    {
-        var fromUserId = GetUserId();
-        if (string.IsNullOrEmpty(fromUserId)) return;
-
-        if (ConnectedUsers.TryGetValue(toUserId, out var connectionId))
-        {
-            await Clients.Client(connectionId).SendAsync("ReceiveAnswer", new SignalingAnswer(
-                fromUserId,
-                toUserId,
-                roomId,
-                sdp
-            ));
-        }
-
-        _logger.LogDebug("Answer sent from {FromUserId} to {ToUserId}", fromUserId, toUserId);
-    }
-
-    /// <summary>
-    /// Send ICE candidate
-    /// </summary>
-    public async Task SendIceCandidate(string toUserId, string candidate, string? sdpMid, int? sdpMLineIndex, string? roomId)
-    {
-        var fromUserId = GetUserId();
-        if (string.IsNullOrEmpty(fromUserId)) return;
-
-        if (ConnectedUsers.TryGetValue(toUserId, out var connectionId))
-        {
-            await Clients.Client(connectionId).SendAsync("ReceiveIceCandidate", new SignalingIceCandidate(
-                fromUserId,
-                toUserId,
-                roomId,
-                candidate,
-                sdpMid,
-                sdpMLineIndex
-            ));
-        }
-
-        _logger.LogDebug("ICE candidate sent from {FromUserId} to {ToUserId}", fromUserId, toUserId);
-    }
-
-    #endregion
-
     #region WebRTC Signaling - Conference Rooms
 
     /// <summary>
     /// Create a new conference room
     /// </summary>
+    /// <param name="roomName">ConversationId</param>
     public async Task CreateRoom(string roomName)
     {
         var userId = GetUserId();
@@ -380,6 +177,12 @@ public class TalkTimeHub : Hub
 
         var user = await _userRepository.GetByIdAsync(userId);
         if (user == null) return;
+
+        if (roomName == null || !await _conversationRepository.IsParticipantAsync(roomName, userId))
+        {
+            await Clients.Caller.SendAsync("Error", new { message = "Not a participant of this conversation" });
+            return;
+        }
 
         var roomId = Guid.NewGuid().ToString();
         var roomState = new RoomState
@@ -417,6 +220,12 @@ public class TalkTimeHub : Hub
         if (!ConferenceRooms.TryGetValue(roomId, out var roomState))
         {
             await Clients.Caller.SendAsync("Error", new { message = "Room not found" });
+            return;
+        }
+
+        if (!await _conversationRepository.IsParticipantAsync(roomState.Name, userId))
+        {
+            await Clients.Caller.SendAsync("Error", new { message = "Not a participant of this conversation" });
             return;
         }
 
@@ -475,6 +284,12 @@ public class TalkTimeHub : Hub
             return;
         }
 
+        if (!await _conversationRepository.IsParticipantAsync(roomState.Name, fromUserId))
+        {
+            await Clients.Caller.SendAsync("Error", new { message = "Not a participant of this conversation" });
+            return;
+        }
+
         // Send offer to all other participants
         foreach (var participantId in roomState.Participants.Keys.Where(p => p != fromUserId))
         {
@@ -500,6 +315,12 @@ public class TalkTimeHub : Hub
 
         if (!ConferenceRooms.TryGetValue(roomId, out var roomState))
         {
+            return;
+        }
+
+        if (!await _conversationRepository.IsParticipantAsync(roomState.Name, fromUserId))
+        {
+            await Clients.Caller.SendAsync("Error", new { message = "Not a participant of this conversation" });
             return;
         }
 
@@ -604,7 +425,8 @@ internal class CallInfo
 {
     public string CallId { get; set; } = string.Empty;
     public string CallerId { get; set; } = string.Empty;
-    public string CalleeId { get; set; } = string.Empty;
+    public ConcurrentBag<string> Participants { get; set; } = new ConcurrentBag<string>();
+    public ConcurrentBag<string> PendingParticipants { get; set; } = new ConcurrentBag<string>();
     public string CallType { get; set; } = string.Empty;
     public DateTime StartedAt { get; set; }
     public bool IsAccepted { get; set; }
