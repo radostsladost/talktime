@@ -190,10 +190,10 @@ public class TalkTimeHub : Hub
             return;
         }
 
-        var roomId = Guid.NewGuid().ToString();
+        var roomId = roomName;
         var roomState = new RoomState
         {
-            RoomId = roomId,
+            RoomId = roomName,
             Name = roomName,
             CreatedBy = userId,
             CreatedAt = DateTime.UtcNow
@@ -229,7 +229,7 @@ public class TalkTimeHub : Hub
             return;
         }
 
-        if (!await _conversationRepository.IsParticipantAsync(roomState.Name, userId))
+        if (!await _conversationRepository.IsParticipantAsync(roomId, userId))
         {
             await Clients.Caller.SendAsync("Error", new { message = "Not a participant of this conversation" });
             return;
@@ -295,7 +295,7 @@ public class TalkTimeHub : Hub
             return;
         }
 
-        if (!await _conversationRepository.IsParticipantAsync(roomState.Name, fromUserId))
+        if (!await _conversationRepository.IsParticipantAsync(roomId, fromUserId))
         {
             await Clients.Caller.SendAsync("Error", new { message = "Not a participant of this conversation" });
             return;
@@ -329,7 +329,7 @@ public class TalkTimeHub : Hub
             return;
         }
 
-        if (!await _conversationRepository.IsParticipantAsync(roomState.Name, fromUserId))
+        if (!await _conversationRepository.IsParticipantAsync(roomId, fromUserId))
         {
             await Clients.Caller.SendAsync("Error", new { message = "Not a participant of this conversation" });
             return;
@@ -350,6 +350,27 @@ public class TalkTimeHub : Hub
                 ));
             }
         }
+    }
+
+    /// <summary>
+    /// Send WebRTC answer
+    /// </summary>
+    public async Task SendAnswer(string toUserId, string sdp, string? roomId)
+    {
+        var fromUserId = GetUserId();
+        if (string.IsNullOrEmpty(fromUserId)) return;
+
+        if (ConnectedUsers.TryGetValue(toUserId, out var connectionId))
+        {
+            await Clients.Client(connectionId).SendAsync("ReceiveAnswer", new SignalingAnswer(
+                fromUserId,
+                toUserId,
+                roomId,
+                sdp
+            ));
+        }
+
+        _logger.LogDebug("Answer sent from {FromUserId} to {ToUserId}", fromUserId, toUserId);
     }
 
     #endregion
