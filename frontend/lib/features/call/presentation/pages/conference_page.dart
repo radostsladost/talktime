@@ -39,6 +39,7 @@ class _ConferencePageState extends State<ConferencePage> {
   ConferenceState _conferenceState = ConferenceState.connecting;
   bool _isMuted = false;
   bool _isCameraOff = false;
+  bool _isVideoReady = false;
 
   // Multi-peer maps
   final Map<String, RTCPeerConnection> _peerConnections = {};
@@ -136,15 +137,8 @@ class _ConferencePageState extends State<ConferencePage> {
   Future<void> _getUserMedia() async {
     final constraints = {
       'audio': {'echoCancellation': true, 'noiseSuppression': true},
-      'video': {
-        'mandatory': {
-          'minWidth': '640',
-          'minHeight': '480',
-          'minFrameRate': '30',
-        },
-        'facingMode': 'user',
-      },
     };
+    setState(() => _isCameraOff = false);
 
     _localStream = await navigator.mediaDevices.getUserMedia(constraints);
     if (mounted) {
@@ -339,7 +333,29 @@ class _ConferencePageState extends State<ConferencePage> {
     }
   }
 
-  void _toggleCamera() {
+  Future<void> _toggleCamera() async {
+    if (!_isVideoReady) {
+      final constraints = {
+        'audio': {'echoCancellation': true, 'noiseSuppression': true},
+        'video': {
+          'mandatory': {
+            'minWidth': '640',
+            'minHeight': '480',
+            'minFrameRate': '30',
+          },
+          'facingMode': 'user',
+        },
+      };
+      _localStream = await navigator.mediaDevices.getUserMedia(constraints);
+      setState(() {
+        _isVideoReady = true;
+      });
+    }
+
+    if (mounted) {
+      setState(() => _localRenderer.srcObject = _localStream);
+    }
+
     final tracks = _localStream?.getVideoTracks();
     if (tracks!.isNotEmpty) {
       final enabled = !tracks[0].enabled;
@@ -456,6 +472,7 @@ class _ConferencePageState extends State<ConferencePage> {
     return ClipRRect(
       borderRadius: BorderRadius.circular(12),
       child: Stack(
+        alignment: AlignmentDirectional.center,
         children: [
           RTCVideoView(
             _localRenderer,

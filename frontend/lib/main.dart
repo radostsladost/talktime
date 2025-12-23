@@ -3,8 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/features/auth/presentation/pages/login_page.dart';
 import 'package:talktime/features/chat/presentation/pages/chat_list_page.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
-void main() {
+Future<void> main() async {
+  await dotenv.load(fileName: ".env");
   runApp(const MyApp());
 }
 

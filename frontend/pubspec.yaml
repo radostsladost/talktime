@@ -21,6 +21,8 @@ dependencies:
   logger: ^2.0.2 # Logging
   web_socket_channel: ^3.0.3 # signaling
   signalr_netcore: ^1.4.4 # SignalR client for real-time communication
+  flutter_dotenv: ^6.0.0
+  flutter_nnnoiseless: ^1.0.1
 
 dev_dependencies:
   flutter_test:
@@ -29,3 +31,5 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - .env

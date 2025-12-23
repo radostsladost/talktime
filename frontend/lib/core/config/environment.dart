@@ -1,3 +1,5 @@
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+
 /// Environment configuration for the application
 /// This allows easy switching between development and production settings
 class Environment {
@@ -13,10 +15,8 @@ class Environment {
   static String get apiBaseUrl {
     switch (_currentEnv) {
       case 'production':
-        return String.fromEnvironment(
-          'API_BASE_URL',
-          defaultValue: 'https://api.example.host',
-        ); // Replace with your production URL
+        return dotenv.env['API_BASE_URL'] ??
+            'https://api.example.host'; // Replace with your production URL
       case 'development':
       default:
         // For Android emulator use 10.0.2.2 instead of localhost
