@@ -1,0 +1,26 @@
+version: "3.8"
+
+services:
+  webapp:
+    image: backend # Name for your built image
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "9999:9999" # Map host port 8080 to container port 8080
+    depends_on:
+      - postgresdb
+
+  postgresdb:
+    image: postgres:16-alpine # Use the official PostgreSQL image
+    expose:
+      - "5432:5432" # Map host port 5432 to container port 5432
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 12345
+      POSTGRES_DB: talktime
+    volumes:
+      - ../files/postgres_data:/var/lib/postgresql/data # Persist data in a volume
+
+volumes:
+  postgres_data:

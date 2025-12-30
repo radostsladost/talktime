@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:talktime/features/call/presentation/pages/call_page.dart';
 import 'package:talktime/features/call/presentation/pages/conference_page.dart';
@@ -19,17 +21,24 @@ class _MessageListPageState extends State<MessageListPage> {
   late Future<List<Message>> _messagesFuture;
   final _textController = TextEditingController();
   final _scrollController = ScrollController();
+  late Timer _timer;
 
   @override
   void initState() {
     super.initState();
     _messagesFuture = MessageService().getMessages(widget.conversation.id);
+    _timer = Timer.periodic(const Duration(seconds: 30), (_) {
+      setState(() {
+        _messagesFuture = MessageService().getMessages(widget.conversation.id);
+      });
+    });
   }
 
   @override
   void dispose() {
     _textController.dispose();
     _scrollController.dispose();
+    _timer?.cancel();
     super.dispose();
   }
 
