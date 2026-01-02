@@ -22,7 +22,7 @@ class Environment {
         // For Android emulator use 10.0.2.2 instead of localhost
         // For iOS simulator use localhost
         // For physical device use your computer's IP address (e.g., 192.168.1.100)
-        return 'http://localhost:5000';
+        return dotenv.env['API_BASE_URL'] ?? 'http://localhost:5000';
     }
   }
 

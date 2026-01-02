@@ -6,7 +6,6 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:logger/logger.dart';
 import 'package:talktime/features/call/data/signaling_service.dart';
 import 'package:talktime/core/network/api_client.dart';
-import 'package:talktime/shared/models/user.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
 
 enum ConferenceState { connecting, joined, inProgress, ended }
@@ -38,7 +37,7 @@ class _ConferencePageState extends State<ConferencePage> {
 
   ConferenceState _conferenceState = ConferenceState.connecting;
   bool _isMuted = false;
-  bool _isCameraOff = false;
+  bool _isCameraOff = true;
   bool _isVideoReady = false;
 
   // Multi-peer maps
@@ -47,7 +46,10 @@ class _ConferencePageState extends State<ConferencePage> {
   final Map<String, RTCVideoRenderer> _remoteRenderers = {};
 
   // Track participants (excluding self)
-  Set<String> _participantIds = {};
+  final Set<String> _participantIds = {};
+
+  // Track participant info for displaying usernames
+  final Map<String, UserInfo> _participantInfo = {};
 
   final List<StreamSubscription> _subscriptions = [];
 
@@ -75,10 +77,12 @@ class _ConferencePageState extends State<ConferencePage> {
 
       // Initialize with initial participants (exclude self)
       final selfId = await _getUserId();
-      _participantIds = {
-        for (var user in widget.initialParticipants)
-          if (user.id != selfId) user.id,
-      };
+      for (var user in widget.initialParticipants) {
+        if (user.id != selfId) {
+          _participantIds.add(user.id);
+          _participantInfo[user.id] = user;
+        }
+      }
 
       for (final id in _participantIds) {
         await _createPeerConnection(id);
@@ -106,7 +110,7 @@ class _ConferencePageState extends State<ConferencePage> {
   }
 
   Future<bool> _requestPermissions() async {
-    final permissions = <Permission>[Permission.microphone, Permission.camera];
+    final permissions = <Permission>[Permission.microphone];
     final statuses = await permissions.request();
     return statuses.values.every(
       (status) => status == PermissionStatus.granted,
@@ -138,7 +142,7 @@ class _ConferencePageState extends State<ConferencePage> {
     final constraints = {
       'audio': {'echoCancellation': true, 'noiseSuppression': true},
     };
-    setState(() => _isCameraOff = false);
+    setState(() => _isCameraOff = true);
 
     _localStream = await navigator.mediaDevices.getUserMedia(constraints);
     if (mounted) {
@@ -225,6 +229,7 @@ class _ConferencePageState extends State<ConferencePage> {
     if (!_participantIds.contains(event.user.id) &&
         await _getUserId() != event.user.id) {
       _participantIds.add(event.user.id);
+      _participantInfo[event.user.id] = event.user;
       await _createPeerConnection(event.user.id);
 
       _logger.i('Participant joined: ${event.user.id}');
@@ -239,6 +244,7 @@ class _ConferencePageState extends State<ConferencePage> {
   Future<void> _handleParticipantLeft(RoomParticipantUpdate event) async {
     if (_participantIds.remove(event.user.id) &&
         await _getUserId() != event.user.id) {
+      _participantInfo.remove(event.user.id);
       _removePeerConnection(event.user.id);
       if (mounted) setState(() {});
       _logger.i('Participant left: ${event.user.id}');
@@ -249,8 +255,16 @@ class _ConferencePageState extends State<ConferencePage> {
     _logger.e('_handleOffer from ${event.fromUserId}');
 
     if (!_peerConnections.containsKey(event.fromUserId)) {
-      await _createPeerConnection(event.fromUserId);
       _participantIds.add(event.fromUserId);
+      // Try to find user info from initial participants or create a placeholder
+      if (!_participantInfo.containsKey(event.fromUserId)) {
+        final userInfo = widget.initialParticipants.firstWhere(
+          (u) => u.id == event.fromUserId,
+          orElse: () => UserInfo(id: event.fromUserId, username: 'User'),
+        );
+        _participantInfo[event.fromUserId] = userInfo;
+      }
+      await _createPeerConnection(event.fromUserId);
     }
 
     try {
@@ -335,6 +349,15 @@ class _ConferencePageState extends State<ConferencePage> {
 
   Future<void> _toggleCamera() async {
     if (!_isVideoReady) {
+      final permissions = <Permission>[Permission.camera];
+      final statuses = await permissions.request();
+
+      if (!statuses.values.every(
+        (status) => status == PermissionStatus.granted,
+      )) {
+        return;
+      }
+
       final constraints = {
         'audio': {'echoCancellation': true, 'noiseSuppression': true},
         'video': {
@@ -428,24 +451,47 @@ class _ConferencePageState extends State<ConferencePage> {
           // Participant grid
           _conferenceState == ConferenceState.inProgress ||
                   _conferenceState == ConferenceState.joined
-              ? GridView.builder(
-                  padding: const EdgeInsets.all(8),
-                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: columns,
-                    crossAxisSpacing: 8,
-                    mainAxisSpacing: 8,
-                    childAspectRatio: 0.75,
-                  ),
-                  itemCount: totalTiles,
-                  itemBuilder: (context, index) {
-                    if (index == 0 && _localStream != null) {
-                      return _buildLocalTile();
-                    }
+              ? Center(
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final tileWidth =
+                          (constraints.maxWidth - (columns + 1) * 8) / columns;
+                      final tileHeight = tileWidth / 0.75;
+                      final gridHeight = rows * tileHeight + (rows + 1) * 8;
 
-                    final remoteId =
-                        participants[_localStream != null ? index - 1 : index];
-                    return _buildRemoteTile(remoteId);
-                  },
+                      return SizedBox(
+                        height: gridHeight > constraints.maxHeight
+                            ? constraints.maxHeight
+                            : gridHeight,
+                        child: GridView.builder(
+                          padding: const EdgeInsets.all(8),
+                          shrinkWrap: true,
+                          physics: totalTiles <= 6
+                              ? const NeverScrollableScrollPhysics()
+                              : const AlwaysScrollableScrollPhysics(),
+                          gridDelegate:
+                              SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: columns,
+                                crossAxisSpacing: 8,
+                                mainAxisSpacing: 8,
+                                childAspectRatio: 0.75,
+                              ),
+                          itemCount: totalTiles,
+                          itemBuilder: (context, index) {
+                            if (index == 0 && _localStream != null) {
+                              return _buildLocalTile();
+                            }
+
+                            final remoteId =
+                                participants[_localStream != null
+                                    ? index - 1
+                                    : index];
+                            return _buildRemoteTile(remoteId);
+                          },
+                        ),
+                      );
+                    },
+                  ),
                 )
               : Center(
                   child: Column(
@@ -474,23 +520,51 @@ class _ConferencePageState extends State<ConferencePage> {
       child: Stack(
         alignment: AlignmentDirectional.center,
         children: [
-          RTCVideoView(
-            _localRenderer,
-            mirror: true,
-            objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-          ),
-          if (_isMuted) ...[
-            const Positioned.fill(child: ColoredBox(color: Colors.black54)),
+          if (!_isCameraOff)
+            RTCVideoView(
+              _localRenderer,
+              mirror: true,
+              objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+            )
+          else
+            Container(
+              color: Colors.grey[800],
+              child: Center(
+                child: CircleAvatar(
+                  radius: 40,
+                  backgroundColor: Colors.blue,
+                  child: Text(
+                    'You'.substring(0, 1).toUpperCase(),
+                    style: const TextStyle(
+                      fontSize: 36,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          if (_isMuted)
             const Positioned(
               bottom: 8,
               right: 8,
               child: Icon(Icons.mic_off, color: Colors.red, size: 24),
             ),
-          ],
-          if (_isCameraOff)
-            const Center(
-              child: Icon(Icons.videocam_off, size: 60, color: Colors.grey),
+          Positioned(
+            bottom: 8,
+            left: 8,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.black54,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: const Text(
+                'You',
+                style: TextStyle(color: Colors.white, fontSize: 12),
+              ),
             ),
+          ),
         ],
       ),
     );
@@ -498,19 +572,60 @@ class _ConferencePageState extends State<ConferencePage> {
 
   Widget _buildRemoteTile(String participantId) {
     final renderer = _remoteRenderers[participantId];
-    if (renderer == null) {
-      return Container(
-        color: Colors.grey[800],
-        child: const Center(child: CircularProgressIndicator()),
-      );
-    }
+    final stream = _remoteStreams[participantId];
+    final userInfo = _participantInfo[participantId];
+    final username = userInfo?.username ?? 'User';
+    final hasVideo =
+        stream?.getVideoTracks().isNotEmpty == true &&
+        stream!.getVideoTracks().first.enabled;
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(12),
-      child: RTCVideoView(
-        renderer,
-        mirror: false,
-        objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+      child: Stack(
+        alignment: AlignmentDirectional.center,
+        children: [
+          if (renderer != null && hasVideo)
+            RTCVideoView(
+              renderer,
+              mirror: false,
+              objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+            )
+          else
+            Container(
+              color: Colors.grey[800],
+              child: Center(
+                child: renderer == null
+                    ? const CircularProgressIndicator()
+                    : CircleAvatar(
+                        radius: 40,
+                        backgroundColor: Colors.deepPurple,
+                        child: Text(
+                          username.substring(0, 1).toUpperCase(),
+                          style: const TextStyle(
+                            fontSize: 36,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+              ),
+            ),
+          Positioned(
+            bottom: 8,
+            left: 8,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.black54,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                username,
+                style: const TextStyle(color: Colors.white, fontSize: 12),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
