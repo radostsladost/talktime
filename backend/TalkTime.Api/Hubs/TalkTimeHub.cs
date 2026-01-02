@@ -268,6 +268,18 @@ public class TalkTimeHub : Hub
             roomState.CreatedAt
         ));
 
+        foreach (var c in roomState.Participants.ToArray())
+        {
+            if (c.Value == userDto)
+                continue;
+
+            await Clients.Caller.SendAsync("ParticipantJoined", new RoomParticipantUpdate(
+                roomId,
+                c.Value,
+                "joined"
+            ));
+        }
+
         _logger.LogInformation("User {UserId} joined room {RoomId}", userId, roomId);
     }
 

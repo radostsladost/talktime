@@ -92,8 +92,8 @@ class _ConferencePageState extends State<ConferencePage> {
         _conferenceState = ConferenceState.joined;
       });
 
-      // If creator, send offer to all
-      if (widget.isCreator && _participantIds.isNotEmpty) {
+      // Send offers to all existing participants (whether creator or not)
+      if (_participantIds.isNotEmpty) {
         await _createAndSendOffers();
       }
     } catch (e) {
@@ -454,40 +454,45 @@ class _ConferencePageState extends State<ConferencePage> {
               ? Center(
                   child: LayoutBuilder(
                     builder: (context, constraints) {
+                      final spacing = 8.0;
                       final tileWidth =
-                          (constraints.maxWidth - (columns + 1) * 8) / columns;
+                          (constraints.maxWidth - (columns + 1) * spacing) /
+                          columns;
                       final tileHeight = tileWidth / 0.75;
-                      final gridHeight = rows * tileHeight + (rows + 1) * 8;
+                      final gridHeight =
+                          rows * tileHeight + (rows + 1) * spacing;
+
+                      // Build list of all tiles
+                      final tiles = <Widget>[];
+                      for (int i = 0; i < totalTiles; i++) {
+                        if (i == 0 && _localStream != null) {
+                          tiles.add(_buildLocalTile());
+                        } else {
+                          final remoteId =
+                              participants[_localStream != null ? i - 1 : i];
+                          tiles.add(_buildRemoteTile(remoteId));
+                        }
+                      }
 
                       return SizedBox(
                         height: gridHeight > constraints.maxHeight
                             ? constraints.maxHeight
                             : gridHeight,
-                        child: GridView.builder(
-                          padding: const EdgeInsets.all(8),
-                          shrinkWrap: true,
-                          physics: totalTiles <= 6
-                              ? const NeverScrollableScrollPhysics()
-                              : const AlwaysScrollableScrollPhysics(),
-                          gridDelegate:
-                              SliverGridDelegateWithFixedCrossAxisCount(
-                                crossAxisCount: columns,
-                                crossAxisSpacing: 8,
-                                mainAxisSpacing: 8,
-                                childAspectRatio: 0.75,
-                              ),
-                          itemCount: totalTiles,
-                          itemBuilder: (context, index) {
-                            if (index == 0 && _localStream != null) {
-                              return _buildLocalTile();
-                            }
-
-                            final remoteId =
-                                participants[_localStream != null
-                                    ? index - 1
-                                    : index];
-                            return _buildRemoteTile(remoteId);
-                          },
+                        width: constraints.maxWidth,
+                        child: Wrap(
+                          alignment: WrapAlignment.center,
+                          runAlignment: WrapAlignment.center,
+                          spacing: spacing,
+                          runSpacing: spacing,
+                          children: tiles
+                              .map(
+                                (tile) => SizedBox(
+                                  width: tileWidth,
+                                  height: tileHeight,
+                                  child: tile,
+                                ),
+                              )
+                              .toList(),
                         ),
                       );
                     },
