@@ -37,7 +37,7 @@ class _ConferencePageState extends State<ConferencePage> {
 
   ConferenceState _conferenceState = ConferenceState.connecting;
   bool _isMuted = false;
-  bool _isCameraOff = true;
+  bool _isCameraEnabled = false;
   bool _isVideoReady = false;
 
   // Multi-peer maps
@@ -142,7 +142,7 @@ class _ConferencePageState extends State<ConferencePage> {
     final constraints = {
       'audio': {'echoCancellation': true, 'noiseSuppression': true},
     };
-    setState(() => _isCameraOff = true);
+    setState(() => _isCameraEnabled = false);
 
     _localStream = await navigator.mediaDevices.getUserMedia(constraints);
     if (mounted) {
@@ -383,7 +383,9 @@ class _ConferencePageState extends State<ConferencePage> {
     if (tracks!.isNotEmpty) {
       final enabled = !tracks[0].enabled;
       tracks[0].enabled = enabled;
-      setState(() => _isCameraOff = !enabled);
+      setState(() => _isCameraEnabled = enabled);
+    } else {
+      setState(() => _isCameraEnabled = false);
     }
   }
 
@@ -525,7 +527,7 @@ class _ConferencePageState extends State<ConferencePage> {
       child: Stack(
         alignment: AlignmentDirectional.center,
         children: [
-          if (!_isCameraOff)
+          if (_isCameraEnabled)
             RTCVideoView(
               _localRenderer,
               mirror: true,
@@ -653,8 +655,8 @@ class _ConferencePageState extends State<ConferencePage> {
         ),
         const SizedBox(width: 20),
         _buildIconButton(
-          icon: _isCameraOff ? Icons.videocam_off : Icons.videocam,
-          color: _isCameraOff ? Colors.red : Colors.white,
+          icon: !_isCameraEnabled ? Icons.videocam_off : Icons.videocam,
+          color: !_isCameraEnabled ? Colors.red : Colors.white,
           onPressed: _toggleCamera,
         ),
         const SizedBox(width: 20),
