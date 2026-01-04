@@ -198,9 +198,7 @@ class _MessageListPageState extends State<MessageListPage> {
       MaterialPageRoute(
         builder: (context) => ConferencePage(
           roomId: widget.conversation.id,
-          conversationId: widget.conversation.id,
           initialParticipants: [],
-          isCreator: false,
         ),
       ),
     );
