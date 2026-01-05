@@ -27,7 +27,9 @@ class Conversation extends Equatable {
 
     return Conversation(
       id: json['id'],
-      type: json['type'] == 'group' ? ConversationType.group : ConversationType.direct,
+      type: json['type'] == 'group'
+          ? ConversationType.group
+          : ConversationType.direct,
       name: json['name'],
       participants: participants,
       lastMessage: json['lastMessage'],
@@ -35,9 +37,9 @@ class Conversation extends Equatable {
     );
   }
 
-  String get displayTitle {
+  String? get displayTitle {
     if (type == ConversationType.group) return name ?? 'Group';
-    return participants.first.username;
+    return null;
   }
 
   String get displaySubtitle {
@@ -45,5 +47,12 @@ class Conversation extends Equatable {
   }
 
   @override
-  List<Object?> get props => [id, type, name, participants, lastMessage, lastMessageAt];
+  List<Object?> get props => [
+    id,
+    type,
+    name,
+    participants,
+    lastMessage,
+    lastMessageAt,
+  ];
 }

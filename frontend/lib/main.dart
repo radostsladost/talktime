@@ -30,6 +30,8 @@ class MyApp extends StatelessWidget {
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
       ),
+      darkTheme: ThemeData.dark(useMaterial3: true), // standard dark theme
+      themeMode: ThemeMode.system, // device controls theme
       home: const SplashScreen(),
     );
   }

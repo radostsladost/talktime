@@ -32,10 +32,16 @@ class _ConferencePageState extends State<ConferencePage> {
     super.initState();
     _initRenderers();
 
-    _callService.initService();
+    _callService.initService().catchError((error) {
+      print(error);
+    });
     // Check if we are already in this call, if not, start it
     if (_callService.currentState == CallState.idle) {
-      _callService.startCall(widget.roomId, widget.initialParticipants);
+      _callService
+          .startCall(widget.roomId, widget.initialParticipants)
+          .catchError((error) {
+            print(error);
+          });
     } else {
       // We re-entered the page, attach existing streams immediately
       _attachExistingStreams();
@@ -67,7 +73,7 @@ class _ConferencePageState extends State<ConferencePage> {
         children: [
           // REMOTE STREAMS GRID
           StreamBuilder<Map<String, MediaStream>>(
-            stream: _callService.remoteStreamsStream,
+            stream: CallService().remoteStreamsStream,
             builder: (context, snapshot) {
               final streams = snapshot.data ?? {};
               return _buildGrid(streams);
@@ -82,7 +88,7 @@ class _ConferencePageState extends State<ConferencePage> {
               width: 100,
               height: 150,
               child: StreamBuilder<MediaStream?>(
-                stream: _callService.localStreamStream,
+                stream: CallService().localStreamStream,
                 builder: (context, snapshot) {
                   if (snapshot.hasData && snapshot.data != null) {
                     _localRenderer.srcObject = snapshot.data;
@@ -108,7 +114,7 @@ class _ConferencePageState extends State<ConferencePage> {
     // 1. Prepare data
     final participants = streams.keys.toList();
     // Use the service to get user info (names)
-    final userInfoMap = _callService.participantInfo;
+    final userInfoMap = CallService().participantInfo;
 
     // 2. Calculate Grid Dimensions
     // Note: We don't include local participant in this count if it's in a separate PiP view.
@@ -171,21 +177,21 @@ class _ConferencePageState extends State<ConferencePage> {
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         StreamBuilder<bool>(
-          stream: _callService.micStateStream,
+          stream: CallService().micStateStream,
           initialData: false,
           builder: (context, snapshot) {
             final isMuted = snapshot.data ?? false;
             return IconButton(
               icon: Icon(isMuted ? Icons.mic_off : Icons.mic),
               color: isMuted ? Colors.red : Colors.white,
-              onPressed: () => _callService.toggleMic(),
+              onPressed: () => CallService().toggleMic(),
             );
           },
         ),
         IconButton(
           icon: const Icon(Icons.call_end, color: Colors.red),
           onPressed: () {
-            _callService.endCall();
+            CallService().endCall();
             Navigator.pop(context);
           },
         ),

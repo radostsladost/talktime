@@ -19,12 +19,20 @@ class ChatListPage extends StatefulWidget {
 class _ChatListPageState extends State<ChatListPage>
     with WidgetsBindingObserver {
   late Future<List<Conversation>> _conversationsFuture;
+  late String _myId = '';
   late Timer _timer;
 
   @override
   void initState() {
     super.initState();
     _conversationsFuture = ConversationService().getConversations();
+    _myId = '';
+    (AuthService().getCurrentUser()).then(
+      (user) => setState(() {
+        _myId = user.id;
+      }),
+    );
+
     WidgetsBinding.instance.addObserver(this);
     _timer = Timer.periodic(const Duration(seconds: 30), (_) {
       setState(() {
@@ -71,9 +79,18 @@ class _ChatListPageState extends State<ChatListPage>
             itemCount: conversations.length,
             itemBuilder: (context, index) {
               final convo = conversations[index];
+              final name =
+                  convo.displayTitle ??
+                  convo.participants
+                      ?.firstWhere((i) => i.id != _myId)
+                      ?.username ??
+                  convo.participants?.first?.username ??
+                  "UNKNOWN";
+
+              print("MBError: " + name + " " + _myId);
               return ListTile(
-                leading: CircleAvatar(child: Text(convo.displayTitle)),
-                title: Text(convo.displayTitle),
+                leading: CircleAvatar(child: Text(name)),
+                title: Text(name),
                 subtitle: Text(convo.displaySubtitle),
                 trailing: Text(convo.lastMessageAt ?? ''),
                 onTap: () => _openChat(context, convo),

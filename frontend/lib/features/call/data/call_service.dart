@@ -72,6 +72,7 @@ class CallService {
     String roomId,
     List<UserInfo> initialParticipants,
   ) async {
+    _logger.i("Start call called: $_state");
     if (_state != CallState.idle) return; // Already in a call
 
     _currentRoomId = roomId;
@@ -169,21 +170,44 @@ class CallService {
   }
 
   Future<void> _getUserMedia() async {
-    final constraints = {
-      'audio': {'echoCancellation': true, 'noiseSuppression': true},
-      'video': {
-        'mandatory': {
-          'minWidth': '640',
-          'minHeight': '480',
-          'minFrameRate': '30',
-        },
-        'facingMode': 'user',
-      },
-    };
+    try {
+      // just because video is not required:
+      final permissions = <Permission>[Permission.camera];
+      final statuses = await permissions.request();
 
-    final stream = await navigator.mediaDevices.getUserMedia(constraints);
-    _localStream = stream;
-    _localStreamController.add(_localStream);
+      if (!statuses.values.every(
+        (status) => status == PermissionStatus.granted,
+      )) {
+        var constraints = {
+          'audio': {'echoCancellation': true, 'noiseSuppression': true},
+        };
+
+        final stream = await navigator.mediaDevices.getUserMedia(constraints);
+        _localStream = stream;
+        _localStreamController.add(_localStream);
+
+        return;
+      }
+
+      var vidconstraints = {
+        'audio': {'echoCancellation': true, 'noiseSuppression': true},
+        'video': {
+          'mandatory': {
+            'minWidth': '640',
+            'minHeight': '480',
+            'minFrameRate': '30',
+          },
+          'facingMode': 'user',
+        },
+      };
+
+      final stream = await navigator.mediaDevices.getUserMedia(vidconstraints);
+
+      _localStream = stream;
+      _localStreamController.add(_localStream);
+    } catch (e) {
+      _logger.w('Error getting user media: $e');
+    }
   }
 
   // =========================================================
@@ -195,7 +219,35 @@ class CallService {
 
     final config = {
       'iceServers': [
-        {'urls': 'stun:stun.l.google.com:19302'},
+        {
+          'urls': ['stun:v776682.macloud.host:5349'],
+          "username": "turnserver",
+          "credential":
+              "959212b0629ad5c3e7d8c3f9ccc20771e5c3596370847f1fd85feda871e11d56",
+        },
+        {
+          'urls': ['turns:v776682.macloud.host:5349'],
+          "username": "turnserver",
+          "credential":
+              "959212b0629ad5c3e7d8c3f9ccc20771e5c3596370847f1fd85feda871e11d56",
+        },
+        {
+          'urls': ['stun:v776682.macloud.host:3478'],
+          "username": "turnserver",
+          "credential":
+              "959212b0629ad5c3e7d8c3f9ccc20771e5c3596370847f1fd85feda871e11d56",
+        },
+        {
+          'urls': ['turns:v776682.macloud.host:3478'],
+          "username": "turnserver",
+          "credential":
+              "959212b0629ad5c3e7d8c3f9ccc20771e5c3596370847f1fd85feda871e11d56",
+        },
+        {
+          'urls': ['stun:stun.l.google.com:19302'],
+          "username": "",
+          "credential": "",
+        },
       ],
       'sdpSemantics': 'unified-plan',
     };
@@ -204,9 +256,10 @@ class CallService {
 
     // Add local tracks
     if (_localStream != null) {
-      _localStream!.getTracks().forEach((track) {
-        pc.addTrack(track, _localStream!);
-      });
+      for (var track in _localStream!.getTracks()) {
+        // Adding track with stream ID is safer for Unified Plan
+        await pc.addTrack(track, _localStream!);
+      }
     }
 
     // Handle Remote Stream
@@ -219,13 +272,19 @@ class CallService {
     };
 
     pc.onIceCandidate = (candidate) {
-      if (_currentRoomId != null) {
-        _signalingService!.sendRoomIceCandidate(
-          _currentRoomId!,
-          candidate.candidate!,
-          candidate.sdpMid,
-          candidate.sdpMLineIndex,
-        );
+      _signalingService!.sendRoomIceCandidate(
+        _currentRoomId!,
+        candidate.candidate!,
+        candidate.sdpMid,
+        candidate.sdpMLineIndex,
+      );
+    };
+
+    pc.onIceConnectionState = (state) {
+      if (state == RTCIceConnectionState.RTCIceConnectionStateDisconnected ||
+          state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
+        _logger.w('Peer $participantId disconnected');
+        // Optionally reconnect or remove
       }
     };
 
@@ -268,11 +327,11 @@ class CallService {
         _signalingService!.onParticipantLeft.listen(_handleParticipantLeft),
       );
 
-    _signalingService!.createRoom(_currentRoomId!);
+    if (_currentRoomId != null) _signalingService!.createRoom(_currentRoomId!);
   }
 
   Future<void> _handleOffer(SignalingOfferEvent event) async {
-    _logger.e('_handleOffer from ${event.fromUserId}');
+    _logger.i('_handleOffer from ${event.fromUserId}');
 
     if (!_peerConnections.containsKey(event.fromUserId)) {
       _participantIds.add(event.fromUserId);
@@ -281,56 +340,74 @@ class CallService {
 
     try {
       final pc = _peerConnections[event.fromUserId]!;
+      final state = await pc.getSignalingState();
+      // If we are already negotiating (not stable), and we are the "impolite" peer
+      // we might want to ignore this, or rollback.
+      // For simple apps, just checking for stable often helps prevent crashes:
+      if (state != RTCSignalingState.RTCSignalingStateStable &&
+          state != RTCSignalingState.RTCSignalingStateHaveRemoteOffer) {
+        // This is a collision.
+        // Strategy: If I am "waiting for an answer", ignore their offer
+        // and let my offer win.
+        _logger.w(
+          "Collision detected. Ignoring offer from ${event.fromUserId}",
+        );
+        return;
+      }
 
       final offer = RTCSessionDescription(event.sdp, 'offer');
-
       await pc.setRemoteDescription(offer);
 
       // Create and send answer
 
       final answer = await pc.createAnswer();
-
       await pc.setLocalDescription(answer);
-
       await _signalingService!.sendAnswer(
         event.fromUserId,
-
         answer.sdp!,
-
         roomId: _currentRoomId!,
       );
 
-      _logger.e('_handleOffer sendAnswer from ${event.fromUserId}');
+      _logger.i('_handleOffer sendAnswer from ${event.fromUserId}');
     } catch (e) {
       _logger.e('Error handling offer from ${event.fromUserId}: $e');
     }
   }
 
   Future<void> _handleAnswer(SignalingAnswerEvent event) async {
-    _logger.e('_handleAnswer from ${event.fromUserId}');
+    _logger.i('_handleAnswer from ${event.fromUserId}');
 
     final pc = _peerConnections[event.fromUserId];
-
     if (pc == null) return;
+
+    // --- FIX START ---
+    // Check if we are actually waiting for an answer
+    final state = await pc.getSignalingState();
+    if (state == RTCSignalingState.RTCSignalingStateStable) {
+      _logger.w(
+        "Ignored answer from ${event.fromUserId} because connection is already stable.",
+      );
+      return;
+    }
+    // --- FIX END ---
 
     try {
       final answer = RTCSessionDescription(event.sdp, 'answer');
 
       await pc.setRemoteDescription(answer);
 
-      if (_state == CallState.connected) {
-        _state = CallState.connecting;
-      }
+      // if (_state == CallState.connected) {
+      //   _state = CallState.connecting;
+      // }
     } catch (e) {
       _logger.e('Error handling answer from ${event.fromUserId}: $e');
     }
   }
 
   Future<void> _handleIceCandidate(SignalingIceCandidateEvent event) async {
-    _logger.e('_handleIceCandidate from ${event.fromUserId}');
+    _logger.i('_handleIceCandidate from ${event.fromUserId}');
 
     final pc = _peerConnections[event.fromUserId];
-
     if (pc == null) return;
 
     try {
@@ -349,22 +426,17 @@ class CallService {
   }
 
   Future<void> _handleParticipantJoined(RoomParticipantUpdate event) async {
+    _logger.i('_handleParticipantJoined  ${event.user.id}');
     if (!_participantIds.contains(event.user.id) &&
         await _getUserId() != event.user.id) {
       _participantIds.add(event.user.id);
 
       _participantInfo[event.user.id] = event.user;
-
       await _createPeerConnection(event.user.id);
-
       _logger.i('Participant joined: ${event.user.id}');
-
       final pc = _peerConnections[event.user.id]!;
-
       final offer = await pc.createOffer();
-
       await pc.setLocalDescription(offer);
-
       await _signalingService!.sendRoomOffer(_currentRoomId!, offer.sdp!);
 
       _logger.i('Participant offer sent: ${event.user.id}');
@@ -372,6 +444,7 @@ class CallService {
   }
 
   Future<void> _handleParticipantLeft(RoomParticipantUpdate event) async {
+    _logger.i('_handleParticipantJoined  ${event.user.id}');
     if (_participantIds.remove(event.user.id) &&
         await _getUserId() != event.user.id) {
       _participantInfo.remove(event.user.id);

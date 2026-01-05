@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/features/call/presentation/pages/call_page.dart';
 import 'package:talktime/features/call/presentation/pages/conference_page.dart';
 import 'package:talktime/features/chat/data/message_service.dart';
@@ -21,12 +22,19 @@ class _MessageListPageState extends State<MessageListPage> {
   late Future<List<Message>> _messagesFuture;
   final _textController = TextEditingController();
   final _scrollController = ScrollController();
+  late String _myId = '';
   late Timer _timer;
 
   @override
   void initState() {
     super.initState();
     _messagesFuture = MessageService().getMessages(widget.conversation.id);
+    _myId = '';
+    (AuthService().getCurrentUser()).then(
+      (user) => setState(() {
+        _myId = user.id;
+      }),
+    );
     _timer = Timer.periodic(const Duration(seconds: 30), (_) {
       setState(() {
         _messagesFuture = MessageService().getMessages(widget.conversation.id);
@@ -74,9 +82,17 @@ class _MessageListPageState extends State<MessageListPage> {
 
   @override
   Widget build(BuildContext context) {
+    final name =
+        widget.conversation.displayTitle ??
+        widget.conversation.participants
+            ?.firstWhere((i) => i.id != _myId)
+            ?.username ??
+        widget.conversation.participants?.first?.username ??
+        "UNKNOWN";
+
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.conversation.displayTitle),
+        title: Text(name),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () => Navigator.pop(context),
@@ -165,6 +181,14 @@ class _MessageListPageState extends State<MessageListPage> {
   }
 
   Widget _buildMessageInput() {
+    final name =
+        widget.conversation.displayTitle ??
+        widget.conversation.participants
+            ?.firstWhere((i) => i.id != _myId)
+            ?.username ??
+        widget.conversation.participants?.first?.username ??
+        "UNKNOWN";
+
     return Padding(
       padding: const EdgeInsets.all(8.0),
       child: Row(
@@ -173,7 +197,7 @@ class _MessageListPageState extends State<MessageListPage> {
             child: TextField(
               controller: _textController,
               decoration: InputDecoration(
-                hintText: 'Message ${widget.conversation.displayTitle}',
+                hintText: 'Message ${name}',
                 filled: true,
                 fillColor: Colors.grey[100],
                 border: OutlineInputBorder(

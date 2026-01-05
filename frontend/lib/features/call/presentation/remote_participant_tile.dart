@@ -45,6 +45,9 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
     // If the stream reference changes (rare, but possible), update the renderer
     if (oldWidget.stream.id != widget.stream.id) {
       _renderer.srcObject = widget.stream;
+      if (mounted) {
+        setState(() => _isRendererReady = true);
+      }
     }
   }
 
@@ -61,6 +64,7 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
     final hasVideo =
         widget.stream.getVideoTracks().isNotEmpty &&
         widget.stream.getVideoTracks().first.enabled;
+    if (hasVideo) _renderer.srcObject = widget.stream;
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(12),

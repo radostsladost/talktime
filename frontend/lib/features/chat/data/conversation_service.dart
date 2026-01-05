@@ -12,7 +12,6 @@ class ConversationService {
   /// Search user
   Future<List<User>> searchUser(String query) async {
     try {
-      _logger.i('Fetching conversations');
       final response = await _apiClient.post(
         ApiConstants.searchUserByQuery(query),
       );
@@ -22,7 +21,7 @@ class ConversationService {
           .map((json) => User.fromJson(json as Map<String, dynamic>))
           .toList();
 
-      _logger.i('Fetched ${users.length} conversations');
+      _logger.d('Fetched ${users.length} conversations');
       return users;
     } catch (e) {
       _logger.e('Error fetching conversations: $e');
@@ -33,7 +32,7 @@ class ConversationService {
   /// Get all conversations for the current user
   Future<List<Conversation>> getConversations() async {
     try {
-      _logger.i('Fetching conversations');
+      _logger.d('Fetching conversations');
       final response = await _apiClient.get(ApiConstants.conversations);
 
       final List conversationsJson = response['data'] as List;
@@ -41,7 +40,7 @@ class ConversationService {
           .map((json) => Conversation.fromJson(json as Map<String, dynamic>))
           .toList();
 
-      _logger.i('Fetched ${conversations.length} conversations');
+      _logger.d('Fetched ${conversations.length} conversations');
       return conversations;
     } catch (e) {
       _logger.e('Error fetching conversations: $e');
@@ -52,7 +51,7 @@ class ConversationService {
   /// Get a specific conversation by ID
   Future<Conversation> getConversationById(String id) async {
     try {
-      _logger.i('Fetching conversation: $id');
+      _logger.d('Fetching conversation: $id');
       final response = await _apiClient.get(ApiConstants.conversationById(id));
 
       return Conversation.fromJson(response['data'] as Map<String, dynamic>);
@@ -65,7 +64,7 @@ class ConversationService {
   /// Create a new direct conversation (1-on-1 chat)
   Future<Conversation> createDirectConversation(String otherUserId) async {
     try {
-      _logger.i('Creating direct conversation with user: $otherUserId');
+      _logger.d('Creating direct conversation with user: $otherUserId');
       final response = await _apiClient.post(
         ApiConstants.conversations,
         body: {
@@ -77,7 +76,7 @@ class ConversationService {
       final conversation = Conversation.fromJson(
         response['data'] as Map<String, dynamic>,
       );
-      _logger.i('Created direct conversation: ${conversation.id}');
+      _logger.d('Created direct conversation: ${conversation.id}');
       return conversation;
     } catch (e) {
       _logger.e('Error creating direct conversation: $e');
@@ -88,7 +87,7 @@ class ConversationService {
   /// Create a new group conversation
   Future<Conversation> createGroup(List<String> userIds, String name) async {
     try {
-      _logger.i('Creating group conversation: $name');
+      _logger.d('Creating group conversation: $name');
       final response = await _apiClient.post(
         ApiConstants.conversations,
         body: {'type': 'group', 'name': name, 'participantIds': userIds},
@@ -97,7 +96,7 @@ class ConversationService {
       final conversation = Conversation.fromJson(
         response['data'] as Map<String, dynamic>,
       );
-      _logger.i('Created group conversation: ${conversation.id}');
+      _logger.d('Created group conversation: ${conversation.id}');
       return conversation;
     } catch (e) {
       _logger.e('Error creating group conversation: $e');
@@ -108,7 +107,7 @@ class ConversationService {
   /// Update conversation (rename group)
   Future<Conversation> updateConversation(String id, String name) async {
     try {
-      _logger.i('Updating conversation $id with name: $name');
+      _logger.d('Updating conversation $id with name: $name');
       await _apiClient.put(
         ApiConstants.conversationById(id),
         body: {'name': name},
@@ -125,9 +124,9 @@ class ConversationService {
   /// Delete a conversation
   Future<void> deleteConversation(String id) async {
     try {
-      _logger.i('Deleting conversation: $id');
+      _logger.d('Deleting conversation: $id');
       await _apiClient.delete(ApiConstants.conversationById(id));
-      _logger.i('Successfully deleted conversation: $id');
+      _logger.d('Successfully deleted conversation: $id');
     } catch (e) {
       _logger.e('Error deleting conversation $id: $e');
       rethrow;
@@ -137,12 +136,12 @@ class ConversationService {
   /// Add a participant to a group conversation
   Future<void> addParticipant(String conversationId, String userId) async {
     try {
-      _logger.i('Adding user $userId to conversation $conversationId');
+      _logger.d('Adding user $userId to conversation $conversationId');
       await _apiClient.post(
         ApiConstants.addParticipant(conversationId),
         body: {'userId': userId},
       );
-      _logger.i('Successfully added participant');
+      _logger.d('Successfully added participant');
     } catch (e) {
       _logger.e('Error adding participant: $e');
       rethrow;
@@ -152,11 +151,11 @@ class ConversationService {
   /// Remove a participant from a group conversation
   Future<void> removeParticipant(String conversationId, String userId) async {
     try {
-      _logger.i('Removing user $userId from conversation $conversationId');
+      _logger.d('Removing user $userId from conversation $conversationId');
       await _apiClient.delete(
         ApiConstants.removeParticipant(conversationId, userId),
       );
-      _logger.i('Successfully removed participant');
+      _logger.d('Successfully removed participant');
     } catch (e) {
       _logger.e('Error removing participant: $e');
       rethrow;
