@@ -15,6 +15,10 @@ class User extends Equatable {
     );
   }
 
+  factory User.byId(String id) {
+    return User(id: id, username: '', avatarUrl: '');
+  }
+
   @override
   List<Object?> get props => [id, username, avatarUrl];
 }

@@ -1,5 +1,6 @@
 import 'package:equatable/equatable.dart';
 import 'package:talktime/shared/models/user.dart';
+import 'package:talktime/features/chat/data/models/message.dart' as DbModels;
 
 enum MessageType { text }
 
@@ -28,6 +29,17 @@ class Message extends Equatable {
       content: json['content'],
       type: MessageType.text,
       sentAt: json['sentAt'],
+    );
+  }
+
+  factory Message.fromDb(DbModels.Message msg) {
+    return Message(
+      id: msg.externalId,
+      conversationId: msg.conversationId,
+      sender: User.byId(msg.senderId),
+      content: msg.content,
+      type: MessageType.text,
+      sentAt: msg.sentAt,
     );
   }
 

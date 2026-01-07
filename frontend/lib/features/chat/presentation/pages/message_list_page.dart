@@ -37,6 +37,7 @@ class _MessageListPageState extends State<MessageListPage> {
     );
     _timer = Timer.periodic(const Duration(seconds: 30), (_) {
       setState(() {
+        MessageService().syncPendingMessages(widget.conversation.id);
         _messagesFuture = MessageService().getMessages(widget.conversation.id);
       });
     });
