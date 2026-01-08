@@ -58,7 +58,7 @@ class MessageService {
               ..conversationId = message.conversationId
               ..senderId = message.sender?.id ?? ""
               ..content = message.content
-              ..type = message.type as DbModels.MessageSchemaMessageType
+              ..type = getMessageType(message.type)
               ..sentAt = DateTime.parse(message.sentAt).millisecondsSinceEpoch,
           )
           .toList();
@@ -100,7 +100,7 @@ class MessageService {
               ..conversationId = message.conversationId
               ..senderId = message.sender?.id ?? ""
               ..content = message.content
-              ..type = message.type as DbModels.MessageSchemaMessageType
+              ..type = getMessageType(message.type)
               ..sentAt = DateTime.parse(message.sentAt).millisecondsSinceEpoch,
           )
           .toList();
