@@ -1,32 +1,89 @@
-import 'package:isar/isar.dart';
+import 'dart:async';
+
+import 'package:path/path.dart';
+import 'package:sqflite/sqflite.dart';
+
 import 'package:talktime/features/chat/data/models/message.dart';
 import 'package:talktime/shared/models/message.dart' hide Message;
 import 'package:path_provider/path_provider.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:sqflite_common_ffi_web/sqflite_ffi_web.dart';
 
 class LocalMessageStorage {
-  late Future<Isar> db;
+  LocalMessageStorage();
 
-  LocalMessageStorage() {
-    db = _initDb();
-  }
-
-  Future<Isar> _initDb() async {
-    final dir = await getApplicationDocumentsDirectory();
-    if (Isar.instanceNames.isEmpty) {
-      return await Isar.open(
-        [MessageSchema], // Ensure your Message model is generated with Isar
-        directory: dir.path,
+  Future<Database> _initDb() async {
+    if (kIsWeb) {
+      var factory = databaseFactoryFfiWeb;
+      final database = await factory.openDatabase(
+        // Set the path to the database. Note: Using the `join` function from the
+        // `path` package is best practice to ensure the path is correctly
+        // constructed for each platform.
+        'msg_database.db',
+        options: OpenDatabaseOptions(
+          onCreate: (db, version) {
+            // Run the CREATE TABLE statement on the database.
+            return db.execute(
+              'CREATE TABLE message(id INTEGER PRIMARY KEY,'
+              'externalId TEXT, '
+              'conversationId TEXT, '
+              'senderId TEXT, '
+              'content TEXT, '
+              'type TEXT, '
+              'sentAt int)',
+            );
+          },
+          // Set the version. This executes the onCreate function and provides a
+          // path to perform database upgrades and downgrades.
+          version: 1,
+        ),
       );
+      return database;
     }
-    return Isar.getInstance()!;
+
+    final database = openDatabase(
+      // Set the path to the database. Note: Using the `join` function from the
+      // `path` package is best practice to ensure the path is correctly
+      // constructed for each platform.
+      join(await getDatabasesPath(), 'msg_database.db'),
+      onCreate: (db, version) {
+        // Run the CREATE TABLE statement on the database.
+        return db.execute(
+          'CREATE TABLE message(id INTEGER PRIMARY KEY,'
+          'externalId TEXT, '
+          'conversationId TEXT, '
+          'senderId TEXT, '
+          'content TEXT, '
+          'type TEXT, '
+          'sentAt int)',
+        );
+      },
+      // Set the version. This executes the onCreate function and provides a
+      // path to perform database upgrades and downgrades.
+      version: 1,
+    );
+
+    return database;
   }
 
   /// Save a list of messages (Upsert: Insert or Update)
-  Future<void> saveMessages(List<Message> messages) async {
-    final isar = await db;
-    await isar.writeTxn(() async {
-      await isar.messages.putAll(messages);
-    });
+  Future<void> saveMessages(List<Message>? messages) async {
+    if (messages == null || messages.isEmpty) {
+      return;
+    }
+
+    var db = await _initDb();
+    try {
+      for (var message in messages) {
+        await db.insert(
+          'message',
+          message.toMap(),
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
+    } finally {
+      db.close();
+    }
   }
 
   /// Get messages for a conversation from LOCAL storage
@@ -35,22 +92,49 @@ class LocalMessageStorage {
     int offset = 0,
     int limit = 50,
   }) async {
-    final isar = await db;
-    return await isar.messages
-        .filter()
-        .conversationIdEqualTo(conversationId)
-        .sortBySentAtDesc()
-        .offset(offset)
-        .limit(limit)
-        .findAll();
+    var db = await _initDb();
+    try {
+      final List<Map<String, Object?>> messages = await db.query(
+        'message',
+        where: 'conversationId = ?',
+        whereArgs: [conversationId],
+        limit: 50,
+        offset: offset,
+      );
+      return messages.map((e) => Message.fromMap(e)).toList();
+    } finally {
+      db.close();
+    }
+  }
+
+  /// Get a specific message by external ID
+  Future<Message?> getMessageById(String messageId) async {
+    var db = await _initDb();
+    try {
+      final List<Map<String, Object?>> messages = await db.query(
+        'message',
+        where: 'externalId = ?',
+        whereArgs: [messageId],
+        orderBy: 'sentAt DESC',
+        limit: 1,
+      );
+      return messages.map((e) => Message.fromMap(e)).first;
+    } finally {
+      db.close();
+    }
   }
 
   /// Delete specific message locally
   Future<void> deleteMessage(String messageId) async {
-    final isar = await db;
-    // Assuming messageId is mapped to Isar Id or you query by string ID
-    await isar.writeTxn(() async {
-      await isar.messages.filter().externalIdEqualTo(messageId).deleteAll();
-    });
+    var db = await _initDb();
+    try {
+      await db.delete(
+        'message',
+        where: 'externalId = ?',
+        whereArgs: [messageId],
+      );
+    } finally {
+      db.close();
+    }
   }
 }

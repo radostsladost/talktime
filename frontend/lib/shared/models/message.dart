@@ -39,7 +39,7 @@ class Message extends Equatable {
       sender: User.byId(msg.senderId),
       content: msg.content,
       type: MessageType.text,
-      sentAt: msg.sentAt,
+      sentAt: DateTime.fromMillisecondsSinceEpoch(msg.sentAt).toIso8601String(),
     );
   }
 

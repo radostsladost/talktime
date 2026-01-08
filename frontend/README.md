@@ -14,3 +14,11 @@ A few resources to get you started if this is your first Flutter project:
 For help getting started with Flutter development, view the
 [online documentation](https://docs.flutter.dev/), which offers tutorials,
 samples, guidance on mobile development, and a full API reference.
+
+## Build Instructions
+
+```sh
+flutter pub get
+dart run sqflite_common_ffi_web:setup
+flutter build web --release --dart-define=ENV_PROF=production
+```

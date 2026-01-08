@@ -1,5 +1,4 @@
 import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/features/call/presentation/pages/call_page.dart';
@@ -23,23 +22,34 @@ class _MessageListPageState extends State<MessageListPage> {
   final _textController = TextEditingController();
   final _scrollController = ScrollController();
   late String _myId = '';
-  late Timer _timer;
+  late Timer _syncTimer;
+  late MessageService _messageService;
 
   @override
   void initState() {
     super.initState();
-    _messagesFuture = MessageService().getMessages(widget.conversation.id);
+    _messageService = MessageService();
+    _messagesFuture = _messageService.getMessages(widget.conversation.id);
     _myId = '';
     (AuthService().getCurrentUser()).then(
       (user) => setState(() {
         _myId = user.id;
       }),
     );
-    _timer = Timer.periodic(const Duration(seconds: 30), (_) {
-      setState(() {
-        MessageService().syncPendingMessages(widget.conversation.id);
-        _messagesFuture = MessageService().getMessages(widget.conversation.id);
-      });
+
+    // Start periodic sync for this conversation
+    _syncTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      _syncMessages();
+    });
+
+    // Sync immediately when page loads
+    _syncMessages();
+  }
+
+  void _syncMessages() {
+    _messageService.syncPendingMessages(widget.conversation.id);
+    setState(() {
+      _messagesFuture = _messageService.getMessages(widget.conversation.id);
     });
   }
 
@@ -47,7 +57,8 @@ class _MessageListPageState extends State<MessageListPage> {
   void dispose() {
     _textController.dispose();
     _scrollController.dispose();
-    _timer?.cancel();
+    _syncTimer?.cancel();
+    _messageService.dispose();
     super.dispose();
   }
 
@@ -75,18 +86,25 @@ class _MessageListPageState extends State<MessageListPage> {
 
     // Send to backend (fire and forget for now)
     try {
-      await MessageService().sendMessage(widget.conversation.id, content);
+      await _messageService.sendMessage(widget.conversation.id, content);
+      // After sending, refresh the message list to get the real message from backend
+      _syncMessages();
     } catch (e) {
       // TODO: Show error and retry
+      // Revert optimistic update if send fails
+      setState(() {
+        _messagesFuture = Future.value(ft);
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final uId = _myId;
     final name =
         widget.conversation.displayTitle ??
         widget.conversation.participants
-            ?.firstWhere((i) => i.id != _myId)
+            ?.firstWhere((i) => i.id != uId)
             ?.username ??
         widget.conversation.participants?.first?.username ??
         "UNKNOWN";
@@ -126,7 +144,10 @@ class _MessageListPageState extends State<MessageListPage> {
                   itemCount: messages.length,
                   itemBuilder: (context, index) {
                     final message = messages[messages.length - 1 - index];
-                    return _buildMessageTile(message);
+                    final isOwn =
+                        message.sender.id == 'u1' || message.sender.id == uId;
+                    // Simplified; use auth service later
+                    return _buildMessageTile(message, isOwn);
                   },
                 );
               },
@@ -140,10 +161,7 @@ class _MessageListPageState extends State<MessageListPage> {
     );
   }
 
-  Widget _buildMessageTile(Message message) {
-    final isOwn =
-        message.sender.id == 'u1'; // Simplified; use auth service later
-
+  Widget _buildMessageTile(Message message, bool isOwn) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Row(

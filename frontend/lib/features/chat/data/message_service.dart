@@ -36,14 +36,16 @@ class MessageService {
     }
   }
 
-  /// Syncs new data: Fetch from API -> Save to Local
-  /// Call this on app start, socket notification, or background task.
-  Future<void> syncPendingMessages() async {
+  /// Syncs new messages for a specific conversation from backend to local storage
+  /// Call this when you want to sync messages for a specific conversation
+  Future<void> syncConversationMessages(String conversationId) async {
     try {
-      _logger.i('Syncing pending messages from backend...');
+      _logger.i('Syncing messages for conversation: $conversationId');
 
       // 1. Fetch from API
-      final response = await _apiClient.get(ApiConstants.pendingMessages);
+      final response = await _apiClient.get(
+        '${ApiConstants.messages}?conversationId=$conversationId',
+      );
       final List messagesJson = response['data'] as List;
 
       if (messagesJson.isEmpty) return;
@@ -51,31 +53,73 @@ class MessageService {
       final messages = messagesJson
           .map((json) => Message.fromJson(json as Map<String, dynamic>))
           .map(
-            (message) => DbModels.Message().initFields(
-              message.id,
-              message.conversationId,
-              message.sender?.id ?? "",
-              message.content,
-              message.type as DbModels.MessageSchemaMessageType,
-              message.sentAt,
-            ),
+            (message) => DbModels.Message()
+              ..externalId = message.id
+              ..conversationId = message.conversationId
+              ..senderId = message.sender?.id ?? ""
+              ..content = message.content
+              ..type = message.type as DbModels.MessageSchemaMessageType
+              ..sentAt = DateTime.parse(message.sentAt).millisecondsSinceEpoch,
           )
           .toList();
 
-      // 2. CRITICAL: Save to Local Storage immediately
-      // Since backend deletes them, if we crash here without saving, data is lost.
+      // 2. Save to Local Storage
       await _localStorage.saveMessages(messages);
 
-      _logger.i('Synced and saved ${messages.length} messages');
+      _logger.i(
+        'Synced and saved ${messages.length} messages for conversation $conversationId',
+      );
+    } catch (e) {
+      _logger.e('Error syncing messages for conversation $conversationId: $e');
+      // Do not rethrow; we don't want to crash the syncing cycle usually.
+    }
+  }
 
-      // 3. (Optional) Confirm delivery to backend if your API requires specific ACKs
-      // Usually "pending" endpoints auto-delete on success, but if you have
-      // specific 'markAsDelivered' calls, do them here parallel to saving.
+  /// Syncs pending messages for all conversations
+  /// Call this on app start, socket notification, or background task.
+  Future<void> syncPendingMessages(String conversationId) async {
+    try {
+      _logger.i('Syncing pending messages for conversation: $conversationId');
+
+      // 1. Fetch from API for specific conversation
+      final response = await _apiClient.get(
+        '${ApiConstants.pendingMessages}?conversationId=$conversationId',
+      );
+      final List messagesJson = response['data'] as List;
+
+      if (messagesJson.isEmpty) {
+        _logger.i('No pending messages for conversation: $conversationId');
+        return;
+      }
+
+      final messages = messagesJson
+          .map((json) => Message.fromJson(json as Map<String, dynamic>))
+          .map(
+            (message) => DbModels.Message()
+              ..externalId = message.id
+              ..conversationId = message.conversationId
+              ..senderId = message.sender?.id ?? ""
+              ..content = message.content
+              ..type = message.type as DbModels.MessageSchemaMessageType
+              ..sentAt = DateTime.parse(message.sentAt).millisecondsSinceEpoch,
+          )
+          .toList();
+
+      // 2. Save to Local Storage immediately
+      await _localStorage.saveMessages(messages);
+
+      _logger.i(
+        'Synced and saved ${messages.length} pending messages for conversation: $conversationId',
+      );
+
+      // 3. Mark messages as delivered to backend
       for (var msg in messages) {
         markAsDelivered(msg.externalId).ignore(); // Fire and forget
       }
     } catch (e) {
-      _logger.e('Error syncing messages: $e');
+      _logger.e(
+        'Error syncing pending messages for conversation $conversationId: $e',
+      );
       // Do not rethrow; we don't want to crash the syncing cycle usually.
     }
   }
@@ -101,6 +145,18 @@ class MessageService {
         response['data'] as Map<String, dynamic>,
       );
       _logger.i('Message sent successfully: ${message.id}');
+
+      // Immediately save to local storage for optimistic UI update
+      final dbMessage = DbModels.Message()
+        ..externalId = message.id
+        ..conversationId = message.conversationId
+        ..senderId = message.sender?.id ?? ""
+        ..content = message.content
+        ..type = getMessageType(message.type)
+        ..sentAt = DateTime.parse(message.sentAt).millisecondsSinceEpoch;
+
+      await _localStorage.saveMessages([dbMessage]);
+
       return message;
     } catch (e) {
       _logger.e('Error sending message: $e');
@@ -135,7 +191,7 @@ class MessageService {
       _logger.i('Message marked as delivered');
     } catch (e) {
       _logger.e('Error marking message as delivered: $e');
-      rethrow;
+      // Don't rethrow to prevent sync from failing
     }
   }
 
@@ -144,10 +200,23 @@ class MessageService {
     try {
       _logger.i('Deleting message: $messageId');
       await _apiClient.delete(ApiConstants.deleteMessage(messageId));
+
+      // Also delete from local storage
+      await _localStorage.deleteMessage(messageId);
+
       _logger.i('Message deleted successfully');
     } catch (e) {
       _logger.e('Error deleting message: $e');
       rethrow;
+    }
+  }
+
+  DbModels.MessageSchemaMessageType getMessageType(MessageType type) {
+    switch (type) {
+      case MessageType.text:
+        return DbModels.MessageSchemaMessageType.text;
+      default:
+        throw ArgumentError('Invalid message type');
     }
   }
 
