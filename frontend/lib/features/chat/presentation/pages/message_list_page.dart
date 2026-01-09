@@ -1,9 +1,12 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:talktime/core/websocket/websocket_manager.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/features/call/presentation/pages/call_page.dart';
 import 'package:talktime/features/call/presentation/pages/conference_page.dart';
+import 'package:talktime/features/chat/data/conversation_service.dart';
 import 'package:talktime/features/chat/data/message_service.dart';
+import 'package:talktime/features/chat/data/realtime_message_service.dart';
 import 'package:talktime/shared/models/conversation.dart';
 import 'package:talktime/shared/models/message.dart';
 import 'package:talktime/shared/models/user.dart';
@@ -18,18 +21,21 @@ class MessageListPage extends StatefulWidget {
 }
 
 class _MessageListPageState extends State<MessageListPage> {
-  late Future<List<Message>> _messagesFuture;
+  late List<Message> _messagesFuture = List.empty();
   final _textController = TextEditingController();
   final _scrollController = ScrollController();
   late String _myId = '';
   late Timer _syncTimer;
   late MessageService _messageService;
+  late RealTimeMessageService _realTimeMessageService;
 
   @override
   void initState() {
     super.initState();
     _messageService = MessageService();
-    _messagesFuture = _messageService.getMessages(widget.conversation.id);
+    _messageService.getMessages(widget.conversation.id).then((messages) {
+      _messagesFuture = messages;
+    });
     _myId = '';
     (AuthService().getCurrentUser()).then(
       (user) => setState(() {
@@ -44,13 +50,36 @@ class _MessageListPageState extends State<MessageListPage> {
 
     // Sync immediately when page loads
     _syncMessages();
+
+    WebSocketManager()
+        .initialize()
+        .then((_) {
+          final mngr = WebSocketManager();
+          mngr.joinConversation(widget.conversation.id);
+          mngr.onMessageReceived(_onSignalMsgReceived);
+          // mngr.onUserOnline(_handleUserOnline);
+          // mngr.onUserOffline(_handleUserOffline);
+          // mngr.onTypingIndicator(_handleTypingIndicator);
+        })
+        .catchError((error) {
+          print('WebSocketManager initialization error: $error');
+        });
   }
 
-  void _syncMessages() {
-    _messageService.syncPendingMessages(widget.conversation.id);
+  _onSignalMsgReceived(Message p1) {
     setState(() {
-      _messagesFuture = _messageService.getMessages(widget.conversation.id);
+      _messagesFuture.add(p1);
     });
+    _syncMessages();
+  }
+
+  Future<void> _syncMessages() async {
+    await _messageService
+        .syncPendingMessages(widget.conversation.id)
+        .catchError((error) {
+          print('Error syncing messages: $error');
+        });
+    _messagesFuture = await _messageService.getMessages(widget.conversation.id);
   }
 
   @override
@@ -60,6 +89,10 @@ class _MessageListPageState extends State<MessageListPage> {
     _syncTimer?.cancel();
     _messageService.dispose();
     super.dispose();
+
+    final mngr = WebSocketManager();
+    mngr.leaveConversation(widget.conversation.id);
+    mngr.removeMessageReceivedCallback(_onSignalMsgReceived);
   }
 
   void _sendMessage() async {
@@ -79,9 +112,9 @@ class _MessageListPageState extends State<MessageListPage> {
     );
 
     // Refresh UI with new message
-    final ft = (await _messagesFuture);
+    final ft = List<Message>.from(_messagesFuture);
     setState(() {
-      _messagesFuture = Future.value([...ft, newMessage]);
+      _messagesFuture = ft;
     });
 
     // Send to backend (fire and forget for now)
@@ -93,7 +126,7 @@ class _MessageListPageState extends State<MessageListPage> {
       // TODO: Show error and retry
       // Revert optimistic update if send fails
       setState(() {
-        _messagesFuture = Future.value(ft);
+        _messagesFuture = ft;
       });
     }
   }
@@ -108,6 +141,7 @@ class _MessageListPageState extends State<MessageListPage> {
             ?.username ??
         widget.conversation.participants?.first?.username ??
         "UNKNOWN";
+    final msgs = Future.value(_messagesFuture);
 
     return Scaffold(
       appBar: AppBar(
@@ -128,7 +162,7 @@ class _MessageListPageState extends State<MessageListPage> {
           // Messages List
           Expanded(
             child: FutureBuilder<List<Message>>(
-              future: _messagesFuture,
+              future: msgs,
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());

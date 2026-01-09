@@ -68,6 +68,12 @@ class ApiConstants {
     return '$wsBaseUrl$signalingHub?access_token=$accessToken';
   }
 
+  /// Get the full SignalR WebSocket URL with authentication
+  /// The access token is passed as a query parameter for SignalR authentication
+  static String getSignalingUrlWithNoToken() {
+    return '$wsBaseUrl$signalingHub';
+  }
+
   // ==================== Helper Methods ====================
 
   /// Get full URL for any endpoint

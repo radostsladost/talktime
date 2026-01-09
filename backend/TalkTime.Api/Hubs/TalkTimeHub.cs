@@ -145,8 +145,15 @@ public class TalkTimeHub : Hub
         var userId = GetUserId();
         if (string.IsNullOrEmpty(userId)) return;
 
-        await Clients.OthersInGroup($"conversation_{conversationId}")
-            .SendAsync("TypingIndicator", new { conversationId, userId, isTyping });
+        try
+        {
+            await Clients.OthersInGroup($"conversation_{conversationId}")
+                .SendAsync("TypingIndicator", new { conversationId, userId, isTyping });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send typing indicator to conversation {ConversationId}", conversationId);
+        }
     }
 
     /// <summary>

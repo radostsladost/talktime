@@ -146,11 +146,20 @@ public class MessagesController : ControllerBase
             );
 
             // Send real-time notification to all participants in the conversation
-            await _hubContext.Clients.Group($"conversation_{request.ConversationId}")
-                .SendAsync("ReceiveMessage", messageDto);
+            try
+            {
+                await _hubContext.Clients.Group($"conversation_{request.ConversationId}")
+                    .SendAsync("ReceiveMessage", messageDto);
 
-            _logger.LogInformation("Message {MessageId} sent to conversation {ConversationId} by user {UserId}",
-                message.Id, request.ConversationId, userId);
+                _logger.LogInformation("Message {MessageId} sent to conversation {ConversationId} by user {UserId}",
+                    message.Id, request.ConversationId, userId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to send SignalR message to conversation {ConversationId} for user {UserId}",
+                    request.ConversationId, userId);
+                // Continue with the operation even if SignalR fails
+            }
 
             return Ok(new { data = messageDto });
         }

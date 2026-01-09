@@ -20,7 +20,6 @@ class WebSocketManager {
   bool _isConnecting = false;
   int _reconnectAttempts = 0;
   final Logger _logger = Logger();
-  final AuthService _authService = AuthService();
   final ApiClient _apiClient = ApiClient();
   HubConnection? _hubConnection;
 
@@ -29,29 +28,30 @@ class WebSocketManager {
   final List<Function(String)> _onUserOnlineCallbacks = [];
   final List<Function(String)> _onUserOfflineCallbacks = [];
   final List<Function(String, bool)> _onTypingIndicatorCallbacks = [];
+  final List<String> _cachedConversations = [];
 
   /// Initialize WebSocket connection with SignalR
   Future<void> initialize() async {
     _logger.i('Initializing WebSocket manager');
 
     try {
-      // Get auth token from API client (which uses SharedPreferences)
-      final token = await _apiClient.getToken();
-      if (token == null) {
-        _logger.w('No auth token found, cannot initialize WebSocket');
-        return;
-      }
-
-      final connectionUrl =
-          '${ApiConstants.wsBaseUrl}${ApiConstants.signalingHub}';
+      final connectionUrl = ApiConstants.getSignalingUrlWithNoToken();
 
       _logger.i('SignalR connection URL: $connectionUrl');
+
+      if (_hubConnection != null &&
+          (_hubConnection!.state == HubConnectionState.Connected ||
+              _hubConnection!.state == HubConnectionState.Connecting ||
+              _hubConnection!.state == HubConnectionState.Reconnecting)) {
+        _hubConnection!.stop();
+      }
 
       _hubConnection = HubConnectionBuilder()
           .withUrl(
             connectionUrl,
             options: HttpConnectionOptions(
-              accessTokenFactory: () async => token,
+              accessTokenFactory: () async =>
+                  (await _apiClient.getToken()) ?? "",
             ),
           )
           .build();
@@ -61,6 +61,14 @@ class WebSocketManager {
 
       // Start connection
       await _connect();
+
+      _logger.i('SignalR connection established');
+      _isConnected = true;
+      _isConnecting = false;
+      _reconnectAttempts = 0;
+
+      // Setup message handlers
+      _setupMessageHandlers();
     } catch (e) {
       _logger.e('Failed to initialize WebSocket: $e');
     }
@@ -94,9 +102,6 @@ class WebSocketManager {
       _isConnected = true;
       _isConnecting = false;
       _reconnectAttempts = 0;
-
-      // Setup message handlers
-      _setupMessageHandlers();
     });
   }
 
@@ -172,6 +177,12 @@ class WebSocketManager {
     try {
       await _hubConnection!.start();
       _logger.i('SignalR connected successfully');
+
+      if (_cachedConversations.isNotEmpty) {
+        for (var conversationId in _cachedConversations) {
+          await joinConversation(conversationId);
+        }
+      }
     } catch (e) {
       _isConnecting = false;
       _logger.e('SignalR connection failed: $e');
@@ -188,8 +199,10 @@ class WebSocketManager {
   }
 
   /// Handle received message
-  void _handleReceiveMessage(dynamic messageData) {
+  void _handleReceiveMessage(dynamic args) {
     try {
+      final messageData = args?.first as Map<String, dynamic>?;
+
       // Parse the message data and notify listeners
       if (messageData is Map<String, dynamic>) {
         _logger.i('Received new message data: $messageData');
@@ -215,6 +228,9 @@ class WebSocketManager {
     if (!_isConnected || _hubConnection == null) return;
 
     _logger.i('Joining conversation: $conversationId');
+    if (!_cachedConversations.contains(conversationId)) {
+      _cachedConversations.add(conversationId);
+    }
 
     try {
       await _hubConnection!.invoke('JoinConversation', args: [conversationId]);
@@ -228,6 +244,7 @@ class WebSocketManager {
     if (!_isConnected || _hubConnection == null) return;
 
     _logger.i('Leaving conversation: $conversationId');
+    _cachedConversations.remove(conversationId);
 
     try {
       await _hubConnection!.invoke('LeaveConversation', args: [conversationId]);
