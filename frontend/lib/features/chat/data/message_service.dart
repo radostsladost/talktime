@@ -3,6 +3,7 @@ import 'package:talktime/core/constants/api_constants.dart';
 import 'package:talktime/features/chat/data/local_message_storage.dart';
 import 'package:talktime/shared/models/message.dart';
 import 'package:logger/logger.dart';
+import 'package:talktime/core/websocket/websocket_manager.dart';
 
 import 'package:talktime/features/chat/data/models/message.dart' as DbModels;
 
@@ -10,6 +11,7 @@ import 'package:talktime/features/chat/data/models/message.dart' as DbModels;
 class MessageService {
   final ApiClient _apiClient = ApiClient();
   final Logger _logger = Logger();
+  final WebSocketManager _webSocketManager = WebSocketManager();
 
   // Inject or instantiate your local storage
   final LocalMessageStorage _localStorage = LocalMessageStorage();
@@ -157,6 +159,8 @@ class MessageService {
 
       await _localStorage.saveMessages([dbMessage]);
 
+      // Notify WebSocket that we've sent a message (this will trigger any needed updates)
+      // We can also send acknowledgments if needed
       return message;
     } catch (e) {
       _logger.e('Error sending message: $e');
@@ -223,5 +227,6 @@ class MessageService {
   /// Dispose resources
   void dispose() {
     _apiClient.dispose();
+    _webSocketManager.dispose();
   }
 }

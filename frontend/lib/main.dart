@@ -6,6 +6,7 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
+import 'package:talktime/core/websocket/websocket_manager.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/features/auth/presentation/pages/login_page.dart';
 import 'package:talktime/features/chat/presentation/pages/chat_list_page.dart';
@@ -15,6 +16,17 @@ Future<void> main() async {
   await dotenv.load(fileName: ".env");
   WidgetsFlutterBinding.ensureInitialized();
   await initializeBackgroundService(); // see below
+
+  // Initialize WebSocket manager for real-time messaging
+  // Note: This is a simplified approach - in a real app you'd want to
+  // initialize it properly with proper error handling and lifecycle management
+  try {
+    await WebSocketManager().initialize();
+  } catch (e) {
+    // Log but don't prevent app from starting
+    print('Failed to initialize WebSocket: $e');
+  }
+
   runApp(const MyApp());
 }
 
