@@ -12,17 +12,23 @@ namespace TalkTime.Api.Controllers;
 public class AuthController : ControllerBase
 {
     private readonly IUserRepository _userRepository;
+    private readonly IRefreshTokenRepository _refreshTokenRepository;
     private readonly IJwtService _jwtService;
     private readonly ILogger<AuthController> _logger;
+    private readonly IConfiguration _configuration;
 
     public AuthController(
         IUserRepository userRepository,
+        IRefreshTokenRepository refreshTokenRepository,
         IJwtService jwtService,
-        ILogger<AuthController> logger)
+        ILogger<AuthController> logger,
+        IConfiguration configuration)
     {
         _userRepository = userRepository;
+        _refreshTokenRepository = refreshTokenRepository;
         _jwtService = jwtService;
         _logger = logger;
+        _configuration = configuration;
     }
 
     [HttpPost("login")]
@@ -45,7 +51,7 @@ public class AuthController : ControllerBase
                 return Unauthorized(new { message = "Invalid email or password" });
             }
 
-            var token = _jwtService.GenerateToken(user);
+            var (accessToken, refreshToken, accessTokenExpires, refreshTokenExpires) = await GenerateTokensAsync(user);
 
             // Update online status
             await _userRepository.SetOnlineStatusAsync(user.Id, true);
@@ -53,7 +59,10 @@ public class AuthController : ControllerBase
             _logger.LogInformation("User {UserId} logged in successfully", user.Id);
 
             return Ok(new LoginResponse(
-                token,
+                accessToken,
+                refreshToken,
+                accessTokenExpires,
+                refreshTokenExpires,
                 new UserDto(user.Id, user.Username, user.AvatarUrl)
             ));
         }
@@ -95,12 +104,15 @@ public class AuthController : ControllerBase
 
             await _userRepository.CreateAsync(user);
 
-            var token = _jwtService.GenerateToken(user);
+            var (accessToken, refreshToken, accessTokenExpires, refreshTokenExpires) = await GenerateTokensAsync(user);
 
             _logger.LogInformation("New user registered: {UserId} ({Username})", user.Id, user.Username);
 
             return Ok(new LoginResponse(
-                token,
+                accessToken,
+                refreshToken,
+                accessTokenExpires,
+                refreshTokenExpires,
                 new UserDto(user.Id, user.Username, user.AvatarUrl)
             ));
         }
@@ -111,9 +123,73 @@ public class AuthController : ControllerBase
         }
     }
 
-    [HttpPost("logout")]
+    [HttpPost("refresh")]
+    [AllowAnonymous]
+    public async Task<ActionResult<RefreshTokenResponse>> RefreshToken([FromBody] RefreshTokenRequest request)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(request.RefreshToken))
+            {
+                return BadRequest(new { message = "Refresh token is required" });
+            }
+
+            // Hash the provided token to look it up
+            var tokenHash = _jwtService.HashToken(request.RefreshToken);
+            var storedToken = await _refreshTokenRepository.GetByTokenHashAsync(tokenHash);
+
+            if (storedToken == null)
+            {
+                _logger.LogWarning("Refresh token not found");
+                return Unauthorized(new { message = "Invalid refresh token" });
+            }
+
+            if (!storedToken.IsActive)
+            {
+                _logger.LogWarning("Refresh token is no longer active for user {UserId}", storedToken.UserId);
+
+                // If someone tries to use a revoked token, revoke all tokens for this user (potential token theft)
+                if (storedToken.IsRevoked)
+                {
+                    await _refreshTokenRepository.RevokeAllByUserIdAsync(storedToken.UserId);
+                    _logger.LogWarning("Potential token theft detected for user {UserId}. All tokens revoked.", storedToken.UserId);
+                }
+
+                return Unauthorized(new { message = "Invalid refresh token" });
+            }
+
+            var user = storedToken.User;
+            if (user == null)
+            {
+                _logger.LogWarning("User not found for refresh token");
+                return Unauthorized(new { message = "Invalid refresh token" });
+            }
+
+            // Generate new tokens (token rotation)
+            var (newAccessToken, newRefreshToken, accessTokenExpires, refreshTokenExpires) = await GenerateTokensAsync(user, storedToken.Id);
+
+            // Revoke the old refresh token
+            await _refreshTokenRepository.RevokeAsync(tokenHash, storedToken.Id);
+
+            _logger.LogInformation("Tokens refreshed for user {UserId}", user.Id);
+
+            return Ok(new RefreshTokenResponse(
+                newAccessToken,
+                newRefreshToken,
+                accessTokenExpires,
+                refreshTokenExpires
+            ));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during token refresh");
+            return StatusCode(500, new { message = "An error occurred during token refresh" });
+        }
+    }
+
+    [HttpPost("revoke")]
     [Authorize]
-    public async Task<ActionResult> Logout()
+    public async Task<ActionResult> RevokeToken([FromBody] RevokeTokenRequest request)
     {
         try
         {
@@ -122,6 +198,57 @@ public class AuthController : ControllerBase
             if (string.IsNullOrEmpty(userId))
             {
                 return BadRequest(new { message = "User not found in token" });
+            }
+
+            if (string.IsNullOrWhiteSpace(request.RefreshToken))
+            {
+                return BadRequest(new { message = "Refresh token is required" });
+            }
+
+            var tokenHash = _jwtService.HashToken(request.RefreshToken);
+            var storedToken = await _refreshTokenRepository.GetByTokenHashAsync(tokenHash);
+
+            if (storedToken == null || storedToken.UserId != userId)
+            {
+                return BadRequest(new { message = "Invalid refresh token" });
+            }
+
+            await _refreshTokenRepository.RevokeAsync(tokenHash);
+
+            _logger.LogInformation("Refresh token revoked for user {UserId}", userId);
+
+            return Ok(new { message = "Token revoked successfully" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during token revocation");
+            return StatusCode(500, new { message = "An error occurred during token revocation" });
+        }
+    }
+
+    [HttpPost("logout")]
+    [Authorize]
+    public async Task<ActionResult> Logout([FromBody] RevokeTokenRequest? request = null)
+    {
+        try
+        {
+            var userId = User.FindFirst("userId")?.Value;
+
+            if (string.IsNullOrEmpty(userId))
+            {
+                return BadRequest(new { message = "User not found in token" });
+            }
+
+            // Revoke the specific refresh token if provided
+            if (!string.IsNullOrWhiteSpace(request?.RefreshToken))
+            {
+                var tokenHash = _jwtService.HashToken(request.RefreshToken);
+                await _refreshTokenRepository.RevokeAsync(tokenHash);
+            }
+            else
+            {
+                // Revoke all refresh tokens for this user
+                await _refreshTokenRepository.RevokeAllByUserIdAsync(userId);
             }
 
             await _userRepository.SetOnlineStatusAsync(userId, false);
@@ -133,6 +260,34 @@ public class AuthController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error during logout");
+            return StatusCode(500, new { message = "An error occurred during logout" });
+        }
+    }
+
+    [HttpPost("logout-all")]
+    [Authorize]
+    public async Task<ActionResult> LogoutAll()
+    {
+        try
+        {
+            var userId = User.FindFirst("userId")?.Value;
+
+            if (string.IsNullOrEmpty(userId))
+            {
+                return BadRequest(new { message = "User not found in token" });
+            }
+
+            // Revoke all refresh tokens for this user
+            await _refreshTokenRepository.RevokeAllByUserIdAsync(userId);
+            await _userRepository.SetOnlineStatusAsync(userId, false);
+
+            _logger.LogInformation("User {UserId} logged out from all devices", userId);
+
+            return Ok(new { message = "Logged out from all devices successfully" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during logout-all");
             return StatusCode(500, new { message = "An error occurred during logout" });
         }
     }
@@ -164,5 +319,41 @@ public class AuthController : ControllerBase
             _logger.LogError(ex, "Error getting current user");
             return StatusCode(500, new { message = "An error occurred" });
         }
+    }
+
+    /// <summary>
+    /// Generate access token and refresh token for a user
+    /// </summary>
+    private async Task<(string AccessToken, string RefreshToken, DateTime AccessTokenExpires, DateTime RefreshTokenExpires)> GenerateTokensAsync(User user, string? replacedTokenId = null)
+    {
+        // Generate access token
+        var accessToken = _jwtService.GenerateToken(user);
+        var accessTokenExpires = DateTime.UtcNow.AddMinutes(
+            int.Parse(_configuration["Jwt:ExpirationInMinutes"] ?? "60")
+        );
+
+        // Generate refresh token
+        var refreshToken = _jwtService.GenerateRefreshToken();
+        var refreshTokenExpires = DateTime.UtcNow.AddDays(_jwtService.GetRefreshTokenExpirationDays());
+
+        // Get client info
+        var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
+        var deviceInfo = HttpContext.Request.Headers.UserAgent.ToString();
+
+        // Store refresh token in database
+        var refreshTokenEntity = new RefreshToken
+        {
+            Id = Guid.NewGuid().ToString(),
+            TokenHash = _jwtService.HashToken(refreshToken),
+            UserId = user.Id,
+            ExpiresAt = refreshTokenExpires,
+            CreatedAt = DateTime.UtcNow,
+            IpAddress = ipAddress,
+            DeviceInfo = deviceInfo?.Length > 500 ? deviceInfo[..500] : deviceInfo
+        };
+
+        await _refreshTokenRepository.CreateAsync(refreshTokenEntity);
+
+        return (accessToken, refreshToken, accessTokenExpires, refreshTokenExpires);
     }
 }

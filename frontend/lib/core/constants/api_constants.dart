@@ -17,7 +17,10 @@ class ApiConstants {
   static const String login = '$auth/login';
   static const String register = '$auth/register';
   static const String logout = '$auth/logout';
+  static const String logoutAll = '$auth/logout-all';
   static const String me = '$auth/me';
+  static const String refreshToken = '$auth/refresh';
+  static const String revokeToken = '$auth/revoke';
 
   // ==================== Conversation Endpoints ====================
   static const String conversations = '$apiPrefix/conversations';

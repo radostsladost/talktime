@@ -29,11 +29,30 @@ public record LoginRequest(
 );
 
 public record LoginResponse(
-    string Token,
+    string AccessToken,
+    string RefreshToken,
+    DateTime AccessTokenExpires,
+    DateTime RefreshTokenExpires,
     UserDto User
 );
 
 public record UpdateProfileRequest(
     string? Username,
     string? AvatarUrl
+);
+
+// Refresh Token DTOs
+public record RefreshTokenRequest(
+    string RefreshToken
+);
+
+public record RefreshTokenResponse(
+    string AccessToken,
+    string RefreshToken,
+    DateTime AccessTokenExpires,
+    DateTime RefreshTokenExpires
+);
+
+public record RevokeTokenRequest(
+    string RefreshToken
 );

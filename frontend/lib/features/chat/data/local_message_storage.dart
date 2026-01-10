@@ -98,6 +98,7 @@ class LocalMessageStorage {
         'message',
         where: 'conversationId = ?',
         whereArgs: [conversationId],
+        orderBy: 'sentAt DESC',
         limit: 50,
         offset: offset,
       );
