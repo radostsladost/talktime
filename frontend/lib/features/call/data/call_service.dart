@@ -10,6 +10,7 @@ import 'package:logger/logger.dart';
 import 'package:talktime/features/call/data/signaling_service.dart';
 import 'package:talktime/core/network/api_client.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
+import 'package:talktime/shared/models/user.dart';
 
 enum CallState { idle, connecting, connected, ended }
 
@@ -56,6 +57,8 @@ class CallService {
   String? _currentRoomId;
   bool _isMuted = false;
   bool _isCameraOff = false;
+  Timer? _timer;
+  User? _currentUser;
 
   // =========================================================
   // INITIALIZATION & CONNECTION
@@ -68,7 +71,8 @@ class CallService {
         (_signalingService == null || !_signalingService!.isConnected)) {
       _signalingService = SignalingService(token);
       await _signalingService!.connect();
-      _setupSignalingListeners();
+      await _setupSignalingListeners();
+      _currentUser = await AuthService().getCurrentUser();
     }
   }
 
@@ -88,7 +92,7 @@ class CallService {
       await _startBackgroundService(roomId);
 
       // 2. Setup initial participants
-      final selfId = (await AuthService().getCurrentUser()).id;
+      final selfId = _currentUser!.id;
       for (var user in initialParticipants) {
         if (user.id != selfId) {
           _participantIds.add(user.id);
@@ -98,7 +102,7 @@ class CallService {
       }
 
       // 3. Join Room via Signaling
-      _signalingService?.createRoom(roomId); // Or joinRoom based on logic
+      await _signalingService?.createRoom(roomId); // Or joinRoom based on logic
 
       _updateState(CallState.connected);
 
@@ -106,6 +110,15 @@ class CallService {
       if (_participantIds.isNotEmpty) {
         await _createAndSendOffers();
       }
+
+      if (_timer != null) {
+        _timer!.cancel();
+        _timer = null;
+      }
+      // _timer = Timer.periodic(
+      //   Duration(seconds: 30),
+      //   (Timer t) => _createAndSendOffers(),
+      // );
     } catch (e) {
       _logger.e("Start call failed: $e");
       endCall();
@@ -113,12 +126,20 @@ class CallService {
   }
 
   Future<void> endCall() async {
+    _subscriptions.clear();
     try {
       if (_currentRoomId != null) {
         await _signalingService?.leaveRoom(_currentRoomId!);
+        await _signalingService
+            ?.disconnect(); // Critical fix: Properly disconnect signaling
       }
     } catch (e) {
       _logger.e("Error leaving room: $e");
+    }
+
+    if (_timer != null) {
+      _timer!.cancel();
+      _timer = null;
     }
 
     // Clean up WebRTC
@@ -182,57 +203,63 @@ class CallService {
   }
 
   Future<void> _getUserMedia() async {
-    try {
-      // Check permissions first
-      final permissions = <Permission>[
-        Permission.camera,
-        Permission.microphone,
-      ];
-      final statuses = await permissions.request();
+    int retries = 0;
+    while (retries < 3) {
+      try {
+        // Check permissions first
+        final permissions = <Permission>[
+          Permission.camera,
+          Permission.microphone,
+        ];
+        final statuses = await permissions.request();
 
-      final video = statuses[Permission.camera] == PermissionStatus.granted;
-      final audio = statuses[Permission.microphone] == PermissionStatus.granted;
+        final video = statuses[Permission.camera] == PermissionStatus.granted;
+        final audio =
+            statuses[Permission.microphone] == PermissionStatus.granted;
 
-      var constraints = {
-        'audio': audio
-            ? {'echoCancellation': true, 'noiseSuppression': true}
-            : false,
-        'video': video
-            ? {
-                'mandatory': {
-                  'minWidth': '640',
-                  'minHeight': '480',
-                  'minFrameRate': '30',
-                },
-                'facingMode': 'user',
-              }
-            : false,
-      };
-
-      // If we couldn't get video, we fall back to audio-only media constraints
-      if (video && statuses[Permission.camera] != PermissionStatus.granted) {
-        constraints = {
-          'audio': {'echoCancellation': true, 'noiseSuppression': true},
-          'video': false,
+        var constraints = {
+          'audio': audio
+              ? {'echoCancellation': true, 'noiseSuppression': true}
+              : false,
+          'video': video
+              ? {
+                  'width': {'ideal': 640},
+                  'height': {'ideal': 480},
+                  'frameRate': {'ideal': 30},
+                  'facingMode': 'user',
+                }
+              : false,
         };
-      }
 
-      final stream = await navigator.mediaDevices.getUserMedia(constraints);
+        // If we couldn't get video, we fall back to audio-only media constraints
+        if (video && statuses[Permission.camera] != PermissionStatus.granted) {
+          constraints = {
+            'audio': {'echoCancellation': true, 'noiseSuppression': true},
+            'video': false,
+          };
+        }
 
-      _localStream = stream;
-      _localStreamController.add(_localStream);
+        final stream = await navigator.mediaDevices.getUserMedia(constraints);
 
-      // Ensure initial mute/camera states reflect stream tracks if present
-      if (_isMuted) {
-        final audioTracks = _localStream!.getAudioTracks();
-        if (audioTracks.isNotEmpty) audioTracks[0].enabled = false;
+        _localStream = stream;
+        _localStreamController.add(_localStream);
+
+        // Ensure initial mute/camera states reflect stream tracks if present
+        if (_isMuted) {
+          final audioTracks = _localStream!.getAudioTracks();
+          if (audioTracks.isNotEmpty) audioTracks[0].enabled = false;
+        }
+        if (_isCameraOff) {
+          final videoTracks = _localStream!.getVideoTracks();
+          if (videoTracks.isNotEmpty) videoTracks[0].enabled = false;
+        }
+        return; // Exit on success
+      } catch (e) {
+        retries++;
+        if (retries >= 3) rethrow;
+        await Future.delayed(Duration(milliseconds: 300 * retries));
+        _logger.w('Camera retry #$retries due to: $e');
       }
-      if (_isCameraOff) {
-        final videoTracks = _localStream!.getVideoTracks();
-        if (videoTracks.isNotEmpty) videoTracks[0].enabled = false;
-      }
-    } catch (e) {
-      _logger.w('Error getting user media: $e');
     }
   }
 
@@ -321,11 +348,28 @@ class CallService {
 
   Future<void> _createAndSendOffers() async {
     for (final id in _participantIds) {
-      final pc = _peerConnections[id];
-      if (pc != null) {
+      if (id == _currentUser!.id) continue;
+
+      // Only send offers if we are the impolite peer (higher ID)
+      if (_isPolite(id)) {
+        _logger.i('Skipping offer to $id - we are polite');
+        continue;
+      }
+
+      var pc = _peerConnections[id];
+      if (pc == null) {
+        await _createPeerConnection(id);
+        pc = _peerConnections[id];
+      }
+
+      final state = await pc!.getSignalingState();
+      if (state == RTCSignalingState.RTCSignalingStateStable) {
         final offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
         _signalingService?.sendRoomOffer(_currentRoomId!, offer.sdp!);
+        _logger.i('Offer sent to $id');
+      } else {
+        _logger.w('Skipping offer to $id - not in stable state: $state');
       }
     }
   }
@@ -335,8 +379,12 @@ class CallService {
     // Setup listeners similar to your original code,
     // but call internal private methods (_handleOffer, etc)
     // and update the Streams instead of calling setState
-    if (_subscriptions.isNotEmpty) {
+    if (_subscriptions.isNotEmpty && _signalingService?.isConnected == true) {
       _logger.i("Signaling listeners already set up. Skipping.");
+
+      if (_currentRoomId != null) {
+        _signalingService!.createRoom(_currentRoomId!);
+      }
       return;
     }
 
@@ -348,6 +396,7 @@ class CallService {
       await _signalingService!.connect();
     }
 
+    _subscriptions.clear();
     _subscriptions
       ..add(_signalingService!.onOffer.listen(_handleOffer))
       ..add(_signalingService!.onAnswer.listen(_handleAnswer))
@@ -362,6 +411,11 @@ class CallService {
     if (_currentRoomId != null) _signalingService!.createRoom(_currentRoomId!);
   }
 
+  // Determine if we are the "polite" peer (lower ID is polite, higher ID is impolite)
+  bool _isPolite(String otherUserId) {
+    return _currentUser!.id.compareTo(otherUserId) < 0;
+  }
+
   Future<void> _handleOffer(SignalingOfferEvent event) async {
     _logger.i('_handleOffer from ${event.fromUserId}');
 
@@ -373,35 +427,41 @@ class CallService {
     try {
       final pc = _peerConnections[event.fromUserId]!;
       final state = await pc.getSignalingState();
-      // If we are already negotiating (not stable), and we are the "impolite" peer
-      // we might want to ignore this, or rollback.
-      // For simple apps, just checking for stable often helps prevent crashes:
-      if ((state != RTCSignalingState.RTCSignalingStateStable &&
-              state != RTCSignalingState.RTCSignalingStateHaveRemoteOffer) ||
-          state == RTCSignalingState.RTCSignalingStateHaveLocalOffer) {
-        // This is a collision.
-        // Strategy: If I am "waiting for an answer", ignore their offer
-        // and let my offer win.
-        _logger.w(
-          "Collision detected. Ignoring offer from ${event.fromUserId}",
-        );
-        return;
+      final polite = _isPolite(event.fromUserId);
+
+      // Perfect negotiation pattern:
+      // - If we have a local offer pending (have-local-offer) and we're impolite, ignore incoming offer
+      // - If we're polite, we should rollback and accept the incoming offer
+      if (state == RTCSignalingState.RTCSignalingStateHaveLocalOffer) {
+        if (!polite) {
+          // We are impolite, ignore their offer - our offer wins
+          _logger.w(
+            "Collision detected. Impolite peer ignoring offer from ${event.fromUserId}",
+          );
+          return;
+        } else {
+          // We are polite, rollback our offer and accept theirs
+          _logger.i(
+            "Collision detected. Polite peer rolling back for ${event.fromUserId}",
+          );
+          await pc.setLocalDescription(RTCSessionDescription(null, 'rollback'));
+        }
       }
 
       final offer = RTCSessionDescription(event.sdp, 'offer');
       await pc.setRemoteDescription(offer);
 
       // Create and send answer
-
       final answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
+
       await _signalingService!.sendAnswer(
         event.fromUserId,
         answer.sdp!,
         roomId: _currentRoomId!,
       );
 
-      _logger.i('_handleOffer sendAnswer from ${event.fromUserId}');
+      _logger.i('_handleOffer sendAnswer to ${event.fromUserId}');
     } catch (e) {
       _logger.e('Error handling offer from ${event.fromUserId}: $e');
     }
@@ -411,7 +471,10 @@ class CallService {
     _logger.i('_handleAnswer from ${event.fromUserId}');
 
     final pc = _peerConnections[event.fromUserId];
-    if (pc == null) return;
+    if (pc == null) {
+      _logger.e('_handleAnswer _peerConnection is null: ${event.fromUserId}');
+      return;
+    }
 
     // --- FIX START ---
     // Check if we are actually waiting for an answer
@@ -427,11 +490,13 @@ class CallService {
     try {
       final answer = RTCSessionDescription(event.sdp, 'answer');
 
-      await pc.setRemoteDescription(answer);
+      if (state != RTCSignalingState.RTCSignalingStateHaveRemoteOffer) {
+        await pc.setRemoteDescription(answer);
+      }
 
-      // if (_state == CallState.connected) {
-      //   _state = CallState.connecting;
-      // }
+      if (_state == CallState.connecting) {
+        _state = CallState.connected;
+      }
     } catch (e) {
       _logger.e('Error handling answer from ${event.fromUserId}: $e');
     }
@@ -440,10 +505,35 @@ class CallService {
   Future<void> _handleIceCandidate(SignalingIceCandidateEvent event) async {
     _logger.i('_handleIceCandidate from ${event.fromUserId}');
 
-    final pc = _peerConnections[event.fromUserId];
-    if (pc == null) return;
-
     try {
+      final pc = _peerConnections[event.fromUserId];
+      if (pc == null) {
+        _logger.e(
+          '_handleIceCandidate _peerConnection is null: ${event.fromUserId}',
+        );
+        return;
+      }
+
+      // if its just sync error
+      var remoteDesc = await pc.getRemoteDescription();
+      if (remoteDesc == null) {
+        int retries = 0;
+        while (retries < 3 && remoteDesc == null) {
+          retries++;
+          await Future.delayed(Duration(seconds: 1 * retries), () async {
+            return 1;
+          });
+          remoteDesc = await pc.getRemoteDescription();
+        }
+
+        if (remoteDesc == null) {
+          _logger.i(
+            '_handleIceCandidate remoteDesc is null: ${event.fromUserId}',
+          );
+          return;
+        }
+      }
+
       final candidate = RTCIceCandidate(
         event.candidate,
 
@@ -460,26 +550,37 @@ class CallService {
 
   Future<void> _handleParticipantJoined(RoomParticipantUpdate event) async {
     _logger.i('_handleParticipantJoined  ${event.user.id}');
-    if (!_participantIds.contains(event.user.id) &&
-        await _getUserId() != event.user.id) {
-      _participantIds.add(event.user.id);
+    if (_currentUser!.id == event.user.id) {
+      return;
+    }
 
-      _participantInfo[event.user.id] = event.user;
-      await _createPeerConnection(event.user.id);
-      _logger.i('Participant joined: ${event.user.id}');
+    _participantIds.add(event.user.id);
+
+    _participantInfo[event.user.id] = event.user;
+    await _createPeerConnection(event.user.id);
+
+    _logger.i('Participant joined: ${event.user.id}');
+
+    // Only the "impolite" peer (higher ID) initiates the offer to avoid glare
+    if (!_isPolite(event.user.id)) {
+      _logger.i('We are impolite, sending offer to ${event.user.id}');
       final pc = _peerConnections[event.user.id]!;
       final offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
       await _signalingService!.sendRoomOffer(_currentRoomId!, offer.sdp!);
-
       _logger.i('Participant offer sent: ${event.user.id}');
+    } else {
+      _logger.i('We are polite, waiting for offer from ${event.user.id}');
     }
   }
 
   Future<void> _handleParticipantLeft(RoomParticipantUpdate event) async {
-    _logger.i('_handleParticipantJoined  ${event.user.id}');
-    if (_participantIds.remove(event.user.id) &&
-        await _getUserId() != event.user.id) {
+    _logger.i('_handleParticipantLeft  ${event.user.id}');
+    if (_currentUser!.id == event.user.id) {
+      return;
+    }
+
+    if (_participantIds.remove(event.user.id)) {
       _participantInfo.remove(event.user.id);
 
       _removePeerConnection(event.user.id);
@@ -522,12 +623,5 @@ class CallService {
 
     final service = FlutterBackgroundService();
     service.invoke("stopService");
-  }
-
-  Future<String> _getUserId() async {
-    final authService = new AuthService();
-    // Assuming ApiClient can return current user ID
-    final u = await authService.getCurrentUser();
-    return u.id;
   }
 }

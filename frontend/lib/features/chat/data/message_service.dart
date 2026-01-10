@@ -81,7 +81,7 @@ class MessageService {
   /// Call this on app start, socket notification, or background task.
   Future<void> syncPendingMessages(String conversationId) async {
     try {
-      _logger.i('Syncing pending messages for conversation: $conversationId');
+      // _logger.i('Syncing pending messages for conversation: $conversationId');
 
       // 1. Fetch from API for specific conversation
       final response = await _apiClient.get(
@@ -90,7 +90,7 @@ class MessageService {
       final List messagesJson = response['data'] as List;
 
       if (messagesJson.isEmpty) {
-        _logger.i('No pending messages for conversation: $conversationId');
+        // _logger.i('No pending messages for conversation: $conversationId');
         return;
       }
 
@@ -179,7 +179,7 @@ class MessageService {
           .map((json) => Message.fromJson(json as Map<String, dynamic>))
           .toList();
 
-      _logger.i('Fetched ${messages.length} pending messages');
+      // _logger.i('Fetched ${messages.length} pending messages');
       return messages;
     } catch (e) {
       _logger.e('Error fetching pending messages: $e');

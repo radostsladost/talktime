@@ -21,7 +21,7 @@ class ConversationService {
           .map((json) => User.fromJson(json as Map<String, dynamic>))
           .toList();
 
-      _logger.d('Fetched ${users.length} conversations');
+      // _logger.d('Fetched ${users.length} conversations');
       return users;
     } catch (e) {
       _logger.e('Error fetching conversations: $e');
@@ -32,7 +32,7 @@ class ConversationService {
   /// Get all conversations for the current user
   Future<List<Conversation>> getConversations() async {
     try {
-      _logger.d('Fetching conversations');
+      // _logger.d('Fetching conversations');
       final response = await _apiClient.get(ApiConstants.conversations);
 
       final List conversationsJson = response['data'] as List;
@@ -40,7 +40,7 @@ class ConversationService {
           .map((json) => Conversation.fromJson(json as Map<String, dynamic>))
           .toList();
 
-      _logger.d('Fetched ${conversations.length} conversations');
+      // _logger.d('Fetched ${conversations.length} conversations');
       return conversations;
     } catch (e) {
       _logger.e('Error fetching conversations: $e');

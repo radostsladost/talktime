@@ -76,12 +76,16 @@ class _ConferencePageState extends State<ConferencePage> {
 
     // Listen for state changes to trigger UI rebuilds when necessary
     _stateSubscription = _callService.callStateStream.listen((state) {
+      if (state == CallState.connected) {
+        _attachExistingStreams();
+      }
       setState(() {});
     });
 
     // Listen for local stream changes (rebuild when source object changes)
     _localStreamSubscription = _callService.localStreamStream.listen((stream) {
       setState(() {});
+      _attachExistingStreams();
     });
 
     // Listen for remote stream map changes (crucial for mobile/reliability)
@@ -90,12 +94,14 @@ class _ConferencePageState extends State<ConferencePage> {
     );
 
     // Listen for mic/camera state changes
-    _micSubscription = _callService.micStateStream.listen(
-      (_) => setState(() {}),
-    );
-    _camSubscription = _callService.camStateStream.listen(
-      (_) => setState(() {}),
-    );
+    _micSubscription = _callService.micStateStream.listen((_) {
+      setState(() {});
+      _attachExistingStreams();
+    });
+    _camSubscription = _callService.camStateStream.listen((_) {
+      setState(() {});
+      _attachExistingStreams();
+    });
   }
 
   void _attachExistingStreams() {
@@ -176,6 +182,7 @@ class _ConferencePageState extends State<ConferencePage> {
           // REMOTE STREAMS GRID
           StreamBuilder<Map<String, MediaStream>>(
             stream: CallService().remoteStreamsStream,
+            initialData: CallService().remoteStreams,
             builder: (context, snapshot) {
               final streams = snapshot.data ?? {};
               return _buildGrid(streams);
@@ -191,6 +198,7 @@ class _ConferencePageState extends State<ConferencePage> {
               height: 150,
               child: StreamBuilder<MediaStream?>(
                 stream: CallService().localStreamStream,
+                initialData: CallService().localStream,
                 builder: (context, snapshot) {
                   final stream = snapshot.data;
 
@@ -302,7 +310,9 @@ class _ConferencePageState extends State<ConferencePage> {
         IconButton(
           icon: const Icon(Icons.call_end, color: Colors.red),
           onPressed: () {
-            CallService().endCall();
+            CallService().endCall().catchError((error) {
+              _logger.e('Error ending call: $error');
+            });
             Navigator.pop(context);
           },
         ),

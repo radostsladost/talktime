@@ -122,14 +122,14 @@ class WebSocketManager {
     // Handle user online status
     _hubConnection!.on('UserOnline', (args) {
       final data = args?.first as Map<String, dynamic>?;
-      _logger.d('User online event: $data');
+      // _logger.d('User online event: $data');
 
       if (data != null && data['userId'] != null) {
         final userId = data['userId'] as String;
         for (var callback in _onUserOnlineCallbacks) {
           callback(userId);
         }
-        _logger.i('User online: $userId');
+        // _logger.i('User online: $userId');
       }
     });
 

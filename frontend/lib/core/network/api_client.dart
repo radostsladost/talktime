@@ -50,7 +50,7 @@ class ApiClient {
     bool requiresAuth = true,
   }) async {
     final uri = Uri.parse('${ApiConstants.baseUrl}$endpoint');
-    _logger.i('GET $uri');
+    // _logger.i('GET $uri');
 
     final headers = await _buildHeaders(includeAuth: requiresAuth);
 
@@ -60,7 +60,7 @@ class ApiClient {
           .timeout(const Duration(seconds: 30));
       return _processResponse(response);
     } catch (e) {
-      _logger.e('GET request failed: $e');
+      _logger.e('GET request failed: $uri $e');
       rethrow;
     }
   }
@@ -70,7 +70,7 @@ class ApiClient {
     bool requiresAuth = true,
   }) async {
     final uri = Uri.parse('${ApiConstants.baseUrl}$endpoint');
-    _logger.i('DELETE $uri');
+    // _logger.i('DELETE $uri');
 
     final headers = await _buildHeaders(includeAuth: requiresAuth);
 
@@ -80,7 +80,7 @@ class ApiClient {
           .timeout(const Duration(seconds: 30));
       return _processResponse(response);
     } catch (e) {
-      _logger.e('DELETE request failed: $e');
+      _logger.e('DELETE request failed: $uri $e');
       rethrow;
     }
   }
@@ -91,7 +91,7 @@ class ApiClient {
     bool requiresAuth = true,
   }) async {
     final uri = Uri.parse('${ApiConstants.baseUrl}$endpoint');
-    _logger.i('POST $uri | body: $body');
+    // _logger.i('POST $uri | body: $body');
 
     final headers = await _buildHeaders(includeAuth: requiresAuth);
 
@@ -105,7 +105,7 @@ class ApiClient {
           .timeout(const Duration(seconds: 30));
       return _processResponse(response);
     } catch (e) {
-      _logger.e('POST request failed: $e');
+      _logger.e('POST request failed: $uri $e');
       rethrow;
     }
   }
@@ -116,7 +116,7 @@ class ApiClient {
     bool requiresAuth = true,
   }) async {
     final uri = Uri.parse('${ApiConstants.baseUrl}$endpoint');
-    _logger.i('PUT $uri | body: $body');
+    // _logger.i('PUT $uri | body: $body');
 
     final headers = await _buildHeaders(includeAuth: requiresAuth);
 
@@ -130,7 +130,7 @@ class ApiClient {
           .timeout(const Duration(seconds: 30));
       return _processResponse(response);
     } catch (e) {
-      _logger.e('PUT request failed: $e');
+      _logger.e('PUT request failed: $uri $e');
       rethrow;
     }
   }
@@ -138,8 +138,8 @@ class ApiClient {
   Map<String, dynamic> _processResponse(http.Response response) {
     final statusCode = response.statusCode;
 
-    _logger.d('Response Status: $statusCode');
-    _logger.d('Response Body: ${response.body}');
+    // _logger.d('Response Status: $statusCode');
+    // _logger.d('Response Body: ${response.body}');
 
     // Handle empty responses
     if (response.body.isEmpty) {
