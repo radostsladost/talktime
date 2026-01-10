@@ -7,7 +7,7 @@ import 'package:logger/logger.dart';
 /// Service for managing conversations (chats)
 class ConversationService {
   final ApiClient _apiClient = ApiClient();
-  final Logger _logger = Logger();
+  final Logger _logger = Logger(output: ConsoleOutput());
 
   /// Search user
   Future<List<User>> searchUser(String query) async {

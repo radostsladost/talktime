@@ -19,7 +19,7 @@ class CallService {
   factory CallService() => _instance;
   CallService._internal();
 
-  final Logger _logger = Logger();
+  final Logger _logger = Logger(output: ConsoleOutput());
   SignalingService? _signalingService;
 
   // State Variables
@@ -45,6 +45,10 @@ class CallService {
       _remoteStreamsController.stream;
   Stream<bool> get micStateStream => _micStateController.stream;
   Stream<bool> get camStateStream => _camStateController.stream;
+
+  // State Getters for UI initialization on navigation return
+  MediaStream? get localStream => _localStream;
+  Map<String, MediaStream> get remoteStreams => Map.from(_remoteStreams);
 
   CallState get currentState => _state;
   Map<String, UserInfo> get participantInfo => _participantInfo;
@@ -118,8 +122,16 @@ class CallService {
     }
 
     // Clean up WebRTC
-    _localStream?.getTracks().forEach((t) => t.stop());
-    _localStream?.dispose();
+    if (_localStream != null) {
+      for (var track in _localStream!.getTracks()) {
+        // Explicitly stop tracks before disposing the stream object
+        if (track.enabled) {
+          track.enabled = false; // Disable if enabled
+        }
+        track.stop();
+      }
+      _localStream?.dispose();
+    }
     _localStream = null;
 
     for (var pc in _peerConnections.values) {
@@ -171,40 +183,54 @@ class CallService {
 
   Future<void> _getUserMedia() async {
     try {
-      // just because video is not required:
-      final permissions = <Permission>[Permission.camera];
+      // Check permissions first
+      final permissions = <Permission>[
+        Permission.camera,
+        Permission.microphone,
+      ];
       final statuses = await permissions.request();
 
-      if (!statuses.values.every(
-        (status) => status == PermissionStatus.granted,
-      )) {
-        var constraints = {
-          'audio': {'echoCancellation': true, 'noiseSuppression': true},
-        };
+      final video = statuses[Permission.camera] == PermissionStatus.granted;
+      final audio = statuses[Permission.microphone] == PermissionStatus.granted;
 
-        final stream = await navigator.mediaDevices.getUserMedia(constraints);
-        _localStream = stream;
-        _localStreamController.add(_localStream);
-
-        return;
-      }
-
-      var vidconstraints = {
-        'audio': {'echoCancellation': true, 'noiseSuppression': true},
-        'video': {
-          'mandatory': {
-            'minWidth': '640',
-            'minHeight': '480',
-            'minFrameRate': '30',
-          },
-          'facingMode': 'user',
-        },
+      var constraints = {
+        'audio': audio
+            ? {'echoCancellation': true, 'noiseSuppression': true}
+            : false,
+        'video': video
+            ? {
+                'mandatory': {
+                  'minWidth': '640',
+                  'minHeight': '480',
+                  'minFrameRate': '30',
+                },
+                'facingMode': 'user',
+              }
+            : false,
       };
 
-      final stream = await navigator.mediaDevices.getUserMedia(vidconstraints);
+      // If we couldn't get video, we fall back to audio-only media constraints
+      if (video && statuses[Permission.camera] != PermissionStatus.granted) {
+        constraints = {
+          'audio': {'echoCancellation': true, 'noiseSuppression': true},
+          'video': false,
+        };
+      }
+
+      final stream = await navigator.mediaDevices.getUserMedia(constraints);
 
       _localStream = stream;
       _localStreamController.add(_localStream);
+
+      // Ensure initial mute/camera states reflect stream tracks if present
+      if (_isMuted) {
+        final audioTracks = _localStream!.getAudioTracks();
+        if (audioTracks.isNotEmpty) audioTracks[0].enabled = false;
+      }
+      if (_isCameraOff) {
+        final videoTracks = _localStream!.getVideoTracks();
+        if (videoTracks.isNotEmpty) videoTracks[0].enabled = false;
+      }
     } catch (e) {
       _logger.w('Error getting user media: $e');
     }
@@ -309,12 +335,18 @@ class CallService {
     // Setup listeners similar to your original code,
     // but call internal private methods (_handleOffer, etc)
     // and update the Streams instead of calling setState
+    if (_subscriptions.isNotEmpty) {
+      _logger.i("Signaling listeners already set up. Skipping.");
+      return;
+    }
+
     final token = await ApiClient().getToken();
     if (token == null) throw Exception('No token');
 
-    _signalingService = SignalingService(token);
-
-    await _signalingService!.connect();
+    if (_signalingService == null || !_signalingService!.isConnected) {
+      _signalingService = SignalingService(token);
+      await _signalingService!.connect();
+    }
 
     _subscriptions
       ..add(_signalingService!.onOffer.listen(_handleOffer))
@@ -344,8 +376,9 @@ class CallService {
       // If we are already negotiating (not stable), and we are the "impolite" peer
       // we might want to ignore this, or rollback.
       // For simple apps, just checking for stable often helps prevent crashes:
-      if (state != RTCSignalingState.RTCSignalingStateStable &&
-          state != RTCSignalingState.RTCSignalingStateHaveRemoteOffer) {
+      if ((state != RTCSignalingState.RTCSignalingStateStable &&
+              state != RTCSignalingState.RTCSignalingStateHaveRemoteOffer) ||
+          state == RTCSignalingState.RTCSignalingStateHaveLocalOffer) {
         // This is a collision.
         // Strategy: If I am "waiting for an answer", ignore their offer
         // and let my offer win.

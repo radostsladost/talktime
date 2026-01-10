@@ -13,7 +13,7 @@ class ConferenceManager {
   ConferenceManager._internal();
 
   SignalingService? _signalingService;
-  final Logger _logger = Logger();
+  final Logger _logger = Logger(output: ConsoleOutput());
   final List<StreamSubscription> _subscriptions = [];
 
   bool _isInitialized = false;

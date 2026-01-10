@@ -10,7 +10,7 @@ import 'package:talktime/features/chat/data/models/message.dart' as DbModels;
 /// Service for managing messages
 class MessageService {
   final ApiClient _apiClient = ApiClient();
-  final Logger _logger = Logger();
+  final Logger _logger = Logger(output: ConsoleOutput());
   final WebSocketManager _webSocketManager = WebSocketManager();
 
   // Inject or instantiate your local storage

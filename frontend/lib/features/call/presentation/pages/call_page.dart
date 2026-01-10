@@ -37,7 +37,7 @@ class _CallPageState extends State<CallPage> {
   MediaStream? _localStream;
 
   SignalingService? _signalingService;
-  final Logger _logger = Logger();
+  final Logger _logger = Logger(output: ConsoleOutput());
 
   CallState _callState = CallState.connecting;
   String? _currentCallId;

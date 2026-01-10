@@ -8,7 +8,7 @@ import 'package:talktime/core/constants/api_constants.dart';
 class SignalingService {
   HubConnection? _hubConnection;
   final String _accessToken;
-  final Logger _logger = Logger();
+  final Logger _logger = Logger(output: ConsoleOutput());
 
   // Stream controllers for different signaling events
   final StreamController<IncomingCallEvent> _incomingCallController =

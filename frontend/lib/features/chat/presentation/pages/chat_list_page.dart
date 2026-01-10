@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:logger/logger.dart';
 import 'package:provider/provider.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/features/chat/data/conversation_service.dart';
@@ -21,6 +22,7 @@ class _ChatListPageState extends State<ChatListPage>
   late Future<List<Conversation>> _conversationsFuture;
   late String _myId = '';
   late Timer _timer;
+  final Logger _logger = Logger(output: ConsoleOutput());
 
   @override
   void initState() {
@@ -87,7 +89,7 @@ class _ChatListPageState extends State<ChatListPage>
                   convo.participants?.first?.username ??
                   "UNKNOWN";
 
-              print("MBError: " + name + " " + _myId);
+              //print("MBError: " + name + " " + _myId);
               return ListTile(
                 leading: CircleAvatar(child: Text(name)),
                 title: Text(name),

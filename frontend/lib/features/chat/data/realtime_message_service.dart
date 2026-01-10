@@ -9,7 +9,7 @@ class RealTimeMessageService {
   final WebSocketManager _webSocketManager;
   final MessageService _messageService;
   final ConversationService _conversationService;
-  final Logger _logger = Logger();
+  final Logger _logger = Logger(output: ConsoleOutput());
 
   RealTimeMessageService({
     required WebSocketManager webSocketManager,

@@ -19,7 +19,7 @@ class WebSocketManager {
   bool _isConnected = false;
   bool _isConnecting = false;
   int _reconnectAttempts = 0;
-  final Logger _logger = Logger();
+  final Logger _logger = Logger(output: ConsoleOutput());
   final ApiClient _apiClient = ApiClient();
   HubConnection? _hubConnection;
 

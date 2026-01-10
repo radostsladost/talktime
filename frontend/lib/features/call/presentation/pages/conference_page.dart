@@ -2,6 +2,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:logger/web.dart';
 import 'package:talktime/features/call/data/call_service.dart';
 import 'package:talktime/features/call/data/signaling_service.dart';
 import 'package:talktime/features/call/presentation/remote_participant_tile.dart';
@@ -22,43 +23,144 @@ class ConferencePage extends StatefulWidget {
 
 class _ConferencePageState extends State<ConferencePage> {
   final CallService _callService = CallService(); // Singleton instance
+  final Logger _logger = Logger(output: ConsoleOutput());
 
   // UI Specific Renderers (must be disposed when page closes)
   final RTCVideoRenderer _localRenderer = RTCVideoRenderer();
   final Map<String, RTCVideoRenderer> _remoteRenderers = {};
+
+  // Stream Subscriptions for dynamic updates
+  StreamSubscription? _stateSubscription;
+  StreamSubscription? _localStreamSubscription;
+  StreamSubscription? _remoteStreamsSubscription;
+  StreamSubscription? _micSubscription;
+  StreamSubscription? _camSubscription;
 
   @override
   void initState() {
     super.initState();
     _initRenderers();
 
-    _callService.initService().catchError((error) {
-      print(error);
-    });
-    // Check if we are already in this call, if not, start it
-    if (_callService.currentState == CallState.idle) {
-      _callService
-          .startCall(widget.roomId, widget.initialParticipants)
-          .catchError((error) {
-            print(error);
-          });
-    } else {
-      // We re-entered the page, attach existing streams immediately
-      _attachExistingStreams();
-    }
+    _callService
+        .initService()
+        .catchError((error) {
+          _logger.e("Error initializing call service: $error");
+        })
+        .then((_) {
+          // Check if we are already in this call, if not, start it
+          if (_callService.currentState == CallState.idle) {
+            _callService
+                .startCall(widget.roomId, widget.initialParticipants)
+                .catchError((error) {
+                  _logger.e("Error starting call: $error");
+                });
+          }
+
+          // Setup listeners and attach existing streams immediately after service is set up/call started
+          _setupListeners();
+          _attachExistingStreams();
+        });
   }
 
   Future<void> _initRenderers() async {
     await _localRenderer.initialize();
   }
 
+  void _setupListeners() {
+    // Cancel existing listeners if method is called multiple times unexpectedly
+    _stateSubscription?.cancel();
+    _localStreamSubscription?.cancel();
+    _remoteStreamsSubscription?.cancel();
+    _micSubscription?.cancel();
+    _camSubscription?.cancel();
+
+    // Listen for state changes to trigger UI rebuilds when necessary
+    _stateSubscription = _callService.callStateStream.listen((state) {
+      setState(() {});
+    });
+
+    // Listen for local stream changes (rebuild when source object changes)
+    _localStreamSubscription = _callService.localStreamStream.listen((stream) {
+      setState(() {});
+    });
+
+    // Listen for remote stream map changes (crucial for mobile/reliability)
+    _remoteStreamsSubscription = _callService.remoteStreamsStream.listen(
+      _handleRemoteStreamsUpdate,
+    );
+
+    // Listen for mic/camera state changes
+    _micSubscription = _callService.micStateStream.listen(
+      (_) => setState(() {}),
+    );
+    _camSubscription = _callService.camStateStream.listen(
+      (_) => setState(() {}),
+    );
+  }
+
   void _attachExistingStreams() {
-    // In a real app, you'd grab the current value from the service and set srcObject
+    // 1. Attach local stream if it exists right away
+    final currentLocalStream = _callService.localStream;
+    if (currentLocalStream != null && _localRenderer.srcObject == null) {
+      _localRenderer.srcObject = currentLocalStream;
+    }
+
+    // Set initial mic/cam state reflected in controls based on service state
+    if (_micSubscription == null) {
+      // Ensure mic state is set if control stream hasn't started yet
+      // Though StreamBuilder should handle initialData={false}, this is for safety
+      _callService.micStateStream
+          .listen((isMuted) => setState(() {}))
+          .cancel(); // Only to check value, canceling immediately
+    }
+
+    // 2. Initialize and attach all existing remote renderers
+    _handleRemoteStreamsUpdate(_callService.remoteStreams);
+  }
+
+  void _handleRemoteStreamsUpdate(Map<String, MediaStream> streams) {
+    // 1. Sync up _remoteRenderers map with incoming streams map
+    final activeIds = streams.keys.toSet();
+    final currentIds = _remoteRenderers.keys.toSet();
+
+    // Remove renderers for participants who left
+    for (final id in currentIds.difference(activeIds)) {
+      _remoteRenderers[id]?.dispose();
+      _remoteRenderers.remove(id);
+    }
+
+    // Initialize/Attach renderers for new/current participants
+    for (final id in activeIds) {
+      if (!_remoteRenderers.containsKey(id)) {
+        // Initialize new renderer if one doesn't exist for this ID
+        final newRenderer = RTCVideoRenderer();
+        newRenderer.initialize().then((_) {
+          // After initialization, assign the stream object we already have
+          newRenderer.srcObject = streams[id];
+          // Update state to trigger UI redraw with the new tile
+          if (mounted) setState(() {});
+        });
+        _remoteRenderers[id] = newRenderer;
+      } else {
+        // Update existing renderer's stream object (Handles track changes/reconnects)
+        _remoteRenderers[id]!.srcObject = streams[id];
+      }
+    }
+
+    // Trigger a rebuild to reflect the updated map/state
+    setState(() {});
   }
 
   @override
   void dispose() {
-    // IMPORTANT: We dispose the RENDERERS (UI), but we DO NOT stop the call.
+    // IMPORTANT: Cancel subscriptions
+    _stateSubscription?.cancel();
+    _localStreamSubscription?.cancel();
+    _remoteStreamsSubscription?.cancel();
+    _micSubscription?.cancel();
+    _camSubscription?.cancel();
+
+    // Dispose the RENDERERS (UI), but DO NOT stop the call.
     // The call lives in the service.
     _localRenderer.dispose();
     for (var r in _remoteRenderers.values) r.dispose();
@@ -90,10 +192,19 @@ class _ConferencePageState extends State<ConferencePage> {
               child: StreamBuilder<MediaStream?>(
                 stream: CallService().localStreamStream,
                 builder: (context, snapshot) {
-                  if (snapshot.hasData && snapshot.data != null) {
-                    _localRenderer.srcObject = snapshot.data;
+                  final stream = snapshot.data;
+
+                  if (stream != null) {
+                    // CRITICAL FIX: Only update srcObject if reference changes
+                    // to prevent flickering/detaching native resources.
+                    if (_localRenderer.srcObject != stream) {
+                      _localRenderer.srcObject = stream;
+                    }
                     return RTCVideoView(_localRenderer, mirror: true);
                   }
+
+                  // If stream is null, display placeholder.
+                  // This happens on endCall or during initialization if media acquisition fails.
                   return Container(color: Colors.grey);
                 },
               ),

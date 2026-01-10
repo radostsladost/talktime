@@ -6,7 +6,7 @@ import 'package:talktime/core/constants/api_constants.dart';
 
 class ApiClient {
   final http.Client _client = http.Client();
-  final Logger _logger = Logger();
+  final Logger _logger = Logger(output: ConsoleOutput());
 
   static const String _tokenKey = 'auth_token';
 

@@ -16,7 +16,7 @@ class CreateConferencePage extends StatefulWidget {
 }
 
 class _CreateConferencePageState extends State<CreateConferencePage> {
-  final Logger _logger = Logger();
+  final Logger _logger = Logger(output: ConsoleOutput());
   final TextEditingController _emailController = TextEditingController();
   final FocusNode _emailFocus = FocusNode();
 

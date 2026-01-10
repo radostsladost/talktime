@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:logger/logger.dart';
 import 'package:talktime/core/websocket/websocket_manager.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/features/call/presentation/pages/call_page.dart';
@@ -28,6 +29,7 @@ class _MessageListPageState extends State<MessageListPage> {
   late Timer _syncTimer;
   late MessageService _messageService;
   late RealTimeMessageService _realTimeMessageService;
+  final Logger _logger = Logger(output: ConsoleOutput());
 
   @override
   void initState() {
@@ -62,7 +64,7 @@ class _MessageListPageState extends State<MessageListPage> {
           // mngr.onTypingIndicator(_handleTypingIndicator);
         })
         .catchError((error) {
-          print('WebSocketManager initialization error: $error');
+          _logger.e('WebSocketManager initialization error: $error');
         });
   }
 
@@ -77,7 +79,7 @@ class _MessageListPageState extends State<MessageListPage> {
     await _messageService
         .syncPendingMessages(widget.conversation.id)
         .catchError((error) {
-          print('Error syncing messages: $error');
+          _logger.e('Error syncing messages: $error');
         });
     _messagesFuture = await _messageService.getMessages(widget.conversation.id);
   }
@@ -252,7 +254,7 @@ class _MessageListPageState extends State<MessageListPage> {
               decoration: InputDecoration(
                 hintText: 'Message ${name}',
                 filled: true,
-                fillColor: Colors.grey[100],
+                // fillColor: Colors.grey[100],
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.all(Radius.circular(30)),
                   borderSide: BorderSide.none,
