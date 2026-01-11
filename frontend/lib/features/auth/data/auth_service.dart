@@ -1,3 +1,4 @@
+import 'package:logger/logger.dart';
 import 'package:talktime/core/network/api_client.dart';
 import 'package:talktime/core/constants/api_constants.dart';
 import 'package:talktime/shared/models/user.dart';
@@ -140,11 +141,13 @@ class AuthService {
     // First check if we have tokens stored
     final accessToken = await _apiClient.getToken();
     if (accessToken == null) {
+      Logger().e('no access token');
       return false;
     }
 
     // Check if refresh token is expired (access token will be refreshed automatically)
     if (await _apiClient.isRefreshTokenExpired()) {
+      Logger().e('Refresh token expired');
       await _apiClient.clearAllTokens();
       return false;
     }
@@ -156,6 +159,7 @@ class AuthService {
       await getCurrentUser();
       return true;
     } catch (e) {
+      Logger().e('token invalid');
       return false;
     }
   }

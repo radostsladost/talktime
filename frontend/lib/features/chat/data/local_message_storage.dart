@@ -43,7 +43,46 @@ class LocalMessageStorage {
             'senderId TEXT, '
             'content TEXT, '
             'type TEXT, '
-            'sentAt int)',
+            'sentAt int, '
+            'readAt int)',
+          );
+          // my accounts
+          await db.execute(
+            'CREATE TABLE IF NOT EXISTS account(id INTEGER PRIMARY KEY, '
+            'externalId TEXT NOT NULL, '
+            'username TEXT, '
+            'avatarUrl TEXT, '
+            'email TEXT, '
+            'isOnline bool, '
+            'accessToken TEXT,'
+            'accessTokenExpiration INTEGER,'
+            'refreshToken TEXT,'
+            'refreshTokenExpiration INTEGER'
+            ')',
+          );
+          // contacts
+          await db.execute(
+            'CREATE TABLE IF NOT EXISTS user(id INTEGER PRIMARY KEY, '
+            'externalId TEXT NOT NULL, '
+            'username TEXT, '
+            'avatarUrl TEXT, '
+            'isOnline bool, '
+            'email TEXT)',
+          );
+          // conversations
+          await db.execute(
+            'CREATE TABLE IF NOT EXISTS conversation(id INTEGER PRIMARY KEY, '
+            'createdAt INTEGER NOT NULL, '
+            'externalId TEXT NOT NULL, '
+            'lastMessageAt INTEGER, '
+            'status TEXT DEFAULT \'active\')',
+          );
+
+          // convo participants
+          await db.execute(
+            'CREATE TABLE IF NOT EXISTS conversation_participant(id INTEGER PRIMARY KEY, '
+            'conversationId INTEGER, '
+            'userExternalId TEXT NOT NULL)',
           );
         },
         onUpgrade: (Database db, int oldVersion, int newVersion) async {
@@ -52,10 +91,66 @@ class LocalMessageStorage {
               'ALTER TABLE message ADD COLUMN readAt INTEGER DEFAULT null;',
             );
           }
+          if (oldVersion < 5) {
+            // my accounts
+            await db.execute(
+              'CREATE TABLE IF NOT EXISTS account(id INTEGER PRIMARY KEY, '
+              'externalId TEXT NOT NULL, '
+              'username TEXT, '
+              'avatarUrl TEXT, '
+              'email TEXT, '
+              'isOnline bool, '
+              'accessToken TEXT,'
+              'accessTokenExpiration INTEGER,'
+              'refreshToken TEXT,'
+              'refreshTokenExpiration INTEGER'
+              ')',
+            );
+            // contacts
+            await db.execute(
+              'CREATE TABLE IF NOT EXISTS user(id INTEGER PRIMARY KEY, '
+              'externalId TEXT NOT NULL, '
+              'username TEXT, '
+              'avatarUrl TEXT, '
+              'isOnline bool, '
+              'email TEXT)',
+            );
+            // conversations
+            await db.execute(
+              'CREATE TABLE IF NOT EXISTS conversation(id INTEGER PRIMARY KEY, '
+              'createdAt INTEGER NOT NULL, '
+              'externalId TEXT NOT NULL, '
+              'lastMessageAt INTEGER, '
+              'status TEXT DEFAULT \'active\')',
+            );
+
+            // convo participants
+            await db.execute(
+              'CREATE TABLE IF NOT EXISTS conversation_participant(id INTEGER PRIMARY KEY, '
+              'conversationId INTEGER, '
+              'userExternalId TEXT NOT NULL)',
+            );
+          }
+          if (oldVersion < 6) {
+            // Migrate conversation_participant table from userId INTEGER to userExternalId TEXT
+            await db.execute(
+              'DROP TABLE IF EXISTS conversation_participant_old',
+            );
+            await db.execute(
+              'ALTER TABLE conversation_participant RENAME TO conversation_participant_old',
+            );
+            await db.execute(
+              'CREATE TABLE IF NOT EXISTS conversation_participant(id INTEGER PRIMARY KEY, '
+              'conversationId INTEGER, '
+              'userExternalId TEXT NOT NULL)',
+            );
+            // Note: We can't easily migrate data from old table since we don't have the mapping,
+            // but this is acceptable since the app will repopulate conversations from API
+          }
         },
         // Set the version. This executes the onCreate function and provides a
         // path to perform database upgrades and downgrades.
-        version: 4,
+        version: 6,
       ),
     );
 

@@ -29,8 +29,6 @@ class Message {
     this.readAt = null;
   }
 
-  // Convert a Dog into a Map. The keys must correspond to the names of the
-  // columns in the database.
   Map<String, Object?> toMap() {
     return {
       'id': id > 0 ? id : null,
@@ -44,8 +42,6 @@ class Message {
     };
   }
 
-  // Convert a Dog into a Map. The keys must correspond to the names of the
-  // columns in the database.
   Message.fromMap(Map<String, Object?> map) {
     id = map['id'] as int;
     externalId = (map['externalId'] ?? '') as String;
@@ -61,8 +57,6 @@ class Message {
     readAt = map['readAt'] as int?;
   }
 
-  // Implement toString to make it easier to see information about
-  // each dog when using the print statement.
   @override
   String toString() {
     return 'Message{'

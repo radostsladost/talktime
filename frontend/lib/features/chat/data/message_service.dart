@@ -4,10 +4,9 @@ import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/features/chat/data/local_message_storage.dart';
 import 'package:talktime/shared/models/message.dart';
 import 'package:logger/logger.dart';
-import 'package:talktime/core/websocket/websocket_manager.dart';
 
+import 'package:talktime/features/chat/data/local_conversation_storage.dart';
 import 'package:talktime/features/chat/data/models/message.dart' as DbModels;
-import 'package:talktime/shared/models/user.dart';
 
 /// Service for managing messages
 class MessageService {
@@ -16,6 +15,8 @@ class MessageService {
 
   // Inject or instantiate your local storage
   final LocalMessageStorage _localStorage = LocalMessageStorage();
+  final LocalConversationStorage _conversationStorage =
+      LocalConversationStorage();
 
   /// Get messages for a specific conversation
   /// Supports pagination with skip and take parameters
@@ -77,7 +78,7 @@ class MessageService {
             (message) => DbModels.Message()
               ..externalId = message.id
               ..conversationId = message.conversationId
-              ..senderId = message.sender?.id ?? ""
+              ..senderId = message.sender!.id
               ..content = message.content
               ..type = getMessageType(message.type)
               ..sentAt = DateTime.parse(message.sentAt).millisecondsSinceEpoch,
@@ -86,6 +87,19 @@ class MessageService {
 
       // 2. Save to Local Storage
       await _localStorage.saveMessages(messages);
+
+      // 3. Update conversation lastMessageAt if messages exist
+      if (messages.isNotEmpty) {
+        final lastMessage = messages.reduce(
+          (a, b) => a.sentAt > b.sentAt ? a : b,
+        );
+        await _conversationStorage.updateLastMessageAt(
+          conversationId,
+          DateTime.fromMillisecondsSinceEpoch(
+            lastMessage.sentAt,
+          ).toIso8601String(),
+        );
+      }
 
       _logger.i(
         'Synced and saved ${messages.length} messages for conversation $conversationId',
@@ -121,7 +135,7 @@ class MessageService {
             (message) => DbModels.Message()
               ..externalId = message.id
               ..conversationId = message.conversationId
-              ..senderId = message.sender?.id ?? ""
+              ..senderId = message.sender!.id
               ..content = message.content
               ..type = getMessageType(message.type)
               ..sentAt = DateTime.parse(message.sentAt).millisecondsSinceEpoch,
@@ -130,6 +144,19 @@ class MessageService {
 
       // 2. Save to Local Storage immediately
       await _localStorage.saveMessages(messages);
+
+      // 3. Update conversation lastMessageAt if messages exist
+      if (messages.isNotEmpty) {
+        final lastMessage = messages.reduce(
+          (a, b) => a.sentAt > b.sentAt ? a : b,
+        );
+        await _conversationStorage.updateLastMessageAt(
+          conversationId,
+          DateTime.fromMillisecondsSinceEpoch(
+            lastMessage.sentAt,
+          ).toIso8601String(),
+        );
+      }
 
       _logger.i(
         'Synced and saved ${messages.length} pending messages for conversation: $conversationId',
@@ -188,9 +215,15 @@ class MessageService {
         ..senderId = message.sender?.id ?? ""
         ..content = message.content
         ..type = getMessageType(message.type)
-        ..sentAt = DateTime.parse(message.sentAt ?? "0").millisecondsSinceEpoch;
+        ..sentAt = DateTime.parse(message.sentAt).millisecondsSinceEpoch;
 
       await _localStorage.saveMessages([dbMessage]);
+
+      // Update conversation lastMessageAt
+      await _conversationStorage.updateLastMessageAt(
+        conversationId,
+        message.sentAt,
+      );
 
       // Notify WebSocket that we've sent a message (this will trigger any needed updates)
       // We can also send acknowledgments if needed

@@ -1,6 +1,7 @@
 import 'package:talktime/core/network/api_client.dart';
 import 'package:talktime/core/constants/api_constants.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
+import 'package:talktime/features/chat/data/local_conversation_storage.dart';
 import 'package:talktime/shared/models/conversation.dart';
 import 'package:talktime/shared/models/user.dart';
 import 'package:logger/logger.dart';
@@ -9,6 +10,7 @@ import 'package:logger/logger.dart';
 class ConversationService {
   final ApiClient _apiClient = ApiClient();
   final Logger _logger = Logger(output: ConsoleOutput());
+  final LocalConversationStorage _localStorage = LocalConversationStorage();
 
   /// Search user
   Future<List<User>> searchUser(String query) async {
@@ -33,9 +35,19 @@ class ConversationService {
   /// Get all conversations for the current user
   Future<List<Conversation>> getConversations() async {
     try {
+      // First try to get from local storage
+      try {
+        final localConversations = await _localStorage.getConversations();
+        if (localConversations.isNotEmpty) {
+          return localConversations;
+        }
+      } catch (e) {
+        _logger.w('No local conversations found, fetching from API: $e');
+      }
+
       await AuthService().refreshTokenIfNeeded();
 
-      // _logger.d('Fetching conversations');
+      _logger.d('Fetching conversations from API');
       final response = await _apiClient.get(ApiConstants.conversations);
 
       final List conversationsJson = response['data'] as List;
@@ -43,7 +55,10 @@ class ConversationService {
           .map((json) => Conversation.fromJson(json as Map<String, dynamic>))
           .toList();
 
-      // _logger.d('Fetched ${conversations.length} conversations');
+      // Save to local storage
+      await _localStorage.saveConversations(conversations);
+
+      _logger.d('Fetched ${conversations.length} conversations');
       return conversations;
     } catch (e) {
       _logger.e('Error fetching conversations: $e');
@@ -54,10 +69,28 @@ class ConversationService {
   /// Get a specific conversation by ID
   Future<Conversation> getConversationById(String id) async {
     try {
+      // First try to get from local storage
+      try {
+        final localConversation = await _localStorage
+            .getConversationByExternalId(id);
+        if (localConversation != null) {
+          return localConversation;
+        }
+      } catch (e) {
+        _logger.w('No local conversation found for $id, fetching from API: $e');
+      }
+
       _logger.d('Fetching conversation: $id');
       final response = await _apiClient.get(ApiConstants.conversationById(id));
 
-      return Conversation.fromJson(response['data'] as Map<String, dynamic>);
+      final conversation = Conversation.fromJson(
+        response['data'] as Map<String, dynamic>,
+      );
+
+      // Save to local storage
+      await _localStorage.saveConversation(conversation);
+
+      return conversation;
     } catch (e) {
       _logger.e('Error fetching conversation $id: $e');
       rethrow;
@@ -79,6 +112,10 @@ class ConversationService {
       final conversation = Conversation.fromJson(
         response['data'] as Map<String, dynamic>,
       );
+
+      // Save to local storage
+      await _localStorage.saveConversation(conversation);
+
       _logger.d('Created direct conversation: ${conversation.id}');
       return conversation;
     } catch (e) {
@@ -99,6 +136,10 @@ class ConversationService {
       final conversation = Conversation.fromJson(
         response['data'] as Map<String, dynamic>,
       );
+
+      // Save to local storage
+      await _localStorage.saveConversation(conversation);
+
       _logger.d('Created group conversation: ${conversation.id}');
       return conversation;
     } catch (e) {
@@ -117,7 +158,10 @@ class ConversationService {
       );
 
       // Fetch updated conversation
-      return await getConversationById(id);
+      final conversation = await getConversationById(id);
+
+      // The getConversationById already saves to local storage
+      return conversation;
     } catch (e) {
       _logger.e('Error updating conversation $id: $e');
       rethrow;
@@ -129,6 +173,10 @@ class ConversationService {
     try {
       _logger.d('Deleting conversation: $id');
       await _apiClient.delete(ApiConstants.conversationById(id));
+
+      // Also delete from local storage
+      await _localStorage.deleteConversation(id);
+
       _logger.d('Successfully deleted conversation: $id');
     } catch (e) {
       _logger.e('Error deleting conversation $id: $e');
