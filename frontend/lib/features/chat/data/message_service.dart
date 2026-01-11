@@ -7,6 +7,7 @@ import 'package:logger/logger.dart';
 import 'package:talktime/core/websocket/websocket_manager.dart';
 
 import 'package:talktime/features/chat/data/models/message.dart' as DbModels;
+import 'package:talktime/shared/models/user.dart';
 
 /// Service for managing messages
 class MessageService {
@@ -32,6 +33,24 @@ class MessageService {
       );
 
       return messages.map((message) => Message.fromDb(message)).toList();
+    } catch (e) {
+      _logger.e('Error fetching messages: $e');
+      rethrow;
+    }
+  }
+
+  /// Get messages for a specific conversation
+  /// Supports pagination with skip and take parameters
+  Future<Message?> getLastMessage(String conversationId) async {
+    try {
+      // 1. Read directly from local DB
+      final messages = await _localStorage.getMessages(
+        conversationId,
+        offset: 0,
+        limit: 1,
+      );
+
+      return messages.map((message) => Message.fromDb(message)).firstOrNull;
     } catch (e) {
       _logger.e('Error fetching messages: $e');
       rethrow;

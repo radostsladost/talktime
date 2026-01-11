@@ -1,5 +1,11 @@
 import 'dart:async';
+import 'dart:io' show Platform;
+
+import 'package:collection/collection.dart';
+import 'package:emoji_picker_flutter/emoji_picker_flutter.dart' as emoji_picker;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:logger/logger.dart';
 import 'package:talktime/core/websocket/websocket_manager.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
@@ -8,7 +14,6 @@ import 'package:talktime/features/chat/data/message_service.dart';
 import 'package:talktime/shared/models/conversation.dart';
 import 'package:talktime/shared/models/message.dart';
 import 'package:talktime/shared/models/user.dart';
-import 'package:intl/intl.dart';
 
 class MessageListPage extends StatefulWidget {
   final Conversation conversation;
@@ -20,7 +25,7 @@ class MessageListPage extends StatefulWidget {
 }
 
 class _MessageListPageState extends State<MessageListPage> {
-  late List<Message> _messagesFuture = List.empty();
+  late List<Message> _messages = List.empty();
   final _textController = TextEditingController();
   final _scrollController = ScrollController();
   late String _myId = '';
@@ -28,13 +33,16 @@ class _MessageListPageState extends State<MessageListPage> {
   late MessageService _messageService;
   final Logger _logger = Logger(output: ConsoleOutput());
   List<ConferenceParticipant> _conferenceParticipants = [];
+  bool _isEmojiPickerVisible = false;
 
   @override
   void initState() {
     super.initState();
     _messageService = MessageService();
     _messageService.getMessages(widget.conversation.id).then((messages) {
-      _messagesFuture = messages;
+      setState(() {
+        _messages = messages;
+      });
     });
     _myId = '';
     (AuthService().getCurrentUser()).then(
@@ -58,16 +66,24 @@ class _MessageListPageState extends State<MessageListPage> {
           mngr.joinConversation(widget.conversation.id);
           mngr.onMessageReceived(_onSignalMsgReceived);
           mngr.onUserOffline((userId) {
-            Future.delayed(
-              const Duration(milliseconds: 300),
-              () => setState(() {}),
-            );
+            // Only trigger update if this user is part of our conversation
+            if (widget.conversation.participants?.any((p) => p.id == userId) ==
+                true) {
+              Future.delayed(
+                const Duration(milliseconds: 300),
+                () => setState(() {}),
+              );
+            }
           });
           mngr.onUserOnline((userId) {
-            Future.delayed(
-              const Duration(milliseconds: 300),
-              () => setState(() {}),
-            );
+            // Only trigger update if this user is part of our conversation
+            if (widget.conversation.participants?.any((p) => p.id == userId) ==
+                true) {
+              Future.delayed(
+                const Duration(milliseconds: 300),
+                () => setState(() {}),
+              );
+            }
           });
           mngr.onConferenceParticipant(_onConferenceParticipantUpdate);
           // Load initial conference participants if any
@@ -85,7 +101,7 @@ class _MessageListPageState extends State<MessageListPage> {
 
   _onSignalMsgReceived(Message p1) {
     setState(() {
-      _messagesFuture.insert(0, p1);
+      _messages.insert(0, p1);
     });
     _syncMessages();
   }
@@ -96,11 +112,15 @@ class _MessageListPageState extends State<MessageListPage> {
     String action,
   ) {
     if (roomId == widget.conversation.id) {
-      setState(() {
-        _conferenceParticipants = WebSocketManager().getConferenceParticipants(
-          widget.conversation.id,
-        );
-      });
+      final participants = WebSocketManager().getConferenceParticipants(
+        widget.conversation.id,
+      );
+      // Only update if participants have actually changed
+      if (!listEquals(_conferenceParticipants, participants)) {
+        setState(() {
+          _conferenceParticipants = participants;
+        });
+      }
     }
   }
 
@@ -112,9 +132,12 @@ class _MessageListPageState extends State<MessageListPage> {
         });
 
     _messageService.getMessages(widget.conversation.id).then((messages) {
-      setState(() {
-        _messagesFuture = messages;
-      });
+      // Only update if messages have actually changed
+      if (!listEquals(_messages, messages)) {
+        setState(() {
+          _messages = messages;
+        });
+      }
     });
   }
 
@@ -149,11 +172,11 @@ class _MessageListPageState extends State<MessageListPage> {
     );
 
     // Refresh UI with new message
-    final ft = List<Message>.from(_messagesFuture);
-    ft.insert(0, newMessage);
-    setState(() {
-      _messagesFuture = ft;
-    });
+    // final ft = List<Message>.from(_messages);
+    // ft.insert(0, newMessage);
+    // setState(() {
+    //   _messages = ft;
+    // });
 
     // Send to backend (fire and forget for now)
     try {
@@ -163,9 +186,9 @@ class _MessageListPageState extends State<MessageListPage> {
     } catch (e) {
       // TODO: Show error and retry
       // Revert optimistic update if send fails
-      setState(() {
-        _messagesFuture = ft;
-      });
+      // setState(() {
+      //   _messages = ft;
+      // });
     }
   }
 
@@ -195,7 +218,7 @@ class _MessageListPageState extends State<MessageListPage> {
               ? Colors.green
               : Theme.of(context).textTheme.labelSmall?.color)
         : Theme.of(context).textTheme.labelSmall?.color;
-    final msgs = Future.value(_messagesFuture);
+    final msgs = Future.value(_messages);
 
     return Scaffold(
       appBar: AppBar(
@@ -228,29 +251,15 @@ class _MessageListPageState extends State<MessageListPage> {
 
           // Messages List
           Expanded(
-            child: FutureBuilder<List<Message>>(
-              future: msgs,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                if (snapshot.hasError) {
-                  return Center(child: Text('Error: ${snapshot.error}'));
-                }
-
-                final messages = snapshot.data!;
-                return ListView.builder(
-                  controller: _scrollController,
-                  reverse: true, // So latest messages are at bottom
-                  itemCount: messages.length,
-                  itemBuilder: (context, index) {
-                    final message = messages[index];
-                    final isOwn =
-                        message.sender.id == 'u1' || message.sender.id == uId;
-                    // Simplified; use auth service later
-                    return _buildMessageTile(message, isOwn);
-                  },
-                );
+            child: ListView.builder(
+              controller: _scrollController,
+              reverse: true,
+              itemCount: _messages.length,
+              itemBuilder: (context, index) {
+                final message = _messages[index];
+                final isOwn =
+                    message.sender.id == 'u1' || message.sender.id == _myId;
+                return _buildMessageTile(message, isOwn);
               },
             ),
           ),
@@ -281,6 +290,7 @@ class _MessageListPageState extends State<MessageListPage> {
             ),
           Flexible(
             child: Container(
+              key: Key(message.id), // Add key for better performance
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               decoration: BoxDecoration(
                 color: isOwn ? Colors.blue : Colors.grey[300],
@@ -324,28 +334,137 @@ class _MessageListPageState extends State<MessageListPage> {
         widget.conversation.participants?.first?.username ??
         "UNKNOWN";
 
-    return Padding(
-      padding: const EdgeInsets.all(8.0),
-      child: Row(
-        children: [
-          Expanded(
-            child: TextField(
-              controller: _textController,
-              decoration: InputDecoration(
-                hintText: 'Message ${name}',
-                filled: true,
-                // fillColor: Colors.grey[100],
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.all(Radius.circular(30)),
-                  borderSide: BorderSide.none,
+    return Column(
+      children: [
+        // Emoji Picker (conditionally shown)
+        if (_isEmojiPickerVisible)
+          SizedBox(
+            height: 250,
+            child: emoji_picker.EmojiPicker(
+              onEmojiSelected:
+                  (emoji_picker.Category? category, emoji_picker.Emoji emoji) {
+                    // Insert emoji at cursor position (or end)
+                    final text = _textController.text;
+                    if (text.length == 0) {
+                      _textController.value = TextEditingValue(
+                        text: emoji.emoji,
+                        selection: TextSelection.collapsed(
+                          offset: emoji.emoji.length,
+                        ),
+                      );
+                      return;
+                    }
+
+                    final cursor = _textController.selection.baseOffset;
+                    final newText = text.replaceRange(
+                      cursor,
+                      cursor,
+                      emoji.emoji,
+                    );
+                    _textController.value = TextEditingValue(
+                      text: newText,
+                      selection: TextSelection.collapsed(
+                        offset: cursor + emoji.emoji.length,
+                      ),
+                    );
+                  },
+              onBackspacePressed: () {
+                final text = _textController.text;
+                final selection = _textController.selection;
+                final cursor = selection.baseOffset;
+                if (text.length < 1 || cursor <= 0) {
+                  return;
+                }
+
+                // Use .characters to treat each visual character as 1 unit
+                final characters = text.characters;
+
+                // Ensure cursor doesn't exceed character length
+                final safeCursor = cursor > characters.length
+                    ? characters.length
+                    : cursor;
+
+                // Delete the character BEFORE the cursor
+                final newCharacters = characters.toList();
+                newCharacters.removeAt(safeCursor - 1);
+
+                final newText = newCharacters.join('');
+
+                // Update controller
+                _textController.value = TextEditingValue(
+                  text: newText,
+                  selection: TextSelection.collapsed(offset: safeCursor - 1),
+                );
+              },
+              config: emoji_picker.Config(
+                height: 280,
+                // Customize appearance via modular configs:
+                emojiViewConfig: emoji_picker.EmojiViewConfig(
+                  emojiSizeMax: 32,
+                  backgroundColor: Theme.of(context).colorScheme.surface,
+                  // Note: bgColor is now in view configs or handled via theme
                 ),
+                categoryViewConfig: emoji_picker.CategoryViewConfig(
+                  iconColor: Theme.of(context).colorScheme.onSurface,
+                  iconColorSelected: Theme.of(context).colorScheme.primary,
+                  indicatorColor: Theme.of(context).colorScheme.primary,
+                  backgroundColor: Theme.of(context).colorScheme.surface,
+                  // Category icons are now set via viewOrderConfig
+                ),
+                bottomActionBarConfig: emoji_picker.BottomActionBarConfig(
+                  showBackspaceButton: true,
+                ),
+                searchViewConfig: emoji_picker.SearchViewConfig(
+                  hintText: 'Search emojis...',
+                  backgroundColor: Theme.of(context).colorScheme.surface,
+                  buttonIconColor: Theme.of(context).colorScheme.onSurface,
+                ),
+                // viewOrderConfig: emoji_picker.ViewOrderConfig(
+                //   showSearchView: true,
+                //   showSkinToneActionBar: true,
+                //   // You can reorder tabs if needed
+                // ),
+                // Locale (optional)
+                locale: const Locale('en'),
               ),
-              onSubmitted: (_) => _sendMessage(),
             ),
           ),
-          IconButton(icon: const Icon(Icons.send), onPressed: _sendMessage),
-        ],
-      ),
+        Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: Row(
+            children: [
+              IconButton(
+                icon: Icon(
+                  _isEmojiPickerVisible
+                      ? Icons.keyboard
+                      : Icons.insert_emoticon_outlined,
+                ),
+                onPressed: () {
+                  setState(() {
+                    _isEmojiPickerVisible = !_isEmojiPickerVisible;
+                  });
+                },
+              ),
+              Expanded(
+                child: TextField(
+                  controller: _textController,
+                  decoration: InputDecoration(
+                    hintText: 'Message ${name}',
+                    filled: true,
+                    // fillColor: Colors.grey[100],
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.all(Radius.circular(30)),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                  onSubmitted: (_) => _sendMessage(),
+                ),
+              ),
+              IconButton(icon: const Icon(Icons.send), onPressed: _sendMessage),
+            ],
+          ),
+        ),
+      ],
     );
   }
 

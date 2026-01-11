@@ -30,6 +30,8 @@ dependencies:
   sqflite_common_ffi:
   sqflite_common_ffi_web:
   intl: ^0.20.2
+  emoji_picker_flutter: ^4.4.0
+  characters: ^1.4.0
 
 dev_dependencies:
   flutter_test:

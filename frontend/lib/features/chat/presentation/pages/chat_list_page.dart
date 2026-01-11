@@ -5,9 +5,12 @@ import 'package:logger/logger.dart';
 import 'package:provider/provider.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/features/chat/data/conversation_service.dart';
+import 'package:talktime/features/chat/data/message_service.dart';
 import 'package:talktime/shared/models/conversation.dart';
 import 'package:talktime/features/chat/presentation/pages/message_list_page.dart';
 import 'package:talktime/features/chat/presentation/pages/create_chat.dart';
+import 'package:talktime/shared/models/message.dart';
+import 'package:talktime/shared/models/user.dart';
 
 class ChatListPage extends StatefulWidget {
   const ChatListPage({super.key});
@@ -22,6 +25,7 @@ class _ChatListPageState extends State<ChatListPage>
   late String _myId = '';
   late Timer _timer;
   final Logger _logger = Logger(output: ConsoleOutput());
+  final Map<String, Message> _lastMessageMap = {};
 
   @override
   void initState() {
@@ -39,7 +43,22 @@ class _ChatListPageState extends State<ChatListPage>
       setState(() {
         _conversationsFuture = ConversationService().getConversations();
       });
+      _conversationsFuture
+          .then((_) async {
+            await _fetchLastMessages();
+          })
+          .catchError((error) {
+            _logger.e('Error fetching conversations $error');
+          });
     });
+
+    _conversationsFuture
+        .then((_) async {
+          await _fetchLastMessages();
+        })
+        .catchError((error) {
+          _logger.e('Error fetching conversations $error');
+        });
   }
 
   @override
@@ -47,6 +66,25 @@ class _ChatListPageState extends State<ChatListPage>
     if (state == AppLifecycleState.resumed) {
       // App is reopened from the background
       _conversationsFuture = ConversationService().getConversations();
+      _conversationsFuture
+          .then((_) async {
+            await _fetchLastMessages();
+          })
+          .catchError((error) {
+            _logger.e('Error fetching conversations $error');
+          });
+    }
+  }
+
+  Future<void> _fetchLastMessages() async {
+    final conversations = await _conversationsFuture;
+    for (final conversation in conversations) {
+      final lastMessage = await MessageService().getLastMessage(
+        conversation.id,
+      );
+      setState(() {
+        if (lastMessage != null) _lastMessageMap[conversation.id] = lastMessage;
+      });
     }
   }
 
@@ -78,6 +116,7 @@ class _ChatListPageState extends State<ChatListPage>
 
           return ListView.builder(
             itemCount: conversations.length,
+            padding: const EdgeInsets.symmetric(vertical: 8),
             itemBuilder: (context, index) {
               final convo = conversations[index];
               final name =
@@ -87,14 +126,76 @@ class _ChatListPageState extends State<ChatListPage>
                       ?.username ??
                   convo.participants?.first?.username ??
                   "UNKNOWN";
+              final lastMessage =
+                  _lastMessageMap[convo.id] ??
+                  Message(
+                    id: '0',
+                    content: convo.lastMessage ?? "",
+                    conversationId: convo.id,
+                    sender:
+                        convo.participants?.first ??
+                        User(id: '0', username: 'Unknown'),
+                    sentAt:
+                        convo.lastMessageAt ?? "",
+                  );
 
-              //print("MBError: " + name + " " + _myId);
-              return ListTile(
-                leading: CircleAvatar(child: Text(name)),
-                title: Text(name),
-                subtitle: Text(convo.displaySubtitle),
-                trailing: Text(convo.lastMessageAt ?? ''),
-                onTap: () => _openChat(context, convo),
+              return Card(
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: BorderSide(
+                    color: Theme.of(context).dividerColor.withOpacity(0.2),
+                  ),
+                ),
+                clipBehavior: Clip.hardEdge,
+                child: ListTile(
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 14,
+                  ),
+                  leading: CircleAvatar(
+                    backgroundColor: Theme.of(
+                      context,
+                    ).colorScheme.primary.withOpacity(0.1),
+                    foregroundColor: Theme.of(context).colorScheme.primary,
+                    child: Text(
+                      name.isEmpty ? "?" : name[0].toUpperCase(),
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 18,
+                      ),
+                    ),
+                  ),
+                  title: Text(
+                    name,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  subtitle: Text(
+                    lastMessage.content,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  trailing: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        _formatTimeAgo(lastMessage.sentAt),
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.onSurface.withOpacity(0.6),
+                        ),
+                      ),
+                    ],
+                  ),
+                  onTap: () => _openChat(context, convo),
+                ),
               );
             },
           );
@@ -106,6 +207,23 @@ class _ChatListPageState extends State<ChatListPage>
         onPressed: () => _createGroup(context),
       ),
     );
+  }
+
+  String _formatTimeAgo(String? isoString) {
+    if (isoString == null) return '';
+    try {
+      final messageTime = DateTime.parse(isoString);
+      final now = DateTime.now();
+      final difference = now.difference(messageTime);
+
+      if (difference.inSeconds < 60) return 'now';
+      if (difference.inMinutes < 60) return '${difference.inMinutes}m';
+      if (difference.inHours < 24) return '${difference.inHours}h';
+      if (difference.inDays < 7) return '${difference.inDays}d';
+      return '${messageTime.month}/${messageTime.day}';
+    } catch (e) {
+      return '';
+    }
   }
 
   Future<void> _openChat(

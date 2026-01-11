@@ -9,13 +9,14 @@ import 'package:talktime/shared/models/message.dart' hide Message;
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:sqflite_common_ffi_web/sqflite_ffi_web.dart';
 
 class LocalMessageStorage {
   LocalMessageStorage();
 
   Future<Database> _initDb() async {
     sqfliteFfiInit();
-    var factory = databaseFactoryFfi;
+    var factory = !kIsWeb ? databaseFactoryFfi : databaseFactoryFfiWeb;
     var dbPath = !kIsWeb
         ? join(await factory.getDatabasesPath(), 'msg_database.db')
         : 'msg_database.db';
