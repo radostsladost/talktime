@@ -17,7 +17,7 @@ This service likely handles API requests, real-time communication setup (e.g., S
 
 ### Frontend Application (Flutter)
 
-The user-facing application is developed using **Flutter**, enabling deployment across multiple platforms from a single codebase.
+The user-facing application is developed using **Flutter**, enabling deployment across multiple platforms from a single codebase (tested on Android, PC, and web, though iOS should also work).
 
 - The core logic and UI reside within the `talktime/frontend/lib` directory.
 - Platform-specific configurations and dependencies are managed in directories like `talktime/frontend/android`, `talktime/frontend/ios`, and configuration files like `talktime/frontend/pubspec.yaml`.
