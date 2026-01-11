@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:talktime/core/websocket/websocket_manager.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/features/chat/presentation/pages/chat_list_page.dart';
 
@@ -45,6 +46,8 @@ class _RegisterPageState extends State<RegisterPage> {
         _emailController.text.trim(),
         _passwordController.text,
       );
+
+      await WebSocketManager().initialize();
 
       if (!mounted) return;
 

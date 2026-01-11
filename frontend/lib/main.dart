@@ -6,15 +6,25 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
+import 'package:talktime/core/websocket/websocket_manager.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/features/auth/presentation/pages/login_page.dart';
+import 'package:talktime/features/call/presentation/pages/conference_page.dart';
 import 'package:talktime/features/chat/presentation/pages/chat_list_page.dart';
+import 'package:talktime/features/call/data/incoming_call_manager.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+
+/// Global navigator key for showing incoming calls from anywhere
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 Future<void> main() async {
   await dotenv.load(fileName: ".env");
   WidgetsFlutterBinding.ensureInitialized();
   await initializeBackgroundService(); // see below
+
+  // Initialize the incoming call manager with the global navigator key
+  IncomingCallManager().initialize(navigatorKey);
+
   runApp(const MyApp());
 }
 
@@ -25,6 +35,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'TalkTime',
+      navigatorKey: navigatorKey, // Use global navigator key for incoming calls
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
@@ -69,6 +80,8 @@ class _SplashScreenState extends State<SplashScreen> {
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (_) => const ChatListPage()),
         );
+
+        WebSocketManager().initialize();
       } else {
         // User is not logged in, go to login page
         Navigator.of(

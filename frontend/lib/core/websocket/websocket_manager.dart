@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:logger/logger.dart';
 import 'package:talktime/core/constants/api_constants.dart';
 import 'package:talktime/core/network/api_client.dart';
+import 'package:talktime/features/call/data/incoming_call_manager.dart';
 import 'package:talktime/shared/models/message.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:signalr_netcore/signalr_client.dart';
@@ -52,10 +53,13 @@ class WebSocketManager {
 
       _logger.i('SignalR connection URL: $connectionUrl');
 
+      if (_hubConnection?.state == HubConnectionState.Connected) {
+        _logger.i('SignalR already up');
+        return;
+      }
+
       if (_hubConnection != null &&
-          (_hubConnection!.state == HubConnectionState.Connected ||
-              _hubConnection!.state == HubConnectionState.Connecting ||
-              _hubConnection!.state == HubConnectionState.Reconnecting)) {
+          (_hubConnection!.state != HubConnectionState.Connected)) {
         _hubConnection!.stop();
       }
 
@@ -232,6 +236,19 @@ class WebSocketManager {
         );
       }
     });
+
+    // Handle participant left conference
+    _hubConnection!.on('CallInitiated', (args) {
+      final data = args?.first as Map<String, dynamic>?;
+      _logger.d('CallInitiated: $data');
+      if (data != null) {
+        final roomId = data['roomId'] as String;
+        final userData = data['user'] as Map<String, dynamic>;
+        final participant = ConferenceParticipant.fromJson(userData);
+
+        onCallInitiated(roomId, participant);
+      }
+    });
   }
 
   /// Connect to SignalR hub
@@ -349,6 +366,17 @@ class WebSocketManager {
     } catch (e) {
       _logger.e('Failed to acknowledge message $messageId: $e');
     }
+  }
+
+  /// When a call is initiated
+  void onCallInitiated(String roomId, ConferenceParticipant participant) {
+    IncomingCallManager().showIncomingCall(
+      callId: roomId,
+      roomId: roomId,
+      callerName: participant.username,
+      callType: 'audio',
+      autoDeclineSeconds: 30,
+    );
   }
 
   /// Add callback for receiving new messages

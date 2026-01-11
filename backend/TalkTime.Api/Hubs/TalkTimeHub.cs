@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using TalkTime.Core.DTOs;
+using TalkTime.Core.Entities;
 using TalkTime.Core.Interfaces;
 
 namespace TalkTime.Api.Hubs;
@@ -325,6 +326,23 @@ public class TalkTimeHub : Hub
         }
 
         _logger.LogInformation("User {UserId} joined room {RoomId}", userId, roomId);
+
+        if (roomState.Participants.Count == 1)
+        {
+            // CALL TO OTHERS
+            var conversations = await _conversationRepository.GetByIdWithParticipantsAsync(roomId);
+            foreach (var participant in conversations?.Participants ?? Array.Empty<ConversationParticipant>())
+            {
+                if (participant.UserId != userId)
+                {
+                    await Clients.User(participant.UserId).SendAsync("CallInitiated", new RoomParticipantUpdate(
+                        roomId,
+                        userDto,
+                        "joined"
+                    ));
+                }
+            }
+        }
     }
 
     /// <summary>

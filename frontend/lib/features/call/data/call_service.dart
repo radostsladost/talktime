@@ -476,6 +476,9 @@ class CallService {
       return;
     }
 
+    // Wait for syncronization
+    await Future.delayed(const Duration(seconds: 1), () {});
+
     // --- FIX START ---
     // Check if we are actually waiting for an answer
     final state = await pc.getSignalingState();
@@ -488,9 +491,10 @@ class CallService {
     // --- FIX END ---
 
     try {
-      final answer = RTCSessionDescription(event.sdp, 'answer');
-
-      if (state != RTCSignalingState.RTCSignalingStateHaveRemoteOffer) {
+      final state = await pc.getSignalingState();
+      if (state != RTCSignalingState.RTCSignalingStateHaveRemoteOffer &&
+          state != RTCSignalingState.RTCSignalingStateStable) {
+        final answer = RTCSessionDescription(event.sdp, 'answer');
         await pc.setRemoteDescription(answer);
       }
 
@@ -553,9 +557,9 @@ class CallService {
     if (_currentUser!.id == event.user.id) {
       return;
     }
+    await Future.delayed(const Duration(seconds: 1), () {});
 
     _participantIds.add(event.user.id);
-
     _participantInfo[event.user.id] = event.user;
     await _createPeerConnection(event.user.id);
 
@@ -565,6 +569,7 @@ class CallService {
     if (!_isPolite(event.user.id)) {
       _logger.i('We are impolite, sending offer to ${event.user.id}');
       final pc = _peerConnections[event.user.id]!;
+      final state = await pc.getSignalingState();
       final offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
       await _signalingService!.sendRoomOffer(_currentRoomId!, offer.sdp!);

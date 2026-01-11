@@ -6,7 +6,6 @@ import 'package:provider/provider.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/features/chat/data/conversation_service.dart';
 import 'package:talktime/shared/models/conversation.dart';
-import 'package:talktime/features/call/presentation/pages/call_page.dart';
 import 'package:talktime/features/chat/presentation/pages/message_list_page.dart';
 import 'package:talktime/features/chat/presentation/pages/create_chat.dart';
 
@@ -134,20 +133,6 @@ class _ChatListPageState extends State<ChatListPage>
     Navigator.push(
       context,
       MaterialPageRoute(builder: (context) => CreateConferencePage()),
-    );
-  }
-
-  void _startNewCall(BuildContext context) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => const CallPage(
-          isOutgoing: true,
-          peerName: 'Alex',
-          peerId: 'user-id-here', // Replace with actual user ID
-          callType: CallType.video,
-        ),
-      ),
     );
   }
 

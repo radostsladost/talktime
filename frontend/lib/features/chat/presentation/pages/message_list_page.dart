@@ -3,11 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:logger/logger.dart';
 import 'package:talktime/core/websocket/websocket_manager.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
-import 'package:talktime/features/call/presentation/pages/call_page.dart';
 import 'package:talktime/features/call/presentation/pages/conference_page.dart';
-import 'package:talktime/features/chat/data/conversation_service.dart';
 import 'package:talktime/features/chat/data/message_service.dart';
-import 'package:talktime/features/chat/data/realtime_message_service.dart';
 import 'package:talktime/shared/models/conversation.dart';
 import 'package:talktime/shared/models/message.dart';
 import 'package:talktime/shared/models/user.dart';
@@ -112,7 +109,12 @@ class _MessageListPageState extends State<MessageListPage> {
         .catchError((error) {
           _logger.e('Error syncing messages: $error');
         });
-    _messagesFuture = await _messageService.getMessages(widget.conversation.id);
+
+    _messageService.getMessages(widget.conversation.id).then((messages) {
+      setState(() {
+        _messagesFuture = messages;
+      });
+    });
   }
 
   @override
@@ -156,7 +158,7 @@ class _MessageListPageState extends State<MessageListPage> {
     try {
       await _messageService.sendMessage(widget.conversation.id, content);
       // After sending, refresh the message list to get the real message from backend
-      _syncMessages();
+      await _syncMessages();
     } catch (e) {
       // TODO: Show error and retry
       // Revert optimistic update if send fails
@@ -241,7 +243,7 @@ class _MessageListPageState extends State<MessageListPage> {
                   reverse: true, // So latest messages are at bottom
                   itemCount: messages.length,
                   itemBuilder: (context, index) {
-                    final message = messages[messages.length - 1 - index];
+                    final message = messages[index];
                     final isOwn =
                         message.sender.id == 'u1' || message.sender.id == uId;
                     // Simplified; use auth service later

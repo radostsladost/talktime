@@ -12,7 +12,6 @@ import 'package:talktime/features/chat/data/models/message.dart' as DbModels;
 class MessageService {
   final ApiClient _apiClient = ApiClient();
   final Logger _logger = Logger(output: ConsoleOutput());
-  final WebSocketManager _webSocketManager = WebSocketManager();
 
   // Inject or instantiate your local storage
   final LocalMessageStorage _localStorage = LocalMessageStorage();
@@ -165,7 +164,7 @@ class MessageService {
         ..senderId = message.sender?.id ?? ""
         ..content = message.content
         ..type = getMessageType(message.type)
-        ..sentAt = DateTime.parse(message.sentAt).millisecondsSinceEpoch;
+        ..sentAt = DateTime.parse(message.sentAt ?? "0").millisecondsSinceEpoch;
 
       await _localStorage.saveMessages([dbMessage]);
 
@@ -237,6 +236,5 @@ class MessageService {
   /// Dispose resources
   void dispose() {
     _apiClient.dispose();
-    _webSocketManager.dispose();
   }
 }
