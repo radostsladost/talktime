@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:logger/web.dart';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 
@@ -7,62 +8,41 @@ import 'package:talktime/features/chat/data/models/message.dart';
 import 'package:talktime/shared/models/message.dart' hide Message;
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:sqflite_common_ffi_web/sqflite_ffi_web.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 class LocalMessageStorage {
   LocalMessageStorage();
 
   Future<Database> _initDb() async {
-    if (kIsWeb) {
-      var factory = databaseFactoryFfiWeb;
-      final database = await factory.openDatabase(
-        // Set the path to the database. Note: Using the `join` function from the
-        // `path` package is best practice to ensure the path is correctly
-        // constructed for each platform.
-        'msg_database.db',
-        options: OpenDatabaseOptions(
-          onCreate: (db, version) {
-            // Run the CREATE TABLE statement on the database.
-            return db.execute(
-              'CREATE TABLE message(id INTEGER PRIMARY KEY,'
-              'externalId TEXT, '
-              'conversationId TEXT, '
-              'senderId TEXT, '
-              'content TEXT, '
-              'type TEXT, '
-              'sentAt int)',
-            );
-          },
-          // Set the version. This executes the onCreate function and provides a
-          // path to perform database upgrades and downgrades.
-          version: 1,
-        ),
-      );
-      return database;
-    }
+    sqfliteFfiInit();
+    var factory = databaseFactoryFfi;
+    var dbPath = !kIsWeb
+        ? join(await factory.getDatabasesPath(), 'msg_database.db')
+        : 'msg_database.db';
 
-    final database = openDatabase(
+    final database = await factory.openDatabase(
       // Set the path to the database. Note: Using the `join` function from the
       // `path` package is best practice to ensure the path is correctly
       // constructed for each platform.
-      join(await getDatabasesPath(), 'msg_database.db'),
-      onCreate: (db, version) {
-        // Run the CREATE TABLE statement on the database.
-        return db.execute(
-          'CREATE TABLE message(id INTEGER PRIMARY KEY,'
-          'externalId TEXT, '
-          'conversationId TEXT, '
-          'senderId TEXT, '
-          'content TEXT, '
-          'type TEXT, '
-          'sentAt int)',
-        );
-      },
-      // Set the version. This executes the onCreate function and provides a
-      // path to perform database upgrades and downgrades.
-      version: 1,
+      dbPath,
+      options: OpenDatabaseOptions(
+        onCreate: (db, version) {
+          // Run the CREATE TABLE statement on the database.
+          return db.execute(
+            'CREATE TABLE message(id INTEGER PRIMARY KEY,'
+            'externalId TEXT, '
+            'conversationId TEXT, '
+            'senderId TEXT, '
+            'content TEXT, '
+            'type TEXT, '
+            'sentAt int)',
+          );
+        },
+        // Set the version. This executes the onCreate function and provides a
+        // path to perform database upgrades and downgrades.
+        version: 1,
+      ),
     );
-
     return database;
   }
 

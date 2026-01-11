@@ -8,6 +8,7 @@ import 'package:talktime/features/chat/data/message_service.dart';
 import 'package:talktime/shared/models/conversation.dart';
 import 'package:talktime/shared/models/message.dart';
 import 'package:talktime/shared/models/user.dart';
+import 'package:intl/intl.dart';
 
 class MessageListPage extends StatefulWidget {
   final Conversation conversation;
@@ -84,7 +85,7 @@ class _MessageListPageState extends State<MessageListPage> {
 
   _onSignalMsgReceived(Message p1) {
     setState(() {
-      _messagesFuture.add(p1);
+      _messagesFuture.insert(0, p1);
     });
     _syncMessages();
   }
@@ -149,7 +150,7 @@ class _MessageListPageState extends State<MessageListPage> {
 
     // Refresh UI with new message
     final ft = List<Message>.from(_messagesFuture);
-    _messagesFuture.add(newMessage);
+    ft.insert(0, newMessage);
     setState(() {
       _messagesFuture = ft;
     });
@@ -263,6 +264,7 @@ class _MessageListPageState extends State<MessageListPage> {
 
   Widget _buildMessageTile(Message message, bool isOwn) {
     return Padding(
+      key: Key(message.id),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Row(
         mainAxisAlignment: isOwn
@@ -284,12 +286,26 @@ class _MessageListPageState extends State<MessageListPage> {
                 color: isOwn ? Colors.blue : Colors.grey[300],
                 borderRadius: BorderRadius.circular(20),
               ),
-              child: Text(
-                message.content,
-                style: TextStyle(
-                  color: isOwn ? Colors.white : Colors.black,
-                  fontSize: 16,
-                ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    message.content,
+                    style: TextStyle(
+                      color: isOwn ? Colors.white : Colors.black,
+                      fontSize: 16,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    DateFormat('HH:mm').format(DateTime.parse(message.sentAt)),
+                    style: TextStyle(
+                      color: isOwn ? Colors.white70 : Colors.black54,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
               ),
             ),
           ),

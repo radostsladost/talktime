@@ -27,7 +27,9 @@ dependencies:
   flutter_background_service: ^5.1.0
   sqflite: ^2.4.2
   path: ^1.9.1
+  sqflite_common_ffi:
   sqflite_common_ffi_web:
+  intl: ^0.20.2
 
 dev_dependencies:
   flutter_test:
