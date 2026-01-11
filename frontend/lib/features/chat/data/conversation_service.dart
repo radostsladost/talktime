@@ -1,5 +1,6 @@
 import 'package:talktime/core/network/api_client.dart';
 import 'package:talktime/core/constants/api_constants.dart';
+import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/shared/models/conversation.dart';
 import 'package:talktime/shared/models/user.dart';
 import 'package:logger/logger.dart';
@@ -32,6 +33,8 @@ class ConversationService {
   /// Get all conversations for the current user
   Future<List<Conversation>> getConversations() async {
     try {
+      await AuthService().refreshTokenIfNeeded();
+
       // _logger.d('Fetching conversations');
       final response = await _apiClient.get(ApiConstants.conversations);
 

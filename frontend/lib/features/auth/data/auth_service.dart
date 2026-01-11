@@ -149,6 +149,8 @@ class AuthService {
       return false;
     }
 
+    await refreshTokenIfNeeded();
+
     // Try to get current user to verify tokens are valid
     try {
       await getCurrentUser();
@@ -156,6 +158,15 @@ class AuthService {
     } catch (e) {
       return false;
     }
+  }
+
+  /// Refresh the access token
+  Future<bool> refreshTokenIfNeeded() async {
+    if (await needsTokenRefresh()) {
+      await refreshToken();
+      return true;
+    }
+    return false;
   }
 
   /// Check if tokens need to be refreshed

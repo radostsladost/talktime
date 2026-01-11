@@ -29,6 +29,9 @@ class WebSocketManager {
   final List<Function(String)> _onUserOfflineCallbacks = [];
   final List<Function(String, bool)> _onTypingIndicatorCallbacks = [];
   final List<String> _cachedConversations = [];
+  final Map<String, bool> _onlineStates = {};
+
+  Map<String, bool> get onlineStates => _onlineStates;
 
   /// Initialize WebSocket connection with SignalR
   Future<void> initialize() async {
@@ -50,8 +53,10 @@ class WebSocketManager {
           .withUrl(
             connectionUrl,
             options: HttpConnectionOptions(
-              accessTokenFactory: () async =>
-                  (await _apiClient.getToken()) ?? "",
+              accessTokenFactory: () async {
+                await AuthService().refreshTokenIfNeeded();
+                return (await _apiClient.getToken()) ?? "";
+              },
             ),
           )
           .build();
@@ -126,6 +131,7 @@ class WebSocketManager {
 
       if (data != null && data['userId'] != null) {
         final userId = data['userId'] as String;
+        _onlineStates[userId] = true;
         for (var callback in _onUserOnlineCallbacks) {
           callback(userId);
         }
@@ -139,6 +145,7 @@ class WebSocketManager {
       _logger.d('User offline event: $data');
       if (data is Map<String, dynamic> && data['userId'] != null) {
         final userId = data['userId'] as String;
+        _onlineStates[userId] = false;
         for (var callback in _onUserOfflineCallbacks) {
           callback(userId);
         }

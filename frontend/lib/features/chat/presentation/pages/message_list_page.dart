@@ -28,7 +28,6 @@ class _MessageListPageState extends State<MessageListPage> {
   late String _myId = '';
   late Timer _syncTimer;
   late MessageService _messageService;
-  late RealTimeMessageService _realTimeMessageService;
   final Logger _logger = Logger(output: ConsoleOutput());
 
   @override
@@ -59,9 +58,19 @@ class _MessageListPageState extends State<MessageListPage> {
           final mngr = WebSocketManager();
           mngr.joinConversation(widget.conversation.id);
           mngr.onMessageReceived(_onSignalMsgReceived);
-          // mngr.onUserOnline(_handleUserOnline);
-          // mngr.onUserOffline(_handleUserOffline);
-          // mngr.onTypingIndicator(_handleTypingIndicator);
+          mngr.onUserOffline((userId) {
+            Future.delayed(
+              const Duration(milliseconds: 300),
+              () => setState(() {}),
+            );
+          });
+          mngr.onUserOnline((userId) {
+            Future.delayed(
+              const Duration(milliseconds: 300),
+              () => setState(() {}),
+            );
+          });
+          //TODO: mngr.onTypingIndicator(_handleTypingIndicator);
         })
         .catchError((error) {
           _logger.e('WebSocketManager initialization error: $error');
@@ -133,21 +142,37 @@ class _MessageListPageState extends State<MessageListPage> {
     }
   }
 
+  User? get firstOtherUser =>
+      widget.conversation.participants?.firstWhere((i) => i.id != _myId);
+  String get title =>
+      widget.conversation.displayTitle ??
+      firstOtherUser?.username ??
+      widget.conversation.participants?.first?.username ??
+      "UNKNOWN";
+  Object? get online =>
+      (widget.conversation.participants.length <= 2 && firstOtherUser != null
+      ? (WebSocketManager().onlineStates.containsKey(firstOtherUser!.id) == true
+            ? WebSocketManager().onlineStates[firstOtherUser!.id]
+            : false)
+      : WebSocketManager().onlineStates.values.length);
+
   @override
   Widget build(BuildContext context) {
     final uId = _myId;
-    final name =
-        widget.conversation.displayTitle ??
-        widget.conversation.participants
-            ?.firstWhere((i) => i.id != uId)
-            ?.username ??
-        widget.conversation.participants?.first?.username ??
-        "UNKNOWN";
+    final onlineText = online is bool
+        ? (online == true ? 'Online' : 'Offline')
+        : '${widget.conversation.participants.length} members' +
+              ((online as int) > 2 ? '(${online} online)' : '');
     final msgs = Future.value(_messagesFuture);
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(name),
+        title: Column(
+          children: [
+            Text(title),
+            Text(onlineText, style: Theme.of(context).textTheme.labelSmall),
+          ],
+        ),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () => Navigator.pop(context),

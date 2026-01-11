@@ -10,6 +10,9 @@ class RealTimeMessageService {
   final MessageService _messageService;
   final ConversationService _conversationService;
   final Logger _logger = Logger(output: ConsoleOutput());
+  final Map<String, bool> _onlineStates = {};
+
+  Map<String, bool> get onlineStates => onlineStates;
 
   RealTimeMessageService({
     required WebSocketManager webSocketManager,
@@ -51,12 +54,14 @@ class RealTimeMessageService {
   void _handleUserOnline(String userId) {
     _logger.i('User is now online: $userId');
     // Update UI or trigger appropriate actions
+    _onlineStates[userId] = true;
   }
 
   /// Handle user offline status change
   void _handleUserOffline(String userId) {
     _logger.i('User is now offline: $userId');
     // Update UI or trigger appropriate actions
+    _onlineStates[userId] = false;
   }
 
   /// Handle typing indicator

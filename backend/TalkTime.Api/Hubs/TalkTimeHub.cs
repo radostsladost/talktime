@@ -57,10 +57,22 @@ public class TalkTimeHub : Hub
         foreach (var conversation in conversations)
         {
             await Groups.AddToGroupAsync(Context.ConnectionId, $"conversation_{conversation.Id}");
+
+            // Notify friends/contacts that user is online
+            await Clients.OthersInGroup($"conversation_{conversation.Id}").SendAsync("UserOnline", new { userId });
+
+            if (conversation.Participants != null)
+            {
+                foreach (var participant in conversation.Participants)
+                {
+                    if (participant.UserId != userId && participant.User.IsOnline)
+                    {
+                        await Clients.Caller.SendAsync("UserOnline", new { participant.UserId });
+                    }
+                }
+            }
         }
 
-        // Notify friends/contacts that user is online
-        await Clients.Others.SendAsync("UserOnline", new { userId });
 
         // Send pending messages to the user
         var pendingMessages = await _messageRepository.GetPendingMessagesForUserAsync(userId);
@@ -125,7 +137,20 @@ public class TalkTimeHub : Hub
         }
 
         await Groups.AddToGroupAsync(Context.ConnectionId, $"conversation_{conversationId}");
+        await Clients.OthersInGroup($"conversation_{conversationId}").SendAsync("UserOnline", new { userId });
         _logger.LogInformation("User {UserId} joined conversation {ConversationId}", userId, conversationId);
+
+        var conversation = (await _conversationRepository.GetUserConversationsAsync(userId)).FirstOrDefault(i => i.Id == conversationId);
+        if (conversation?.Participants != null)
+        {
+            foreach (var participant in conversation.Participants)
+            {
+                if (participant.UserId != userId && participant.User.IsOnline)
+                {
+                    await Clients.Caller.SendAsync("UserOnline", new { participant.UserId });
+                }
+            }
+        }
     }
 
     /// <summary>

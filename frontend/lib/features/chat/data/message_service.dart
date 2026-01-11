@@ -1,5 +1,6 @@
 import 'package:talktime/core/network/api_client.dart';
 import 'package:talktime/core/constants/api_constants.dart';
+import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/features/chat/data/local_message_storage.dart';
 import 'package:talktime/shared/models/message.dart';
 import 'package:logger/logger.dart';
@@ -80,8 +81,10 @@ class MessageService {
   /// Syncs pending messages for all conversations
   /// Call this on app start, socket notification, or background task.
   Future<void> syncPendingMessages(String conversationId) async {
+    List<DbModels.Message> messages = [];
     try {
       // _logger.i('Syncing pending messages for conversation: $conversationId');
+      await AuthService().refreshTokenIfNeeded();
 
       // 1. Fetch from API for specific conversation
       final response = await _apiClient.get(
@@ -94,7 +97,7 @@ class MessageService {
         return;
       }
 
-      final messages = messagesJson
+      messages = messagesJson
           .map((json) => Message.fromJson(json as Map<String, dynamic>))
           .map(
             (message) => DbModels.Message()
@@ -113,14 +116,21 @@ class MessageService {
       _logger.i(
         'Synced and saved ${messages.length} pending messages for conversation: $conversationId',
       );
+    } catch (e) {
+      _logger.e(
+        'Error syncing pending messages for conversation $conversationId: $e',
+      );
+      // Do not rethrow; we don't want to crash the syncing cycle usually.
+    }
 
+    try {
       // 3. Mark messages as delivered to backend
       for (var msg in messages) {
         markAsDelivered(msg.externalId).ignore(); // Fire and forget
       }
     } catch (e) {
       _logger.e(
-        'Error syncing pending messages for conversation $conversationId: $e',
+        'Error marking messages as delivered for conversation $conversationId: $e',
       );
       // Do not rethrow; we don't want to crash the syncing cycle usually.
     }
