@@ -46,3 +46,25 @@ The user-facing application is developed using **Flutter**, enabling deployment 
 ## Documentation
 
 Work in progress.
+
+
+## TODO:
+
+### Android & iOS
+- Implement push notifications for incoming calls and messages.
+- Optimize performance for large conversations.
+- Add support for multiple languages.
+
+### iOS
+- Test with real devices.
+
+### Web
+- Implement push notifications for incoming calls and messages.
+- Add support for multiple languages.
+
+### Desktop
+- Implement push notifications for incoming calls and messages.
+- Optimize performance for large conversations.
+- Add support for multiple languages.
+- Add keyboard shortcuts.
+- Add overlay for incoming or ongoing calls (discord like).
