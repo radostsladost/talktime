@@ -8,6 +8,7 @@ class Message {
   String content = "";
   MessageSchemaMessageType type = MessageSchemaMessageType.text;
   int sentAt = 0;
+  int? readAt;
 
   Message();
 
@@ -25,6 +26,7 @@ class Message {
     this.content = content;
     this.type = type;
     this.sentAt = sentAt;
+    this.readAt = null;
   }
 
   // Convert a Dog into a Map. The keys must correspond to the names of the
@@ -38,6 +40,7 @@ class Message {
       'content': content,
       'type': type.index,
       'sentAt': sentAt,
+      'readAt': readAt,
     };
   }
 
@@ -55,6 +58,7 @@ class Message {
         ? MessageSchemaMessageType.values[typ]
         : MessageSchemaMessageType.text;
     sentAt = (map['sentAt'] ?? 0) as int;
+    readAt = map['readAt'] as int?;
   }
 
   // Implement toString to make it easier to see information about
@@ -68,7 +72,8 @@ class Message {
         ' senderId: $senderId,'
         ' content: $content,'
         ' type: $type,'
-        ' sentAt: $sentAt'
+        ' sentAt: $sentAt,'
+        ' readAt: $readAt'
         '}';
   }
 }

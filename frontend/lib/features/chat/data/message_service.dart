@@ -154,6 +154,11 @@ class MessageService {
     }
   }
 
+  Future<void> markAsRead(Message message) {
+    if (message.readAt != null) return Future.value();
+    return _localStorage.markAsRead(message.id);
+  }
+
   /// Send a new message to a conversation
   Future<Message> sendMessage(
     String conversationId,

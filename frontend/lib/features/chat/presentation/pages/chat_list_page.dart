@@ -135,8 +135,7 @@ class _ChatListPageState extends State<ChatListPage>
                     sender:
                         convo.participants?.first ??
                         User(id: '0', username: 'Unknown'),
-                    sentAt:
-                        convo.lastMessageAt ?? "",
+                    sentAt: convo.lastMessageAt ?? "",
                   );
 
               return Card(

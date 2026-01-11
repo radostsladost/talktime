@@ -5,6 +5,7 @@ import 'package:collection/collection.dart';
 import 'package:emoji_picker_flutter/emoji_picker_flutter.dart' as emoji_picker;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:intl/intl.dart';
 import 'package:logger/logger.dart';
 import 'package:talktime/core/websocket/websocket_manager.dart';
@@ -14,6 +15,7 @@ import 'package:talktime/features/chat/data/message_service.dart';
 import 'package:talktime/shared/models/conversation.dart';
 import 'package:talktime/shared/models/message.dart';
 import 'package:talktime/shared/models/user.dart';
+import 'package:visibility_detector/visibility_detector.dart';
 
 class MessageListPage extends StatefulWidget {
   final Conversation conversation;
@@ -34,16 +36,20 @@ class _MessageListPageState extends State<MessageListPage> {
   final Logger _logger = Logger(output: ConsoleOutput());
   List<ConferenceParticipant> _conferenceParticipants = [];
   bool _isEmojiPickerVisible = false;
+  final Map<String, Message> _newMessages = {};
+  int _upperBound = 50;
 
   @override
   void initState() {
     super.initState();
     _messageService = MessageService();
-    _messageService.getMessages(widget.conversation.id).then((messages) {
-      setState(() {
-        _messages = messages;
-      });
-    });
+    _messageService.getMessages(widget.conversation.id, take: _upperBound).then(
+      (messages) {
+        setState(() {
+          _messages = messages;
+        });
+      },
+    );
     _myId = '';
     (AuthService().getCurrentUser()).then(
       (user) => setState(() {
@@ -131,14 +137,16 @@ class _MessageListPageState extends State<MessageListPage> {
           _logger.e('Error syncing messages: $error');
         });
 
-    _messageService.getMessages(widget.conversation.id).then((messages) {
-      // Only update if messages have actually changed
-      if (!listEquals(_messages, messages)) {
-        setState(() {
-          _messages = messages;
-        });
-      }
-    });
+    _messageService.getMessages(widget.conversation.id, take: _upperBound).then(
+      (messages) {
+        // Only update if messages have actually changed
+        if (!listEquals(_messages, messages)) {
+          setState(() {
+            _messages = messages;
+          });
+        }
+      },
+    );
   }
 
   @override
@@ -190,6 +198,39 @@ class _MessageListPageState extends State<MessageListPage> {
       //   _messages = ft;
       // });
     }
+  }
+
+  bool _isLoadingExtra = false;
+  void _markAsRead(Message message) {
+    var index = _messages.indexWhere((m) => m.id == message.id);
+
+    if (index != -1 && index >= _messages.length - 2 && !_isLoadingExtra) {
+      _logger.d('Reading messages with upper bounds ${_messages.length - 2}');
+      _isLoadingExtra = true;
+      _upperBound = _messages.length + 50;
+      _messageService
+          .getMessages(widget.conversation.id, take: _upperBound)
+          .then((messages) {
+            setState(() {
+              _messages = messages;
+            });
+            _isLoadingExtra = false;
+          })
+          .catchError((error) {
+            _isLoadingExtra = false;
+            _logger.e('Failed to load more messages $error');
+            // Handle error
+          });
+    }
+
+    if (message.readAt != null) {
+      return;
+    }
+
+    setState(() {
+      _newMessages[message.id] = message;
+    });
+    _messageService.markAsRead(message);
   }
 
   User? get firstOtherUser =>
@@ -296,26 +337,53 @@ class _MessageListPageState extends State<MessageListPage> {
                 color: isOwn ? Colors.blue : Colors.grey[300],
                 borderRadius: BorderRadius.circular(20),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    message.content,
-                    style: TextStyle(
-                      color: isOwn ? Colors.white : Colors.black,
-                      fontSize: 16,
+
+              child: VisibilityDetector(
+                key: Key(message.id),
+                onVisibilityChanged: (VisibilityInfo info) {
+                  if (info.visibleBounds.size.height > 5) {
+                    _markAsRead(message);
+                  }
+                },
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      message.content,
+                      style: TextStyle(
+                        color: isOwn ? Colors.white : Colors.black,
+                        fontSize: 16,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    DateFormat('HH:mm').format(DateTime.parse(message.sentAt)),
-                    style: TextStyle(
-                      color: isOwn ? Colors.white70 : Colors.black54,
-                      fontSize: 12,
+                    const SizedBox(height: 4),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (_newMessages.containsKey(message.id) && !isOwn)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 4, top: 2),
+                            child: Icon(
+                              Icons.circle,
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.primaryContainer,
+                              size: 8,
+                            ),
+                          ),
+                        Text(
+                          DateFormat(
+                            'HH:mm',
+                          ).format(DateTime.parse(message.sentAt)),
+                          style: TextStyle(
+                            color: isOwn ? Colors.white70 : Colors.black54,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),

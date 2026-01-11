@@ -12,14 +12,21 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:sqflite_common_ffi_web/sqflite_ffi_web.dart';
 
 class LocalMessageStorage {
-  LocalMessageStorage();
+  static final LocalMessageStorage _instance = LocalMessageStorage._internal();
+  factory LocalMessageStorage() => _instance;
+  LocalMessageStorage._internal();
+  Database? _db;
 
   Future<Database> _initDb() async {
+    if (_db != null && _db!.isOpen) return _db!;
+
     sqfliteFfiInit();
     var factory = !kIsWeb ? databaseFactoryFfi : databaseFactoryFfiWeb;
     var dbPath = !kIsWeb
         ? join(await factory.getDatabasesPath(), 'msg_database.db')
         : 'msg_database.db';
+
+    Logger().i('Db path: $dbPath');
 
     final database = await factory.openDatabase(
       // Set the path to the database. Note: Using the `join` function from the
@@ -27,10 +34,10 @@ class LocalMessageStorage {
       // constructed for each platform.
       dbPath,
       options: OpenDatabaseOptions(
-        onCreate: (db, version) {
+        onCreate: (db, version) async {
           // Run the CREATE TABLE statement on the database.
-          return db.execute(
-            'CREATE TABLE message(id INTEGER PRIMARY KEY,'
+          await db.execute(
+            'CREATE TABLE IF NOT EXISTS message(id INTEGER PRIMARY KEY,'
             'externalId TEXT, '
             'conversationId TEXT, '
             'senderId TEXT, '
@@ -39,11 +46,20 @@ class LocalMessageStorage {
             'sentAt int)',
           );
         },
+        onUpgrade: (Database db, int oldVersion, int newVersion) async {
+          if (oldVersion <= 4) {
+            await db.execute(
+              'ALTER TABLE message ADD COLUMN readAt INTEGER DEFAULT null;',
+            );
+          }
+        },
         // Set the version. This executes the onCreate function and provides a
         // path to perform database upgrades and downgrades.
-        version: 1,
+        version: 4,
       ),
     );
+
+    _db = database;
     return database;
   }
 
@@ -54,19 +70,17 @@ class LocalMessageStorage {
     }
 
     var db = await _initDb();
-    try {
-      for (var message in messages) {
-        await db.insert(
-          'message',
-          message.toMap(),
-          conflictAlgorithm: ConflictAlgorithm.replace,
-        );
-      }
-    } finally {
-      db.close();
+    for (var message in messages) {
+      await db.insert(
+        'message',
+        message.toMap(),
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
     }
   }
 
+  /// Get messages for a conversation from LOCAL storage
+  // ... (rest of file for getMessages, getMessageById, deleteMessage)
   /// Get messages for a conversation from LOCAL storage
   Future<List<Message>> getMessages(
     String conversationId, {
@@ -74,36 +88,28 @@ class LocalMessageStorage {
     int limit = 50,
   }) async {
     var db = await _initDb();
-    try {
-      final List<Map<String, Object?>> messages = await db.query(
-        'message',
-        where: 'conversationId = ?',
-        whereArgs: [conversationId],
-        orderBy: 'sentAt DESC',
-        limit: 50,
-        offset: offset,
-      );
-      return messages.map((e) => Message.fromMap(e)).toList();
-    } finally {
-      db.close();
-    }
+    final List<Map<String, Object?>> messages = await db.query(
+      'message',
+      where: 'conversationId = ?',
+      whereArgs: [conversationId],
+      orderBy: 'sentAt DESC',
+      limit: limit,
+      offset: offset,
+    );
+    return messages.map((e) => Message.fromMap(e)).toList();
   }
 
   /// Get a specific message by external ID
   Future<Message?> getMessageById(String messageId) async {
     var db = await _initDb();
-    try {
-      final List<Map<String, Object?>> messages = await db.query(
-        'message',
-        where: 'externalId = ?',
-        whereArgs: [messageId],
-        orderBy: 'sentAt DESC',
-        limit: 1,
-      );
-      return messages.map((e) => Message.fromMap(e)).first;
-    } finally {
-      db.close();
-    }
+    final List<Map<String, Object?>> messages = await db.query(
+      'message',
+      where: 'externalId = ?',
+      whereArgs: [messageId],
+      orderBy: 'sentAt DESC',
+      limit: 1,
+    );
+    return messages.map((e) => Message.fromMap(e)).first;
   }
 
   /// Delete specific message locally
@@ -118,5 +124,16 @@ class LocalMessageStorage {
     } finally {
       db.close();
     }
+  }
+
+  /// Mark a specific message as read in local storage
+  Future<void> markAsRead(String messageExternalId) async {
+    var db = await _initDb();
+    await db.update(
+      'message',
+      {'readAt': DateTime.now().millisecondsSinceEpoch},
+      where: 'externalId = ?',
+      whereArgs: [messageExternalId],
+    );
   }
 }

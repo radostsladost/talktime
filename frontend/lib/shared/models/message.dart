@@ -11,6 +11,7 @@ class Message extends Equatable {
   final String content;
   final MessageType type;
   final String sentAt;
+  final String? readAt;
 
   const Message({
     required this.id,
@@ -19,6 +20,7 @@ class Message extends Equatable {
     required this.content,
     this.type = MessageType.text,
     required this.sentAt,
+    this.readAt = null,
   });
 
   factory Message.fromJson(Map<String, dynamic> json) {
@@ -40,6 +42,9 @@ class Message extends Equatable {
       content: msg.content,
       type: MessageType.text,
       sentAt: DateTime.fromMillisecondsSinceEpoch(msg.sentAt).toIso8601String(),
+      readAt: msg.readAt != null
+          ? DateTime.fromMillisecondsSinceEpoch(msg.readAt!).toIso8601String()
+          : null,
     );
   }
 
@@ -51,5 +56,6 @@ class Message extends Equatable {
     content,
     type,
     sentAt,
+    readAt,
   ];
 }
