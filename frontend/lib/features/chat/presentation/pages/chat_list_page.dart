@@ -47,6 +47,9 @@ class _ChatListPageState extends State<ChatListPage>
           .then((_) async {
             await _fetchLastMessages();
           })
+          .then((_) async {
+            await ConversationService().syncConversations();
+          })
           .catchError((error) {
             _logger.e('Error fetching conversations $error');
           });
@@ -55,6 +58,9 @@ class _ChatListPageState extends State<ChatListPage>
     _conversationsFuture
         .then((_) async {
           await _fetchLastMessages();
+        })
+        .then((_) async {
+          await ConversationService().syncConversations();
         })
         .catchError((error) {
           _logger.e('Error fetching conversations $error');
@@ -67,6 +73,9 @@ class _ChatListPageState extends State<ChatListPage>
       // App is reopened from the background
       _conversationsFuture = ConversationService().getConversations();
       _conversationsFuture
+          .then((_) async {
+            await ConversationService().syncConversations();
+          })
           .then((_) async {
             await _fetchLastMessages();
           })

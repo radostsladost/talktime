@@ -60,11 +60,29 @@ class LocalConversationStorage {
           'status': 'active', // Default status since not in model
         };
 
-        final conversationId = await txn.insert(
+        var byId = (await txn.query(
           'conversation',
-          conversationMap,
-          conflictAlgorithm: ConflictAlgorithm.replace,
-        );
+          where: 'externalId = ?',
+          whereArgs: [conversation.id],
+        )).firstOrNull;
+        int? conversationId;
+
+        if (byId == null) {
+          conversationId = await txn.insert(
+            'conversation',
+            conversationMap,
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
+        } else {
+          conversationMap['id'] = byId['id'];
+          conversationId = await txn.update(
+            'conversation',
+            conversationMap,
+            conflictAlgorithm: ConflictAlgorithm.replace,
+            where: 'id = ?',
+            whereArgs: [byId['id']],
+          );
+        }
 
         // Save participants
         if (conversation.participants.isNotEmpty) {
@@ -85,6 +103,34 @@ class LocalConversationStorage {
               },
               conflictAlgorithm: ConflictAlgorithm.replace,
             );
+
+            var user = (await txn.query(
+              'user',
+              where: 'externalId = ?',
+              whereArgs: [participant.id],
+            )).firstOrNull;
+            if (user == null) {
+              await txn.insert('user', {
+                'externalId': participant.id,
+                'username': participant.username,
+                'avatarUrl': participant.avatarUrl,
+                'isOnline': 0,
+                'email': null,
+              }, conflictAlgorithm: ConflictAlgorithm.replace);
+            } else {
+              await txn.update(
+                'user',
+                {
+                  'externalId': participant.id,
+                  'username': participant.username,
+                  'avatarUrl': participant.avatarUrl,
+                  'isOnline': 0,
+                  'email': null,
+                },
+                where: 'externalId = ?',
+                whereArgs: [participant.id],
+              );
+            }
           }
         }
       }
@@ -119,17 +165,6 @@ class LocalConversationStorage {
 
       // Create participant User objects from external IDs
       List<User> participantUsers = [];
-      // participants
-      //     .map((participantMap) {
-      //       final externalId = participantMap['userExternalId'] as String?;
-      //       if (externalId != null) {
-      //         return User(id: externalId, username: '', avatarUrl: null);
-      //       }
-      //       return User(id: '', username: '', avatarUrl: null);
-      //     })
-      //     .where((user) => user.id.isNotEmpty)
-      //     .toList();
-
       for (var participant in participants) {
         final user = (await db.query(
           'user',
@@ -187,16 +222,25 @@ class LocalConversationStorage {
     );
 
     // Create participant User objects from external IDs
-    final participantUsers = participants
-        .map((participantMap) {
-          final externalId = participantMap['userExternalId'] as String?;
-          if (externalId != null) {
-            return User(id: externalId, username: '', avatarUrl: null);
-          }
-          return User(id: '', username: '', avatarUrl: null);
-        })
-        .where((user) => user.id.isNotEmpty)
-        .toList();
+    List<User> participantUsers = [];
+    for (var participant in participants) {
+      final user = (await db.query(
+        'user',
+        where: 'externalId = ?',
+        whereArgs: [participant['userExternalId'] as String?],
+      )).firstOrNull;
+      if (user != null) {
+        participantUsers.add(
+          User(
+            id: user['externalId'] as String,
+            username: user['username'] as String,
+            avatarUrl: user['avatarUrl'] as String?,
+          ),
+        );
+      } else {
+        participantUsers.add(User(id: '', username: '', avatarUrl: null));
+      }
+    }
 
     return Conversation(
       id: conversation.id,

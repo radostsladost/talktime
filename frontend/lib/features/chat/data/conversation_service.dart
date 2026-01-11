@@ -66,6 +66,30 @@ class ConversationService {
     }
   }
 
+  /// Get all conversations for the current user
+  Future<List<Conversation>> syncConversations() async {
+    try {
+      await AuthService().refreshTokenIfNeeded();
+
+      _logger.d('Fetching conversations from API');
+      final response = await _apiClient.get(ApiConstants.conversations);
+
+      final List conversationsJson = response['data'] as List;
+      final conversations = conversationsJson
+          .map((json) => Conversation.fromJson(json as Map<String, dynamic>))
+          .toList();
+
+      // Save to local storage
+      await _localStorage.saveConversations(conversations);
+
+      _logger.d('Fetched ${conversations.length} conversations');
+      return conversations;
+    } catch (e) {
+      _logger.e('Error fetching conversations: $e');
+      rethrow;
+    }
+  }
+
   /// Get a specific conversation by ID
   Future<Conversation> getConversationById(String id) async {
     try {

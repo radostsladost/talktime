@@ -11,6 +11,7 @@ import 'package:logger/logger.dart';
 import 'package:talktime/core/websocket/websocket_manager.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/features/call/presentation/pages/conference_page.dart';
+import 'package:talktime/features/chat/data/conversation_service.dart';
 import 'package:talktime/features/chat/data/message_service.dart';
 import 'package:talktime/shared/models/conversation.dart';
 import 'package:talktime/shared/models/message.dart';
@@ -34,6 +35,7 @@ class _MessageListPageState extends State<MessageListPage> {
   late Timer _syncTimer;
   late MessageService _messageService;
   final Logger _logger = Logger(output: ConsoleOutput());
+  Map<String, User> _chatParticipants = {};
   List<ConferenceParticipant> _conferenceParticipants = [];
   bool _isEmojiPickerVisible = false;
   final Map<String, Message> _newMessages = {};
@@ -148,6 +150,16 @@ class _MessageListPageState extends State<MessageListPage> {
         }
       },
     );
+
+    ConversationService().getConversationById(widget.conversation.id).then((
+      conversation,
+    ) {
+      setState(() {
+        for (var participant in conversation.participants) {
+          _chatParticipants[participant.id] = participant;
+        }
+      });
+    });
   }
 
   @override
@@ -327,7 +339,10 @@ class _MessageListPageState extends State<MessageListPage> {
               padding: const EdgeInsets.only(right: 12),
               child: CircleAvatar(
                 radius: 16,
-                child: Text(message.sender.username[0]),
+                child: Text(
+                  (_chatParticipants[message.sender.id]?.username ??
+                      message.sender.username)[0],
+                ),
               ),
             ),
           Flexible(
