@@ -50,21 +50,18 @@ Work in progress.
 
 ## TODO:
 
-### Android & iOS
+### All Platforms:
 - Implement push notifications for incoming calls and messages.
-- Optimize performance for large conversations.
 - Add support for multiple languages.
+- Add support for theme switching.
+- Optimize performance for large conversations.
+- Add keyboard shortcuts.
+- Add support for profile view / edit.
+- Add support for settings / preferences.
 
-### iOS
+### Android & iOS
 - Test with real devices.
 
-### Web
-- Implement push notifications for incoming calls and messages.
-- Add support for multiple languages.
-
 ### Desktop
-- Implement push notifications for incoming calls and messages.
-- Optimize performance for large conversations.
-- Add support for multiple languages.
 - Add keyboard shortcuts.
 - Add overlay for incoming or ongoing calls (discord like).
