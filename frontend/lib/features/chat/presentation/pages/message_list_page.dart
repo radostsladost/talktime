@@ -29,6 +29,7 @@ class _MessageListPageState extends State<MessageListPage> {
   late Timer _syncTimer;
   late MessageService _messageService;
   final Logger _logger = Logger(output: ConsoleOutput());
+  List<ConferenceParticipant> _conferenceParticipants = [];
 
   @override
   void initState() {
@@ -70,6 +71,13 @@ class _MessageListPageState extends State<MessageListPage> {
               () => setState(() {}),
             );
           });
+          mngr.onConferenceParticipant(_onConferenceParticipantUpdate);
+          // Load initial conference participants if any
+          setState(() {
+            _conferenceParticipants = mngr.getConferenceParticipants(
+              widget.conversation.id,
+            );
+          });
           //TODO: mngr.onTypingIndicator(_handleTypingIndicator);
         })
         .catchError((error) {
@@ -82,6 +90,20 @@ class _MessageListPageState extends State<MessageListPage> {
       _messagesFuture.add(p1);
     });
     _syncMessages();
+  }
+
+  void _onConferenceParticipantUpdate(
+    String roomId,
+    ConferenceParticipant participant,
+    String action,
+  ) {
+    if (roomId == widget.conversation.id) {
+      setState(() {
+        _conferenceParticipants = WebSocketManager().getConferenceParticipants(
+          widget.conversation.id,
+        );
+      });
+    }
   }
 
   Future<void> _syncMessages() async {
@@ -104,6 +126,7 @@ class _MessageListPageState extends State<MessageListPage> {
     final mngr = WebSocketManager();
     mngr.leaveConversation(widget.conversation.id);
     mngr.removeMessageReceivedCallback(_onSignalMsgReceived);
+    mngr.removeConferenceParticipantCallback(_onConferenceParticipantUpdate);
   }
 
   void _sendMessage() async {
@@ -124,6 +147,7 @@ class _MessageListPageState extends State<MessageListPage> {
 
     // Refresh UI with new message
     final ft = List<Message>.from(_messagesFuture);
+    _messagesFuture.add(newMessage);
     setState(() {
       _messagesFuture = ft;
     });
@@ -163,6 +187,11 @@ class _MessageListPageState extends State<MessageListPage> {
         ? (online == true ? 'Online' : 'Offline')
         : '${widget.conversation.participants.length} members' +
               ((online as int) > 2 ? '(${online} online)' : '');
+    final onlineColor = online is bool
+        ? (online == true
+              ? Colors.green
+              : Theme.of(context).textTheme.labelSmall?.color)
+        : Theme.of(context).textTheme.labelSmall?.color;
     final msgs = Future.value(_messagesFuture);
 
     return Scaffold(
@@ -170,7 +199,12 @@ class _MessageListPageState extends State<MessageListPage> {
         title: Column(
           children: [
             Text(title),
-            Text(onlineText, style: Theme.of(context).textTheme.labelSmall),
+            Text(
+              onlineText,
+              style: Theme.of(
+                context,
+              ).textTheme.labelSmall?.copyWith(color: onlineColor),
+            ),
           ],
         ),
         leading: IconButton(
@@ -186,6 +220,9 @@ class _MessageListPageState extends State<MessageListPage> {
       ),
       body: Column(
         children: [
+          // Conference indicator
+          if (_conferenceParticipants.isNotEmpty) _buildConferenceIndicator(),
+
           // Messages List
           Expanded(
             child: FutureBuilder<List<Message>>(
@@ -290,6 +327,86 @@ class _MessageListPageState extends State<MessageListPage> {
           ),
           IconButton(icon: const Icon(Icons.send), onPressed: _sendMessage),
         ],
+      ),
+    );
+  }
+
+  Widget _buildConferenceIndicator() {
+    return GestureDetector(
+      onTap: () => _startCall(),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.green.shade50,
+          border: Border(
+            bottom: BorderSide(color: Colors.green.shade200, width: 1),
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.videocam, color: Colors.green.shade700, size: 20),
+            const SizedBox(width: 8),
+            // Stacked avatars like Telegram
+            SizedBox(
+              width: _conferenceParticipants.length > 3
+                  ? 60
+                  : _conferenceParticipants.length * 20.0,
+              height: 24,
+              child: Stack(
+                children: [
+                  for (
+                    int i = 0;
+                    i < _conferenceParticipants.length && i < 3;
+                    i++
+                  )
+                    Positioned(
+                      left: i * 14.0,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: Colors.green.shade50,
+                            width: 2,
+                          ),
+                        ),
+                        child: CircleAvatar(
+                          radius: 10,
+                          backgroundColor: Colors.green.shade300,
+                          child: Text(
+                            _conferenceParticipants[i].username[0]
+                                .toUpperCase(),
+                            style: const TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text(
+                _conferenceParticipants.length == 1
+                    ? '${_conferenceParticipants.first.username} is in a call'
+                    : '${_conferenceParticipants.length} people in a call',
+                style: TextStyle(
+                  color: Colors.green.shade700,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+            Text(
+              'Tap to join',
+              style: TextStyle(color: Colors.green.shade600, fontSize: 12),
+            ),
+            Icon(Icons.chevron_right, color: Colors.green.shade600, size: 18),
+          ],
+        ),
       ),
     );
   }

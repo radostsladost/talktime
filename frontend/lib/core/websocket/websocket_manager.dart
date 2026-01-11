@@ -28,10 +28,20 @@ class WebSocketManager {
   final List<Function(String)> _onUserOnlineCallbacks = [];
   final List<Function(String)> _onUserOfflineCallbacks = [];
   final List<Function(String, bool)> _onTypingIndicatorCallbacks = [];
+  final List<Function(String, ConferenceParticipant, String)>
+  _onConferenceParticipantCallbacks = [];
   final List<String> _cachedConversations = [];
   final Map<String, bool> _onlineStates = {};
+  final Map<String, List<ConferenceParticipant>> _conferenceParticipants = {};
 
   Map<String, bool> get onlineStates => _onlineStates;
+  Map<String, List<ConferenceParticipant>> get conferenceParticipants =>
+      _conferenceParticipants;
+
+  /// Get participants in a specific room/conversation conference
+  List<ConferenceParticipant> getConferenceParticipants(String roomId) {
+    return _conferenceParticipants[roomId] ?? [];
+  }
 
   /// Initialize WebSocket connection with SignalR
   Future<void> initialize() async {
@@ -169,6 +179,56 @@ class WebSocketManager {
         }
         _logger.i(
           'Typing indicator: $userId in $conversationId - ${isTyping ? "typing" : "stopped"}',
+        );
+      }
+    });
+
+    // Handle participant joined conference
+    _hubConnection!.on('ParticipantJoined', (args) {
+      final data = args?.first as Map<String, dynamic>?;
+      _logger.d('Participant joined event: $data');
+      if (data != null) {
+        final roomId = data['roomId'] as String;
+        final userData = data['user'] as Map<String, dynamic>;
+        final participant = ConferenceParticipant.fromJson(userData);
+
+        _conferenceParticipants.putIfAbsent(roomId, () => []);
+        if (!_conferenceParticipants[roomId]!.any(
+          (p) => p.id == participant.id,
+        )) {
+          _conferenceParticipants[roomId]!.add(participant);
+        }
+
+        for (var callback in _onConferenceParticipantCallbacks) {
+          callback(roomId, participant, 'joined');
+        }
+        _logger.i(
+          'Participant joined conference: ${participant.username} in room $roomId',
+        );
+      }
+    });
+
+    // Handle participant left conference
+    _hubConnection!.on('ParticipantLeft', (args) {
+      final data = args?.first as Map<String, dynamic>?;
+      _logger.d('Participant left event: $data');
+      if (data != null) {
+        final roomId = data['roomId'] as String;
+        final userData = data['user'] as Map<String, dynamic>;
+        final participant = ConferenceParticipant.fromJson(userData);
+
+        _conferenceParticipants[roomId]?.removeWhere(
+          (p) => p.id == participant.id,
+        );
+        if (_conferenceParticipants[roomId]?.isEmpty ?? false) {
+          _conferenceParticipants.remove(roomId);
+        }
+
+        for (var callback in _onConferenceParticipantCallbacks) {
+          callback(roomId, participant, 'left');
+        }
+        _logger.i(
+          'Participant left conference: ${participant.username} from room $roomId',
         );
       }
     });
@@ -331,6 +391,20 @@ class WebSocketManager {
     _onTypingIndicatorCallbacks.remove(callback);
   }
 
+  /// Add callback for conference participant updates
+  void onConferenceParticipant(
+    Function(String, ConferenceParticipant, String) callback,
+  ) {
+    _onConferenceParticipantCallbacks.add(callback);
+  }
+
+  /// Remove callback for conference participant updates
+  void removeConferenceParticipantCallback(
+    Function(String, ConferenceParticipant, String) callback,
+  ) {
+    _onConferenceParticipantCallbacks.remove(callback);
+  }
+
   /// Dispose resources
   void dispose() {
     _logger.i('Disposing WebSocket manager');
@@ -342,5 +416,28 @@ class WebSocketManager {
     _onUserOnlineCallbacks.clear();
     _onUserOfflineCallbacks.clear();
     _onTypingIndicatorCallbacks.clear();
+    _onConferenceParticipantCallbacks.clear();
+    _conferenceParticipants.clear();
+  }
+}
+
+/// Represents a participant in a conference call
+class ConferenceParticipant {
+  final String id;
+  final String username;
+  final String? avatarUrl;
+
+  ConferenceParticipant({
+    required this.id,
+    required this.username,
+    this.avatarUrl,
+  });
+
+  factory ConferenceParticipant.fromJson(Map<String, dynamic> json) {
+    return ConferenceParticipant(
+      id: json['id'] as String,
+      username: json['username'] as String,
+      avatarUrl: json['avatarUrl'] as String?,
+    );
   }
 }

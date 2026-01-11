@@ -290,6 +290,12 @@ public class TalkTimeHub : Hub
             "joined"
         ));
 
+        await Clients.Group($"conversation_{roomId}").SendAsync("ParticipantJoined", new RoomParticipantUpdate(
+            roomId,
+            userDto,
+            "joined"
+        ));
+
         // Send current participants to the new user
         var participants = roomState.Participants.Values.ToList();
         await Clients.Caller.SendAsync("RoomJoined", new RoomInfo(
@@ -306,6 +312,12 @@ public class TalkTimeHub : Hub
                 continue;
 
             await Clients.Caller.SendAsync("ParticipantJoined", new RoomParticipantUpdate(
+                roomId,
+                c.Value,
+                "joined"
+            ));
+
+            await Clients.Group($"conversation_{roomId}").SendAsync("ParticipantJoined", new RoomParticipantUpdate(
                 roomId,
                 c.Value,
                 "joined"
@@ -481,6 +493,11 @@ public class TalkTimeHub : Hub
 
         // Notify other participants
         await Clients.Group($"room_{roomId}").SendAsync("ParticipantLeft", new RoomParticipantUpdate(
+            roomId,
+            userDto,
+            "left"
+        ));
+        await Clients.Group($"conversation_{roomId}").SendAsync("ParticipantLeft", new RoomParticipantUpdate(
             roomId,
             userDto,
             "left"
