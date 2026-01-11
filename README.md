@@ -22,19 +22,25 @@ The user-facing application is developed using **Flutter**, enabling deployment 
 - The core logic and UI reside within the `talktime/frontend/lib` directory.
 - Platform-specific configurations and dependencies are managed in directories like `talktime/frontend/android`, `talktime/frontend/ios`, and configuration files like `talktime/frontend/pubspec.yaml`.
 
+### Screenshots
+
 - Main Menu
 ![Main Menu](https://github.com/radostsladost/talktime/blob/main/docs/main_menu.jpg "Main Menu")
 
 - Chat with messages
+
 ![chats](https://github.com/radostsladost/talktime/blob/main/docs/chats.jpg "chats")
 
 - Conference tap to join
+
 ![conference_tap_to_join](https://github.com/radostsladost/talktime/blob/main/docs/conference_tap_to_join.jpg "conference_tap_to_join")
 
 - Incoming call screen
+
 ![incoming_call](https://github.com/radostsladost/talktime/blob/main/docs/incoming_call.jpg "incoming_call")
 
 - Ongoing call screen
+
 ![ongoing_call](https://github.com/radostsladost/talktime/blob/main/docs/ongoing_call.jpg "ongoing_call")
 
 ## Documentation
