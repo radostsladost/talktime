@@ -59,6 +59,7 @@ class _MessageListPageState extends State<MessageListPage> {
 
     // Start periodic sync for this conversation
     _syncTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (!mounted) return;
       _syncMessages();
     });
 
@@ -75,20 +76,20 @@ class _MessageListPageState extends State<MessageListPage> {
             // Only trigger update if this user is part of our conversation
             if (widget.conversation.participants?.any((p) => p.id == userId) ==
                 true) {
-              Future.delayed(
-                const Duration(milliseconds: 300),
-                () => setState(() {}),
-              );
+              Future.delayed(const Duration(milliseconds: 300), () {
+                if (!mounted) return;
+                setState(() {});
+              });
             }
           });
           mngr.onUserOnline((userId) {
             // Only trigger update if this user is part of our conversation
             if (widget.conversation.participants?.any((p) => p.id == userId) ==
                 true) {
-              Future.delayed(
-                const Duration(milliseconds: 300),
-                () => setState(() {}),
-              );
+              Future.delayed(const Duration(milliseconds: 300), () {
+                if (!mounted) return;
+                setState(() {});
+              });
             }
           });
           mngr.onConferenceParticipant(_onConferenceParticipantUpdate);

@@ -186,7 +186,9 @@ class ApiClient {
         _logger.i('Tokens refreshed successfully');
         return true;
       } else {
-        _logger.e('Failed to refresh token: ${response.statusCode}');
+        _logger.e(
+          'Failed to refresh token: ${response.statusCode} ${response.body}',
+        );
         await clearAllTokens();
         return false;
       }

@@ -1,14 +1,10 @@
 import 'dart:async';
 
 import 'package:logger/web.dart';
-import 'package:path/path.dart';
-import 'package:sqflite/sqflite.dart';
-
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
-import 'package:sqflite_common_ffi_web/sqflite_ffi_web.dart';
 import 'package:talktime/shared/models/conversation.dart';
 import 'package:talktime/shared/models/user.dart';
+import 'package:talktime/features/chat/data/database/database_helper.dart';
 
 class ConversationParticipant {
   int id = 0;
@@ -37,36 +33,17 @@ class LocalConversationStorage {
       LocalConversationStorage._internal();
   factory LocalConversationStorage() => _instance;
   LocalConversationStorage._internal();
-  Database? _db;
+  DatabaseHelper _databaseHelper = DatabaseHelper();
 
-  Future<Database> _initDb() async {
-    if (_db != null && _db!.isOpen) return _db!;
-
-    sqfliteFfiInit();
-    var factory = !kIsWeb ? databaseFactoryFfi : databaseFactoryFfiWeb;
-    var dbPath = !kIsWeb
-        ? join(await factory.getDatabasesPath(), 'msg_database.db')
-        : 'msg_database.db';
-
-    Logger().i('Db path: $dbPath');
-
-    final database = await factory.openDatabase(
-      dbPath,
-      options: OpenDatabaseOptions(
-        // The tables are already created in LocalMessageStorage
-        version: 6,
-      ),
-    );
-
-    _db = database;
-    return database;
+  Future<Database> _getDb() async {
+    return await _databaseHelper.getDb();
   }
 
   /// Save a list of conversations (Upsert: Insert or Update)
   Future<void> saveConversations(List<Conversation> conversations) async {
     if (conversations.isEmpty) return;
 
-    var db = await _initDb();
+    var db = await _getDb();
     await db.transaction((txn) async {
       for (var conversation in conversations) {
         // Save conversation
@@ -121,7 +98,7 @@ class LocalConversationStorage {
 
   /// Get all conversations from local storage
   Future<List<Conversation>> getConversations() async {
-    var db = await _initDb();
+    var db = await _getDb();
 
     // Get conversations
     final List<Map<String, Object?>> conversations = await db.query(
@@ -141,16 +118,36 @@ class LocalConversationStorage {
       );
 
       // Create participant User objects from external IDs
-      final participantUsers = participants
-          .map((participantMap) {
-            final externalId = participantMap['userExternalId'] as String?;
-            if (externalId != null) {
-              return User(id: externalId, username: '', avatarUrl: null);
-            }
-            return User(id: '', username: '', avatarUrl: null);
-          })
-          .where((user) => user.id.isNotEmpty)
-          .toList();
+      List<User> participantUsers = [];
+      // participants
+      //     .map((participantMap) {
+      //       final externalId = participantMap['userExternalId'] as String?;
+      //       if (externalId != null) {
+      //         return User(id: externalId, username: '', avatarUrl: null);
+      //       }
+      //       return User(id: '', username: '', avatarUrl: null);
+      //     })
+      //     .where((user) => user.id.isNotEmpty)
+      //     .toList();
+
+      for (var participant in participants) {
+        final user = (await db.query(
+          'user',
+          where: 'externalId = ?',
+          whereArgs: [participant['userExternalId'] as String?],
+        )).firstOrNull;
+        if (user != null) {
+          participantUsers.add(
+            User(
+              id: user['externalId'] as String,
+              username: user['username'] as String,
+              avatarUrl: user['avatarUrl'] as String?,
+            ),
+          );
+        } else {
+          participantUsers.add(User(id: '', username: '', avatarUrl: null));
+        }
+      }
 
       // Create new conversation with participants
       result.add(
@@ -170,7 +167,7 @@ class LocalConversationStorage {
 
   /// Get a specific conversation by external ID
   Future<Conversation?> getConversationByExternalId(String externalId) async {
-    var db = await _initDb();
+    var db = await _getDb();
     final List<Map<String, Object?>> conversations = await db.query(
       'conversation',
       where: 'externalId = ?',
@@ -216,7 +213,7 @@ class LocalConversationStorage {
     String externalId,
     String lastMessageAt,
   ) async {
-    var db = await _initDb();
+    var db = await _getDb();
     await db.update(
       'conversation',
       {'lastMessageAt': DateTime.parse(lastMessageAt).millisecondsSinceEpoch},
@@ -227,7 +224,7 @@ class LocalConversationStorage {
 
   /// Delete a conversation locally
   Future<void> deleteConversation(String externalId) async {
-    var db = await _initDb();
+    var db = await _getDb();
     await db.transaction((txn) async {
       // First get the conversation ID
       final List<Map<String, Object?>> conversations = await txn.query(
