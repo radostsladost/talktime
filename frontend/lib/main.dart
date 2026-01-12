@@ -6,16 +6,15 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
+import 'package:talktime/core/global_key.dart';
 import 'package:talktime/core/websocket/websocket_manager.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/features/auth/presentation/pages/login_page.dart';
+import 'package:talktime/features/call/data/call_service.dart';
 import 'package:talktime/features/call/presentation/pages/conference_page.dart';
 import 'package:talktime/features/chat/presentation/pages/chat_list_page.dart';
 import 'package:talktime/features/call/data/incoming_call_manager.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-
-/// Global navigator key for showing incoming calls from anywhere
-final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 Future<void> main() async {
   await dotenv.load(fileName: ".env");
@@ -28,8 +27,23 @@ Future<void> main() async {
   runApp(const MyApp());
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  @override
+  void initState() {
+    var listener = AppLifecycleListener(
+      onDetach: () {
+        CallService().endCall();
+      },
+      // onRestart: () => _handleTransition('restart'),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {

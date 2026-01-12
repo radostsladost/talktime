@@ -1,11 +1,14 @@
 // conference_page.dart
 import 'dart:async';
+import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:logger/web.dart';
 import 'package:talktime/features/call/data/call_service.dart';
 import 'package:talktime/features/call/data/signaling_service.dart';
 import 'package:talktime/features/call/presentation/remote_participant_tile.dart';
+import 'package:talktime/features/call/presentation/widgets/screen_window_chooser_popup.dart';
 
 class ConferencePage extends StatefulWidget {
   final String roomId;
@@ -32,6 +35,7 @@ class _ConferencePageState extends State<ConferencePage> {
   // Stream Subscriptions for dynamic updates
   StreamSubscription? _stateSubscription;
   StreamSubscription? _localStreamSubscription;
+  StreamSubscription? _cachedVideoSubscription;
   StreamSubscription? _remoteStreamsSubscription;
   StreamSubscription? _micSubscription;
   StreamSubscription? _camSubscription;
@@ -70,6 +74,7 @@ class _ConferencePageState extends State<ConferencePage> {
     // Cancel existing listeners if method is called multiple times unexpectedly
     _stateSubscription?.cancel();
     _localStreamSubscription?.cancel();
+    _cachedVideoSubscription?.cancel();
     _remoteStreamsSubscription?.cancel();
     _micSubscription?.cancel();
     _camSubscription?.cancel();
@@ -84,6 +89,14 @@ class _ConferencePageState extends State<ConferencePage> {
 
     // Listen for local stream changes (rebuild when source object changes)
     _localStreamSubscription = _callService.localStreamStream.listen((stream) {
+      setState(() {});
+      _attachExistingStreams();
+    });
+
+    // Listen for local stream changes (rebuild when source object changes)
+    _cachedVideoSubscription = _callService.cachedVideoStreamStream.listen((
+      stream,
+    ) {
       setState(() {});
       _attachExistingStreams();
     });
@@ -105,23 +118,27 @@ class _ConferencePageState extends State<ConferencePage> {
   }
 
   void _attachExistingStreams() {
-    // 1. Attach local stream if it exists right away
-    final currentLocalStream = _callService.localStream;
-    if (currentLocalStream != null && _localRenderer.srcObject == null) {
-      _localRenderer.srcObject = currentLocalStream;
-    }
+    try {
+      // 1. Attach local stream if it exists right away
+      final currentLocalStream = _callService.cachedVideoStream;
+      if (currentLocalStream != null && _localRenderer.srcObject == null) {
+        _localRenderer.srcObject = currentLocalStream;
+      }
 
-    // Set initial mic/cam state reflected in controls based on service state
-    if (_micSubscription == null) {
-      // Ensure mic state is set if control stream hasn't started yet
-      // Though StreamBuilder should handle initialData={false}, this is for safety
-      _callService.micStateStream
-          .listen((isMuted) => setState(() {}))
-          .cancel(); // Only to check value, canceling immediately
-    }
+      // Set initial mic/cam state reflected in controls based on service state
+      if (_micSubscription == null) {
+        // Ensure mic state is set if control stream hasn't started yet
+        // Though StreamBuilder should handle initialData={false}, this is for safety
+        _callService.micStateStream
+            .listen((isMuted) => setState(() {}))
+            .cancel(); // Only to check value, canceling immediately
+      }
 
-    // 2. Initialize and attach all existing remote renderers
-    _handleRemoteStreamsUpdate(_callService.remoteStreams);
+      // 2. Initialize and attach all existing remote renderers
+      _handleRemoteStreamsUpdate(_callService.remoteStreams);
+    } catch (error) {
+      _logger.e('Error attaching existing streams: $error');
+    }
   }
 
   void _handleRemoteStreamsUpdate(Map<String, MediaStream> streams) {
@@ -162,6 +179,7 @@ class _ConferencePageState extends State<ConferencePage> {
     // IMPORTANT: Cancel subscriptions
     _stateSubscription?.cancel();
     _localStreamSubscription?.cancel();
+    _cachedVideoSubscription?.cancel();
     _remoteStreamsSubscription?.cancel();
     _micSubscription?.cancel();
     _camSubscription?.cancel();
@@ -181,8 +199,8 @@ class _ConferencePageState extends State<ConferencePage> {
         children: [
           // REMOTE STREAMS GRID
           StreamBuilder<Map<String, MediaStream>>(
-            stream: CallService().remoteStreamsStream,
-            initialData: CallService().remoteStreams,
+            stream: _callService.remoteStreamsStream,
+            initialData: _callService.remoteStreams,
             builder: (context, snapshot) {
               final streams = snapshot.data ?? {};
               return _buildGrid(streams);
@@ -197,10 +215,11 @@ class _ConferencePageState extends State<ConferencePage> {
               width: 100,
               height: 150,
               child: StreamBuilder<MediaStream?>(
-                stream: CallService().localStreamStream,
-                initialData: CallService().localStream,
+                stream: _callService.cachedVideoStreamStream,
+                initialData: _callService.cachedVideoStream,
                 builder: (context, snapshot) {
                   final stream = snapshot.data;
+                  print('Local stream: $stream');
 
                   if (stream != null) {
                     // CRITICAL FIX: Only update srcObject if reference changes
@@ -208,7 +227,10 @@ class _ConferencePageState extends State<ConferencePage> {
                     if (_localRenderer.srcObject != stream) {
                       _localRenderer.srcObject = stream;
                     }
-                    return RTCVideoView(_localRenderer, mirror: true);
+                    return RTCVideoView(
+                      _localRenderer,
+                      mirror: _callService.isScreenSharingValue,
+                    );
                   }
 
                   // If stream is null, display placeholder.
@@ -219,8 +241,8 @@ class _ConferencePageState extends State<ConferencePage> {
             ),
           ),
 
-          // CONTROLS
-          Positioned(bottom: 20, left: 0, right: 0, child: _buildControls()),
+          // CONTROLS AT BOTTOM
+          Positioned(left: 0, right: 0, bottom: 20, child: _buildControls()),
         ],
       ),
     );
@@ -233,7 +255,7 @@ class _ConferencePageState extends State<ConferencePage> {
     // 1. Prepare data
     final participants = streams.keys.toList();
     // Use the service to get user info (names)
-    final userInfoMap = CallService().participantInfo;
+    final userInfoMap = _callService.participantInfo;
 
     // 2. Calculate Grid Dimensions
     // Note: We don't include local participant in this count if it's in a separate PiP view.
@@ -291,32 +313,104 @@ class _ConferencePageState extends State<ConferencePage> {
     );
   }
 
+  void _toggleScreenSharing() async {
+    if (!kIsWeb && Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      if (_callService.isScreenSharingValue) {
+        _callService.toggleScreenShare().catchError((error) {
+          _logger.e('Error toggling screen share: $error');
+        });
+        return;
+      }
+
+      final selectedSource = await ScreenWindowPopupChooser.show(
+        context: context,
+      );
+      if (selectedSource != null) {
+        _callService.toggleScreenShare(source: selectedSource).catchError((
+          error,
+        ) {
+          _logger.e('Error starting screen share: $error');
+        });
+      }
+    } else {
+      _callService.toggleScreenShare().catchError((error) {
+        _logger.e('Error toggling screen share: $error');
+      });
+    }
+  }
+
+  void _showAudioDeviceSelector() {
+    // TODO: Implement audio device selection
+    _logger.i('Audio device selector not yet implemented');
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Audio device selection coming soon')),
+    );
+  }
+
   Widget _buildControls() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        StreamBuilder<bool>(
-          stream: CallService().micStateStream,
-          initialData: false,
-          builder: (context, snapshot) {
-            final isMuted = snapshot.data ?? false;
-            return IconButton(
-              icon: Icon(isMuted ? Icons.mic_off : Icons.mic),
-              color: isMuted ? Colors.red : Colors.white,
-              onPressed: () => CallService().toggleMic(),
-            );
-          },
-        ),
-        IconButton(
-          icon: const Icon(Icons.call_end, color: Colors.red),
-          onPressed: () {
-            CallService().endCall().catchError((error) {
-              _logger.e('Error ending call: $error');
-            });
-            Navigator.pop(context);
-          },
-        ),
-      ],
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          if (kIsWeb || Platform.isAndroid || Platform.isIOS)
+            IconButton(
+              icon: const Icon(Icons.switch_camera),
+              color: Colors.white,
+              onPressed: () => _callService.changeCameraDevice(),
+            ),
+          StreamBuilder<bool>(
+            stream: _callService.camStateStream,
+            initialData: false,
+            builder: (context, snapshot) {
+              final isCameraOn = snapshot.data ?? false;
+              return IconButton(
+                icon: Icon(!isCameraOn ? Icons.videocam_off : Icons.videocam),
+                color: !isCameraOn ? Colors.red : Colors.white,
+                onPressed: () => _callService.toggleCamera(),
+              );
+            },
+          ),
+          StreamBuilder<bool>(
+            stream: _callService.micStateStream,
+            initialData: false,
+            builder: (context, snapshot) {
+              final isMuted = !(snapshot.data ?? false);
+              return IconButton(
+                icon: Icon(isMuted ? Icons.mic_off : Icons.mic),
+                color: isMuted ? Colors.red : Colors.white,
+                onPressed: () => _callService.toggleMic(),
+              );
+            },
+          ),
+          StreamBuilder<bool>(
+            stream: _callService.isScreenSharing,
+            initialData: false,
+            builder: (context, snapshot) {
+              final isScreenSharing = snapshot.data ?? false;
+              return IconButton(
+                icon: Icon(Icons.screen_share),
+                color: isScreenSharing ? Colors.green : Colors.white,
+                onPressed: _toggleScreenSharing,
+              );
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.volume_up),
+            color: Colors.white,
+            onPressed: _showAudioDeviceSelector,
+          ),
+          IconButton(
+            icon: const Icon(Icons.call_end, color: Colors.red),
+            onPressed: () {
+              _callService.endCall().catchError((error) {
+                _logger.e('Error ending call: $error');
+              });
+              Navigator.pop(context);
+            },
+          ),
+        ],
+      ),
     );
   }
 }

@@ -3,14 +3,17 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:path/path.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:logger/logger.dart';
 import 'package:talktime/features/call/data/signaling_service.dart';
 import 'package:talktime/core/network/api_client.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/shared/models/user.dart';
+import 'package:talktime/core/global_key.dart';
 
 enum CallState { idle, connecting, connected, ended }
 
@@ -26,6 +29,7 @@ class CallService {
   // State Variables
   CallState _state = CallState.idle;
   MediaStream? _localStream;
+  MediaStream? _cachedVideoStream;
   final Map<String, RTCPeerConnection> _peerConnections = {};
   final Map<String, MediaStream> _remoteStreams = {};
   final Map<String, UserInfo> _participantInfo = {};
@@ -34,29 +38,36 @@ class CallService {
   // Stream Controllers (To update UI)
   final _stateController = StreamController<CallState>.broadcast();
   final _localStreamController = StreamController<MediaStream?>.broadcast();
+  final _cachedVideoStreamController =
+      StreamController<MediaStream?>.broadcast();
   final _remoteStreamsController =
       StreamController<Map<String, MediaStream>>.broadcast();
   final _micStateController = StreamController<bool>.broadcast();
   final _camStateController = StreamController<bool>.broadcast();
+  final _isScreenSharingController = StreamController<bool>.broadcast();
 
   // Public Getters
+  Stream<bool> get isScreenSharing => _isScreenSharingController.stream;
+  bool get isScreenSharingValue => _isScreenSharing;
   Stream<CallState> get callStateStream => _stateController.stream;
   Stream<MediaStream?> get localStreamStream => _localStreamController.stream;
+  Stream<MediaStream?> get cachedVideoStreamStream =>
+      _cachedVideoStreamController.stream;
   Stream<Map<String, MediaStream>> get remoteStreamsStream =>
       _remoteStreamsController.stream;
   Stream<bool> get micStateStream => _micStateController.stream;
   Stream<bool> get camStateStream => _camStateController.stream;
-
   // State Getters for UI initialization on navigation return
   MediaStream? get localStream => _localStream;
+  MediaStream? get cachedVideoStream => _cachedVideoStream;
   Map<String, MediaStream> get remoteStreams => Map.from(_remoteStreams);
-
   CallState get currentState => _state;
   Map<String, UserInfo> get participantInfo => _participantInfo;
 
   String? _currentRoomId;
   bool _isMuted = false;
   bool _isCameraOff = false;
+  bool _isScreenSharing = false;
   Timer? _timer;
   User? _currentUser;
 
@@ -89,6 +100,7 @@ class CallService {
     try {
       // 1. Get Permissions & Media
       await _getUserMedia();
+      await activateCameraOrScreenShare(newScreenShareValue: false);
       await _startBackgroundService(roomId);
 
       // 2. Setup initial participants
@@ -100,6 +112,7 @@ class CallService {
           await _createPeerConnection(user.id);
         }
       }
+      desktopCapturer.getSources(types: [SourceType.Screen, SourceType.Window]);
 
       // 3. Join Room via Signaling
       await _signalingService?.createRoom(roomId); // Or joinRoom based on logic
@@ -142,6 +155,12 @@ class CallService {
       _timer = null;
     }
 
+    if (_cachedVideoStream != null) {
+      _cachedVideoStream?.dispose();
+      _cachedVideoStream = null;
+      _cachedVideoStreamController.sink.add(null);
+    }
+
     // Clean up WebRTC
     if (_localStream != null) {
       for (var track in _localStream!.getTracks()) {
@@ -175,13 +194,176 @@ class CallService {
   // MEDIA CONTROL
   // =========================================================
 
+  Future<void> toggleScreenShare({DesktopCapturerSource? source}) async {
+    await activateCameraOrScreenShare(newScreenShareValue: !_isScreenSharing);
+  }
+
+  Future<void> activateCameraOrScreenShare({
+    DesktopCapturerSource? source,
+    bool? newScreenShareValue,
+  }) async {
+    _logger.i('activateCameraOrScreenShare $_isScreenSharing');
+    try {
+      _isScreenSharing = newScreenShareValue ?? false;
+      _isScreenSharingController.sink.add(_isScreenSharing);
+
+      MediaStreamTrack? newVideoTrack;
+      MediaStream? cachedVideoStream;
+
+      if (_cachedVideoStream != null) {
+        _cachedVideoStream?.dispose();
+        _cachedVideoStream = null;
+        _cachedVideoStreamController.sink.add(null);
+      }
+
+      if (_isCameraOff && !_isScreenSharing) {
+        _camStateController.add(!_isCameraOff);
+        await _replaceVideoTrackInPeerConnections(null);
+        return;
+      }
+
+      if (_isScreenSharing) {
+        // Get screen stream and extract video track
+        cachedVideoStream = await _getScreenStream(source?.id);
+      }
+      if (!_isScreenSharing || cachedVideoStream == null) {
+        _isScreenSharing = false;
+        // Get camera stream and extract video track
+        cachedVideoStream = await _getCameraStream();
+      }
+
+      if (cachedVideoStream == null) {
+        _logger.e('Failed to get media stream');
+        ScaffoldMessenger.of(navigatorKey.currentContext!).showSnackBar(
+          const SnackBar(content: Text('Failed to get video device')),
+        );
+        if (!_isScreenSharing) {
+          _isCameraOff = true;
+          _camStateController.add(!_isCameraOff);
+        }
+        await _replaceVideoTrackInPeerConnections(null);
+        return;
+      }
+
+      newVideoTrack = cachedVideoStream.getVideoTracks().firstOrNull;
+
+      if (newVideoTrack == null) {
+        _logger.e('Failed to get media stream (track)');
+        ScaffoldMessenger.of(navigatorKey.currentContext!).showSnackBar(
+          const SnackBar(content: Text('Failed to get video device (track)')),
+        );
+        if (!_isScreenSharing) {
+          _isCameraOff = true;
+          _camStateController.add(!_isCameraOff);
+        }
+        await _replaceVideoTrackInPeerConnections(null);
+        return;
+      }
+
+      if (!_isScreenSharing) {
+        _isCameraOff = false;
+        _camStateController.add(true);
+      }
+      // Replace video track in local stream
+      if (_localStream != null) {
+        // Remove old video tracks
+        final oldVideoTracks = [..._localStream!.getVideoTracks()];
+        for (var track in oldVideoTracks) {
+          print("Enumerating oldTracks: ${track.label} - ${track.kind}");
+          try {
+            await _localStream!.removeTrack(track);
+          } catch (_) {}
+          try {
+            track.stop();
+          } catch (_) {}
+        }
+        // Add new video track
+        await _localStream!.addTrack(newVideoTrack);
+
+        // Replace track in all peer connections
+        await _replaceVideoTrackInPeerConnections(newVideoTrack);
+
+        _logger.i('camera activated successfully');
+        _cachedVideoStream = cachedVideoStream;
+        _localStreamController.sink.add(_localStream);
+        _cachedVideoStreamController.sink.add(_cachedVideoStream);
+      } else {
+        _logger.e('_localStream is null');
+        await _replaceVideoTrackInPeerConnections(null);
+      }
+    } catch (e, stackTrace) {
+      _logger.e(
+        'Error toggling screen sharing: $e',
+        error: e,
+        stackTrace: stackTrace,
+      );
+      _isScreenSharing = false;
+      _isScreenSharingController.sink.add(_isScreenSharing);
+    }
+  }
+
+  Future<void> _replaceVideoTrackInPeerConnections(
+    MediaStreamTrack? newTrack,
+  ) async {
+    for (final pc in _peerConnections.values) {
+      final senders = await pc.getSenders();
+      for (final sender in senders) {
+        if (sender.track?.kind == 'video') {
+          await sender.replaceTrack(newTrack);
+        }
+      }
+    }
+  }
+
+  Future<MediaStream?> _getCameraStream() async {
+    // Check permissions first
+    final permissions = <Permission>[Permission.camera];
+    final statuses = await permissions.request();
+
+    if (statuses[Permission.camera] != PermissionStatus.granted) {
+      _logger.i('Camera permission not granted');
+      ScaffoldMessenger.of(navigatorKey.currentContext!).showSnackBar(
+        const SnackBar(content: Text('Camera permission not granted')),
+      );
+      return null;
+    }
+
+    final constraints = {
+      'video': {
+        'width': {'ideal': 640},
+        'height': {'ideal': 480},
+        'frameRate': {'ideal': 30},
+        'facingMode': _facingMode,
+      },
+    };
+
+    return await navigator.mediaDevices.getUserMedia(constraints);
+  }
+
+  Future<MediaStream> _getScreenStream(String? sourceId) async {
+    final constraints = sourceId != null
+        ? {
+            'video': {
+              'deviceId': {'exact': sourceId},
+            },
+            'audio': false,
+          }
+        : {
+            'video': {'cursor': 'always'},
+            'audio': false,
+          };
+
+    final stream = await navigator.mediaDevices.getDisplayMedia(constraints);
+    return stream;
+  }
+
   void toggleMic() {
     if (_localStream != null) {
       final tracks = _localStream!.getAudioTracks();
       if (tracks.isNotEmpty) {
         _isMuted = !_isMuted;
         tracks[0].enabled = !_isMuted;
-        _micStateController.add(_isMuted);
+        _micStateController.add(!_isMuted);
       }
     }
   }
@@ -191,9 +373,25 @@ class CallService {
       final tracks = _localStream!.getVideoTracks();
       if (tracks.isNotEmpty) {
         _isCameraOff = !_isCameraOff;
-        tracks[0].enabled = !_isCameraOff;
-        _camStateController.add(_isCameraOff);
+        if (!_isScreenSharing) tracks[0].enabled = !_isCameraOff;
+        _camStateController.add(!_isCameraOff);
       }
+    }
+  }
+
+  void changeCameraDevice() async {
+    if (_facingMode == 'user') {
+      _facingMode = 'environment';
+    } else {
+      _facingMode = 'user';
+    }
+
+    try {
+      if (!_isScreenSharing) {
+        await activateCameraOrScreenShare(newScreenShareValue: false);
+      }
+    } catch (e) {
+      _logger.e('Error changing camera device: $e');
     }
   }
 
@@ -202,8 +400,10 @@ class CallService {
     _stateController.add(newState);
   }
 
+  String _facingMode = 'user';
   Future<void> _getUserMedia() async {
     int retries = 0;
+
     while (retries < 3) {
       try {
         // Check permissions first
@@ -213,52 +413,30 @@ class CallService {
         ];
         final statuses = await permissions.request();
 
-        final video = statuses[Permission.camera] == PermissionStatus.granted;
-        final audio =
+        final videoGranted =
+            statuses[Permission.camera] == PermissionStatus.granted;
+        final audioGranted =
             statuses[Permission.microphone] == PermissionStatus.granted;
 
-        var constraints = {
-          'audio': audio
-              ? {'echoCancellation': true, 'noiseSuppression': true}
-              : false,
-          'video': video
-              ? {
-                  'width': {'ideal': 640},
-                  'height': {'ideal': 480},
-                  'frameRate': {'ideal': 30},
-                  'facingMode': 'user',
-                }
-              : false,
-        };
+        var audioConstraints = audioGranted
+            ? {'echoCancellation': true, 'noiseSuppression': true}
+            : false;
 
-        // If we couldn't get video, we fall back to audio-only media constraints
-        if (video && statuses[Permission.camera] != PermissionStatus.granted) {
-          constraints = {
-            'audio': {'echoCancellation': true, 'noiseSuppression': true},
-            'video': false,
-          };
-        }
-
-        final stream = await navigator.mediaDevices.getUserMedia(constraints);
+        // Create single stream with both audio and video
+        final stream = await navigator.mediaDevices.getUserMedia({
+          'audio': audioConstraints,
+        });
 
         _localStream = stream;
-        _localStreamController.add(_localStream);
+        _localStreamController.sink.add(_localStream);
 
-        // Ensure initial mute/camera states reflect stream tracks if present
-        if (_isMuted) {
-          final audioTracks = _localStream!.getAudioTracks();
-          if (audioTracks.isNotEmpty) audioTracks[0].enabled = false;
-        }
-        if (_isCameraOff) {
-          final videoTracks = _localStream!.getVideoTracks();
-          if (videoTracks.isNotEmpty) videoTracks[0].enabled = false;
-        }
-        return; // Exit on success
+        _micStateController.add(audioGranted);
+        return;
       } catch (e) {
         retries++;
         if (retries >= 3) rethrow;
         await Future.delayed(Duration(milliseconds: 300 * retries));
-        _logger.w('Camera retry #$retries due to: $e');
+        _logger.w('Media retry #$retries due to: $e');
       }
     }
   }
@@ -307,10 +485,9 @@ class CallService {
 
     final pc = await createPeerConnection(config);
 
-    // Add local tracks
+    // Add local tracks from single local stream
     if (_localStream != null) {
       for (var track in _localStream!.getTracks()) {
-        // Adding track with stream ID is safer for Unified Plan
         await pc.addTrack(track, _localStream!);
       }
     }
@@ -318,7 +495,8 @@ class CallService {
     // Handle Remote Stream
     pc.onTrack = (RTCTrackEvent event) {
       if (event.streams.isNotEmpty) {
-        _remoteStreams[participantId] = event.streams[0];
+        // Store only the first/primary stream for this participant
+        _remoteStreams[participantId] = event.streams.first;
         // Notify UI
         _remoteStreamsController.add(Map.from(_remoteStreams));
       }
@@ -491,9 +669,9 @@ class CallService {
     // --- FIX END ---
 
     try {
-      final state = await pc.getSignalingState();
-      if (state != RTCSignalingState.RTCSignalingStateHaveRemoteOffer &&
-          state != RTCSignalingState.RTCSignalingStateStable) {
+      final currentState = await pc.getSignalingState();
+      if (currentState != RTCSignalingState.RTCSignalingStateHaveRemoteOffer &&
+          currentState != RTCSignalingState.RTCSignalingStateStable) {
         final answer = RTCSessionDescription(event.sdp, 'answer');
         await pc.setRemoteDescription(answer);
       }
@@ -569,7 +747,6 @@ class CallService {
     if (!_isPolite(event.user.id)) {
       _logger.i('We are impolite, sending offer to ${event.user.id}');
       final pc = _peerConnections[event.user.id]!;
-      final state = await pc.getSignalingState();
       final offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
       await _signalingService!.sendRoomOffer(_currentRoomId!, offer.sdp!);

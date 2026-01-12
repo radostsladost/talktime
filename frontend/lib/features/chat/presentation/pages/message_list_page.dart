@@ -403,7 +403,7 @@ class _MessageListPageState extends State<MessageListPage> {
               ),
             ),
           ),
-          if (isOwn) const SizedBox(width: 44), // Match avatar width + padding
+          if (isOwn) const SizedBox(width: 10), // Match avatar width + padding
         ],
       ),
     );
