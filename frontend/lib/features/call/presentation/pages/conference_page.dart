@@ -1,6 +1,7 @@
 // conference_page.dart
 import 'dart:async';
 import 'dart:io';
+import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
@@ -250,7 +251,7 @@ class _ConferencePageState extends State<ConferencePage> {
 
                   // If stream is null, display placeholder.
                   // This happens on endCall or during initialization if media acquisition fails.
-                  return Container(color: Colors.grey);
+                  return Container(color: Colors.transparent);
                 },
               ),
             ),
@@ -286,23 +287,36 @@ class _ConferencePageState extends State<ConferencePage> {
       );
     }
 
+    if (totalTiles == 1 && streams.length == 1) {
+      final id = participants.first;
+      final stream = streams[id]!;
+      final user = userInfoMap[id];
+
+      return Center(
+        child: RemoteParticipantTile(
+          key: ValueKey(id),
+          participantId: id,
+          stream: stream,
+          username: user?.username ?? '???',
+        ),
+      );
+    }
+
     final columns = totalTiles <= 2
         ? 1
         : 2; // Simple logic: 1 col for 1-2 people, 2 for more
-    final rows = (totalTiles / columns).ceil();
 
     return LayoutBuilder(
       builder: (context, constraints) {
         final spacing = 8.0;
-        final availableWidth = constraints.maxWidth - (columns + 1) * spacing;
-        final tileWidth = availableWidth / columns;
+        // Max width available for tiles
+        final maxWidth = constraints.maxWidth - (columns + 1) * spacing;
+        final tileWidth = min(maxWidth / columns, 400.0); // max 300px wide
 
-        // Aspect ratio 3:4 or 9:16 usually works better for mobile portrait
-        final tileHeight = constraints.maxHeight / rows - (spacing * 2);
-
-        return SingleChildScrollView(
+        return Center(
           child: Wrap(
             alignment: WrapAlignment.center,
+            crossAxisAlignment: WrapCrossAlignment.center,
             spacing: spacing,
             runSpacing: spacing,
             children: participants.map((id) {
@@ -311,14 +325,16 @@ class _ConferencePageState extends State<ConferencePage> {
 
               return SizedBox(
                 width: tileWidth,
-                height: tileHeight,
                 // We use a Key to ensure Flutter doesn't destroy/recreate
                 // the renderer unnecessarily when the list order changes.
-                child: RemoteParticipantTile(
-                  key: ValueKey(id),
-                  participantId: id,
-                  stream: stream,
-                  username: user?.username ?? '???',
+                child: AspectRatio(
+                  aspectRatio: 1.0,
+                  child: RemoteParticipantTile(
+                    key: ValueKey(id),
+                    participantId: id,
+                    stream: stream,
+                    username: user?.username ?? '???',
+                  ),
                 ),
               );
             }).toList(),

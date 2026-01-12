@@ -842,6 +842,9 @@ class CallService {
     final pc = _peerConnections.remove(participantId);
     _remoteStreams.remove(participantId);
     await pc?.close();
+
+    _remoteStreams.remove(participantId);
+    _remoteStreamsController.sink.add(_remoteStreams);
   }
 
   Future<void> _startBackgroundService(String roomName) async {
