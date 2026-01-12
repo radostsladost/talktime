@@ -58,6 +58,10 @@ class LocalConversationStorage {
                 ).millisecondsSinceEpoch
               : null,
           'status': 'active', // Default status since not in model
+          'name': conversation.name,
+          'type': conversation.type == ConversationType.group
+              ? 'group'
+              : 'direct',
         };
 
         var byId = (await txn.query(
@@ -188,7 +192,9 @@ class LocalConversationStorage {
       result.add(
         Conversation(
           id: conversation.id,
-          type: conversation.type,
+          type: participantUsers.length > 2
+              ? ConversationType.group
+              : ConversationType.direct,
           name: conversation.name,
           participants: participantUsers,
           lastMessage: conversation.lastMessage,
@@ -305,7 +311,7 @@ class LocalConversationStorage {
       id: (map['externalId'] ?? '') as String,
       type: ConversationType
           .direct, // Default to direct, will be updated from API
-      name: null,
+      name: map['name'] as String?,
       participants: [],
       lastMessageAt: map['lastMessageAt'] != null
           ? DateTime.fromMillisecondsSinceEpoch(

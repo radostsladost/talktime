@@ -6,9 +6,10 @@ import 'package:provider/provider.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/features/chat/data/conversation_service.dart';
 import 'package:talktime/features/chat/data/message_service.dart';
+import 'package:talktime/features/chat/presentation/pages/create_group_chat.dart';
 import 'package:talktime/shared/models/conversation.dart';
 import 'package:talktime/features/chat/presentation/pages/message_list_page.dart';
-import 'package:talktime/features/chat/presentation/pages/create_chat.dart';
+import 'package:talktime/features/chat/presentation/pages/create_conversation.dart';
 import 'package:talktime/shared/models/message.dart';
 import 'package:talktime/shared/models/user.dart';
 
@@ -209,10 +210,20 @@ class _ChatListPageState extends State<ChatListPage>
           );
         },
       ),
-      floatingActionButton: FloatingActionButton(
-        heroTag: "ChatsList",
-        child: const Icon(Icons.edit),
-        onPressed: () => _createGroup(context),
+      floatingActionButton: Column(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          FloatingActionButton(
+            heroTag: "NewGroup",
+            child: const Icon(Icons.group),
+            onPressed: () => _createGroup(context),
+          ),
+          FloatingActionButton(
+            heroTag: "NewConversation",
+            child: const Icon(Icons.edit),
+            onPressed: () => _createConversation(context),
+          ),
+        ],
       ),
     );
   }
@@ -256,11 +267,19 @@ class _ChatListPageState extends State<ChatListPage>
     );
   }
 
+  void _createConversation(BuildContext context) {
+    // TODO: Show group creation dialog
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => CreateConversationPage()),
+    );
+  }
+
   void _createGroup(BuildContext context) {
     // TODO: Show group creation dialog
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (context) => CreateConferencePage()),
+      MaterialPageRoute(builder: (context) => CreateGroupChatPage()),
     );
   }
 

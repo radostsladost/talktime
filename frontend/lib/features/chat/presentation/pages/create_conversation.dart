@@ -8,14 +8,14 @@ import 'package:talktime/features/chat/presentation/pages/message_list_page.dart
 import 'package:talktime/shared/models/user.dart';
 import 'package:logger/logger.dart';
 
-class CreateConferencePage extends StatefulWidget {
-  const CreateConferencePage({super.key});
+class CreateConversationPage extends StatefulWidget {
+  const CreateConversationPage({super.key});
 
   @override
-  State<CreateConferencePage> createState() => _CreateConferencePageState();
+  State<CreateConversationPage> createState() => _CreateConversationPageState();
 }
 
-class _CreateConferencePageState extends State<CreateConferencePage> {
+class _CreateConversationPageState extends State<CreateConversationPage> {
   final Logger _logger = Logger(output: ConsoleOutput());
   final TextEditingController _emailController = TextEditingController();
   final FocusNode _emailFocus = FocusNode();
@@ -131,10 +131,7 @@ class _CreateConferencePageState extends State<CreateConferencePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('New Conversation'),
-        backgroundColor: Theme.of(context).colorScheme.primary,
-      ),
+      appBar: AppBar(title: const Text('New Contact')),
       body: Padding(
         padding: const EdgeInsets.all(24.0),
         child: Column(

@@ -24,18 +24,102 @@ class RemoteParticipantTile extends StatefulWidget {
 class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
   final RTCVideoRenderer _renderer = RTCVideoRenderer();
   bool _isRendererReady = false;
+  bool _hasActiveVideo = false;
+  bool _hasActiveAudio = true;
+
+  StreamSubscription? _onAddTrackSubscription;
+  StreamSubscription? _onRemoveTrackSubscription;
 
   @override
   void initState() {
     super.initState();
     _initRenderer();
+    _setupStreamListeners();
   }
 
   Future<void> _initRenderer() async {
     await _renderer.initialize();
     _renderer.srcObject = widget.stream;
     if (mounted) {
-      setState(() => _isRendererReady = true);
+      setState(() {
+        _isRendererReady = true;
+        _updateTrackStates();
+      });
+    }
+  }
+
+  void _setupStreamListeners() {
+    // Listen for track additions
+    widget.stream.onAddTrack = (event) {
+      _updateTrackStates();
+      _setupTrackListeners(event);
+    };
+
+    // Listen for track removals
+    widget.stream.onRemoveTrack = (event) {
+      _updateTrackStates();
+    };
+
+    // Setup listeners for existing tracks
+    for (final track in widget.stream.getTracks()) {
+      _setupTrackListeners(track);
+    }
+  }
+
+  void _setupTrackListeners(MediaStreamTrack track) {
+    // Listen for mute/unmute events on the track
+    track.onMute = () {
+      if (mounted) {
+        setState(() => _updateTrackStates());
+      }
+    };
+
+    track.onUnMute = () {
+      if (mounted) {
+        setState(() => _updateTrackStates());
+      }
+    };
+
+    track.onEnded = () {
+      if (mounted) {
+        setState(() => _updateTrackStates());
+      }
+    };
+  }
+
+  void _updateTrackStates() {
+    final videoTracks = widget.stream.getVideoTracks();
+    final audioTracks = widget.stream.getAudioTracks();
+
+    // Check video: track exists, is enabled, and is not muted
+    _hasActiveVideo =
+        videoTracks.isNotEmpty &&
+        videoTracks.any(
+          (track) => track.enabled == true && track.muted == false,
+          // && track.readyState == 'live',
+        );
+
+    // Check audio: track exists and is enabled and not muted
+    _hasActiveAudio =
+        audioTracks.isEmpty ||
+        audioTracks.any(
+          (track) => track.enabled == true && track.muted == false,
+        );
+
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  void _disposeStreamListeners() {
+    _onAddTrackSubscription?.cancel();
+    _onRemoveTrackSubscription?.cancel();
+
+    // Clear track listeners
+    for (final track in widget.stream.getTracks()) {
+      track.onMute = null;
+      track.onUnMute = null;
+      track.onEnded = null;
     }
   }
 
@@ -44,15 +128,22 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
     super.didUpdateWidget(oldWidget);
     // If the stream reference changes (rare, but possible), update the renderer
     if (oldWidget.stream.id != widget.stream.id) {
+      // Dispose old stream listeners
+      _disposeStreamListeners();
+
+      // Setup new stream
       _renderer.srcObject = widget.stream;
-      if (mounted) {
-        setState(() => _isRendererReady = true);
-      }
+      _setupStreamListeners();
+      _updateTrackStates();
+    } else {
+      // Same stream, but tracks might have changed
+      _updateTrackStates();
     }
   }
 
   @override
   void dispose() {
+    _disposeStreamListeners();
     // Only dispose the UI renderer, NOT the stream (which lives in CallService)
     _renderer.dispose();
     super.dispose();
@@ -60,11 +151,19 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
 
   @override
   Widget build(BuildContext context) {
-    // Check if video track exists and is enabled
+    // Re-check track states on every build for safety
+    final videoTracks = widget.stream.getVideoTracks();
     final hasVideo =
-        widget.stream.getVideoTracks().isNotEmpty &&
-        widget.stream.getVideoTracks().first.enabled;
-    if (hasVideo) _renderer.srcObject = widget.stream;
+        videoTracks.isNotEmpty &&
+        videoTracks.any(
+          (track) => track.enabled == true && track.muted == false,
+          // && track.readyState == 'live',
+        );
+
+    // Update renderer source if we have active video
+    if (hasVideo && _isRendererReady) {
+      _renderer.srcObject = widget.stream;
+    }
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(12),
@@ -86,7 +185,9 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
                   radius: 30,
                   backgroundColor: Colors.deepPurple,
                   child: Text(
-                    widget.username.substring(0, 1).toUpperCase(),
+                    widget.username.isNotEmpty
+                        ? widget.username.substring(0, 1).toUpperCase()
+                        : '?',
                     style: const TextStyle(fontSize: 24, color: Colors.white),
                   ),
                 ),
@@ -110,13 +211,20 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
             ),
           ),
 
-          // 3. Audio Mute Indicator (Optional: Check audio tracks)
-          if (widget.stream.getAudioTracks().isNotEmpty &&
-              !widget.stream.getAudioTracks().first.enabled)
+          // 3. Audio Mute Indicator
+          if (!_hasActiveAudio)
             const Positioned(
               top: 8,
               right: 8,
               child: Icon(Icons.mic_off, color: Colors.red, size: 20),
+            ),
+
+          // 4. Video Off Indicator (when in avatar mode)
+          if (!hasVideo)
+            const Positioned(
+              top: 8,
+              left: 8,
+              child: Icon(Icons.videocam_off, color: Colors.red, size: 20),
             ),
         ],
       ),

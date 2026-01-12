@@ -311,11 +311,17 @@ class CallService {
     MediaStreamTrack? newTrack,
   ) async {
     for (final pc in _peerConnections.values) {
-      final senders = await pc.getSenders();
+      final transceivers = await pc.getTransceivers();
       var success = false;
-      for (final sender in senders) {
-        if (sender.track?.kind == 'video') {
-          await sender.replaceTrack(newTrack);
+      for (final transceiver in transceivers) {
+        // Use transceiver.sender.track?.kind for active tracks,
+        // or check the transceiver's mid/receiver for video type when track is null
+        final senderTrackKind = transceiver.sender.track?.kind;
+        final receiverTrackKind = transceiver.receiver.track?.kind;
+        final isVideoTransceiver =
+            senderTrackKind == 'video' || receiverTrackKind == 'video';
+        if (isVideoTransceiver) {
+          await transceiver.sender.replaceTrack(newTrack);
           success = true;
         }
       }

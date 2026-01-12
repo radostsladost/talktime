@@ -35,7 +35,7 @@ class DatabaseHelper {
         onUpgrade: (db, oldVersion, newVersion) async {
           await _migrateDatabase(db, oldVersion, newVersion);
         },
-        version: 6,
+        version: 7,
       ),
     );
 
@@ -84,7 +84,10 @@ class DatabaseHelper {
       'createdAt INTEGER NOT NULL, '
       'externalId TEXT NOT NULL, '
       'lastMessageAt INTEGER, '
-      'status TEXT DEFAULT \'active\')',
+      'status TEXT DEFAULT \'active\','
+      'name TEXT,'
+      'type TEXT DEFAULT \'direct\''
+      ')',
     );
 
     await db.execute(
@@ -115,6 +118,18 @@ class DatabaseHelper {
         'CREATE TABLE IF NOT EXISTS conversation_participant(id INTEGER PRIMARY KEY, '
         'conversationId INTEGER, '
         'userExternalId TEXT NOT NULL)',
+      );
+    }
+
+    if (oldVersion < 7) {
+      await db.execute(
+        'ALTER TABLE conversation ADD COLUMN name TEXT DEFAULT null;',
+      );
+      await db.execute(
+        'ALTER TABLE conversation ADD COLUMN type TEXT DEFAULT \'direct\';',
+      );
+      await db.execute(
+        'UPDATE conversation SET type = \'group\' WHERE (SELECT COUNT(*) FROM conversation_participant WHERE conversationId = conversation.id) > 2;',
       );
     }
   }
