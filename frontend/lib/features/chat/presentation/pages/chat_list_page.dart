@@ -218,6 +218,7 @@ class _ChatListPageState extends State<ChatListPage>
             child: const Icon(Icons.group),
             onPressed: () => _createGroup(context),
           ),
+          SizedBox(height: 8),
           FloatingActionButton(
             heroTag: "NewConversation",
             child: const Icon(Icons.edit),

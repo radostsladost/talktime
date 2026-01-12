@@ -544,11 +544,12 @@ class CallService {
     // };
 
     pc.onIceCandidate = (candidate) {
-      _signalingService!.sendRoomIceCandidate(
-        _currentRoomId!,
+      _signalingService!.sendIceCandidate(
+        participantId,
         candidate.candidate!,
         candidate.sdpMid,
         candidate.sdpMLineIndex,
+        roomId: _currentRoomId,
       );
     };
 
@@ -585,7 +586,7 @@ class CallService {
       if (state == RTCSignalingState.RTCSignalingStateStable) {
         final offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
-        _signalingService?.sendRoomOffer(_currentRoomId!, offer.sdp!);
+        _signalingService?.sendOffer(id, offer.sdp!, roomId: _currentRoomId);
         _logger.i('Offer sent to $id');
       } else {
         _logger.w('Skipping offer to $id - not in stable state: $state');
@@ -636,7 +637,13 @@ class CallService {
   }
 
   Future<void> _handleOffer(SignalingOfferEvent event) async {
-    _logger.i('_handleOffer from ${event.fromUserId}');
+    _logger.i('_handleOffer from ${event.fromUserId} to ${event.toUserId}');
+
+    // Only process offers intended for us
+    if (event.toUserId != _currentUser!.id) {
+      _logger.i('Ignoring offer not intended for us (to: ${event.toUserId})');
+      return;
+    }
 
     if (!_peerConnections.containsKey(event.fromUserId)) {
       _participantIds.add(event.fromUserId);
@@ -687,7 +694,13 @@ class CallService {
   }
 
   Future<void> _handleAnswer(SignalingAnswerEvent event) async {
-    _logger.i('_handleAnswer from ${event.fromUserId}');
+    _logger.i('_handleAnswer from ${event.fromUserId} to ${event.toUserId}');
+
+    // Only process answers intended for us
+    if (event.toUserId != _currentUser!.id) {
+      _logger.i('Ignoring answer not intended for us (to: ${event.toUserId})');
+      return;
+    }
 
     final pc = _peerConnections[event.fromUserId];
     if (pc == null) {
@@ -726,7 +739,17 @@ class CallService {
   }
 
   Future<void> _handleIceCandidate(SignalingIceCandidateEvent event) async {
-    _logger.i('_handleIceCandidate from ${event.fromUserId}');
+    _logger.i(
+      '_handleIceCandidate from ${event.fromUserId} to ${event.toUserId}',
+    );
+
+    // Only process ICE candidates intended for us
+    if (event.toUserId != _currentUser!.id) {
+      _logger.i(
+        'Ignoring ICE candidate not intended for us (to: ${event.toUserId})',
+      );
+      return;
+    }
 
     try {
       final pc = _peerConnections[event.fromUserId];
@@ -790,7 +813,11 @@ class CallService {
       final pc = _peerConnections[event.user.id]!;
       final offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
-      await _signalingService!.sendRoomOffer(_currentRoomId!, offer.sdp!);
+      await _signalingService!.sendOffer(
+        event.user.id,
+        offer.sdp!,
+        roomId: _currentRoomId,
+      );
       _logger.i('Participant offer sent: ${event.user.id}');
     } else {
       _logger.i('We are polite, waiting for offer from ${event.user.id}');

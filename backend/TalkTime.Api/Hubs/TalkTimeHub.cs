@@ -307,18 +307,14 @@ public class TalkTimeHub : Hub
             roomState.CreatedAt
         ));
 
+        // Send existing participants to the new user ONLY (not to everyone)
         foreach (var c in roomState.Participants.ToArray())
         {
             if (c.Value == userDto)
                 continue;
 
+            // Only notify the new user about existing participants
             await Clients.Caller.SendAsync("ParticipantJoined", new RoomParticipantUpdate(
-                roomId,
-                c.Value,
-                "joined"
-            ));
-
-            await Clients.Group($"conversation_{roomId}").SendAsync("ParticipantJoined", new RoomParticipantUpdate(
                 roomId,
                 c.Value,
                 "joined"
@@ -391,6 +387,40 @@ public class TalkTimeHub : Hub
     }
 
     /// <summary>
+    /// Send offer to 1 participant in a room
+    /// </summary>
+    public async Task SendOffer(string toUserId, string sdp, string roomId)
+    {
+        var fromUserId = GetUserId();
+        if (string.IsNullOrEmpty(fromUserId)) return;
+
+        if (!ConferenceRooms.TryGetValue(roomId, out var roomState))
+        {
+            return;
+        }
+
+        if (!await _conversationRepository.IsParticipantAsync(roomId, fromUserId))
+        {
+            await Clients.Caller.SendAsync("Error", new { message = "Not a participant of this conversation" });
+            return;
+        }
+
+        // Send offer to all other participants
+        foreach (var participantId in roomState.Participants.Keys.Where(p => p != fromUserId && p == toUserId))
+        {
+            if (ConnectedUsers.TryGetValue(participantId, out var connectionId))
+            {
+                await Clients.Client(connectionId).SendAsync("ReceiveOffer", new SignalingOffer(
+                    fromUserId,
+                    participantId,
+                    roomId,
+                    sdp
+                ));
+            }
+        }
+    }
+
+    /// <summary>
     /// Send ICE candidate to all participants in a room
     /// </summary>
     public async Task SendRoomIceCandidate(string roomId, string candidate, string? sdpMid, int? sdpMLineIndex)
@@ -424,6 +454,29 @@ public class TalkTimeHub : Hub
                 ));
             }
         }
+    }
+
+    /// <summary>
+    /// Send ICE candidate to a specific user
+    /// </summary>
+    public async Task SendIceCandidate(string toUserId, string candidate, string? sdpMid, int? sdpMLineIndex, string? roomId)
+    {
+        var fromUserId = GetUserId();
+        if (string.IsNullOrEmpty(fromUserId)) return;
+
+        if (ConnectedUsers.TryGetValue(toUserId, out var connectionId))
+        {
+            await Clients.Client(connectionId).SendAsync("ReceiveIceCandidate", new SignalingIceCandidate(
+                fromUserId,
+                toUserId,
+                roomId,
+                candidate,
+                sdpMid,
+                sdpMLineIndex
+            ));
+        }
+
+        _logger.LogDebug("ICE candidate sent from {FromUserId} to {ToUserId}", fromUserId, toUserId);
     }
 
     /// <summary>
