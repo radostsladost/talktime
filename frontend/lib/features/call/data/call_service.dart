@@ -112,7 +112,6 @@ class CallService {
           await _createPeerConnection(user.id);
         }
       }
-      desktopCapturer.getSources(types: [SourceType.Screen, SourceType.Window]);
 
       // 3. Join Room via Signaling
       await _signalingService?.createRoom(roomId); // Or joinRoom based on logic
@@ -132,8 +131,8 @@ class CallService {
       //   Duration(seconds: 30),
       //   (Timer t) => _createAndSendOffers(),
       // );
-    } catch (e) {
-      _logger.e("Start call failed: $e");
+    } catch (e, stackTrace) {
+      _logger.e("Start call failed: $e", error: e, stackTrace: stackTrace);
       endCall();
     }
   }
@@ -200,9 +199,12 @@ class CallService {
 
   Future<void> activateCameraOrScreenShare({
     DesktopCapturerSource? source,
+    bool? forceStop,
     bool? newScreenShareValue,
   }) async {
-    _logger.i('activateCameraOrScreenShare $_isScreenSharing');
+    _logger.i(
+      'activateCameraOrScreenShare screenShare: ($_isScreenSharing => $newScreenShareValue), stop: $forceStop',
+    );
     try {
       _isScreenSharing = newScreenShareValue ?? false;
       _isScreenSharingController.sink.add(_isScreenSharing);
@@ -210,13 +212,27 @@ class CallService {
       MediaStreamTrack? newVideoTrack;
       MediaStream? cachedVideoStream;
 
+      if (_localStream != null) {
+        // Remove old video tracks
+        final oldVideoTracks = [..._localStream!.getVideoTracks()];
+        for (var track in oldVideoTracks) {
+          // print("Enumerating oldTracks: ${track.label} - ${track.kind}");
+          try {
+            await _localStream!.removeTrack(track);
+          } catch (_) {}
+          try {
+            track.stop();
+          } catch (_) {}
+        }
+      }
+
       if (_cachedVideoStream != null) {
         _cachedVideoStream?.dispose();
         _cachedVideoStream = null;
         _cachedVideoStreamController.sink.add(null);
       }
 
-      if (_isCameraOff && !_isScreenSharing) {
+      if ((_isCameraOff && !_isScreenSharing) || forceStop == true) {
         _camStateController.add(!_isCameraOff);
         await _replaceVideoTrackInPeerConnections(null);
         return;
@@ -266,17 +282,6 @@ class CallService {
       }
       // Replace video track in local stream
       if (_localStream != null) {
-        // Remove old video tracks
-        final oldVideoTracks = [..._localStream!.getVideoTracks()];
-        for (var track in oldVideoTracks) {
-          print("Enumerating oldTracks: ${track.label} - ${track.kind}");
-          try {
-            await _localStream!.removeTrack(track);
-          } catch (_) {}
-          try {
-            track.stop();
-          } catch (_) {}
-        }
         // Add new video track
         await _localStream!.addTrack(newVideoTrack);
 
@@ -307,10 +312,18 @@ class CallService {
   ) async {
     for (final pc in _peerConnections.values) {
       final senders = await pc.getSenders();
+      var success = false;
       for (final sender in senders) {
         if (sender.track?.kind == 'video') {
           await sender.replaceTrack(newTrack);
+          success = true;
         }
+      }
+      if (!success && newTrack != null && _localStream != null) {
+        _logger.i(
+          'Failed to replace video track in peer connection, adding it instead',
+        );
+        await pc.addTrack(newTrack, _localStream!);
       }
     }
   }
@@ -369,14 +382,18 @@ class CallService {
   }
 
   void toggleCamera() {
-    if (_localStream != null) {
-      final tracks = _localStream!.getVideoTracks();
-      if (tracks.isNotEmpty) {
-        _isCameraOff = !_isCameraOff;
-        if (!_isScreenSharing) tracks[0].enabled = !_isCameraOff;
-        _camStateController.add(!_isCameraOff);
+    _isCameraOff = !_isCameraOff;
+    if (!_isScreenSharing) {
+      if (_isCameraOff) {
+        activateCameraOrScreenShare(
+          forceStop: true,
+          newScreenShareValue: false,
+        );
+      } else {
+        activateCameraOrScreenShare(newScreenShareValue: false);
       }
     }
+    _camStateController.add(!_isCameraOff);
   }
 
   void changeCameraDevice() async {
@@ -499,8 +516,26 @@ class CallService {
         _remoteStreams[participantId] = event.streams.first;
         // Notify UI
         _remoteStreamsController.add(Map.from(_remoteStreams));
+      } else {
+        // Handle case where no stream is available
+        if (_remoteStreams.containsKey(participantId)) {
+          _remoteStreams.remove(participantId);
+        }
+        _remoteStreamsController.add(Map.from(_remoteStreams));
       }
     };
+
+    // pc.onRemoveTrack = (MediaStream stream, MediaStreamTrack track) {
+    //   if (_remoteStreams.containsKey(participantId)) {
+    //     _remoteStreamsController.add(Map.from(_remoteStreams));
+    //   }
+    // };
+    // pc.onRemoveStream = (MediaStream stream) {
+    //   if (_remoteStreams.containsKey(participantId)) {
+    //     _remoteStreams.remove(participantId);
+    //     _remoteStreamsController.add(Map.from(_remoteStreams));
+    //   }
+    // };
 
     pc.onIceCandidate = (candidate) {
       _signalingService!.sendRoomIceCandidate(
@@ -519,7 +554,7 @@ class CallService {
       }
     };
 
-    _peerConnections[participantId] = pc;
+    _peerConnections[participantId] = pc; // add
   }
 
   // ... (Include _handleOffer, _handleAnswer, _handleIceCandidate logic here essentially copied from your original file but removing setState calls)

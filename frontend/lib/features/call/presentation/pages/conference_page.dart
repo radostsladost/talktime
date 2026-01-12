@@ -64,6 +64,20 @@ class _ConferencePageState extends State<ConferencePage> {
           _setupListeners();
           _attachExistingStreams();
         });
+
+    // Timer.periodic(Duration(seconds: 5), (timer) {
+    //   if (_callService.remoteStreams.values.any(
+    //         (stream) =>
+    //             stream.getVideoTracks()?.any(
+    //               (track) => track?.kind == 'video' && track?.enabled == true,
+    //             ) ==
+    //             false,
+    //       ) ==
+    //       true) {
+    //     print("Remote video track disabled");
+    //     setState(() {});
+    //   }
+    // });
   }
 
   Future<void> _initRenderers() async {
@@ -219,9 +233,10 @@ class _ConferencePageState extends State<ConferencePage> {
                 initialData: _callService.cachedVideoStream,
                 builder: (context, snapshot) {
                   final stream = snapshot.data;
-                  print('Local stream: $stream');
+                  // print('Local stream: $stream');
 
-                  if (stream != null) {
+                  if (stream != null &&
+                      stream.getVideoTracks()?.isNotEmpty == true) {
                     // CRITICAL FIX: Only update srcObject if reference changes
                     // to prevent flickering/detaching native resources.
                     if (_localRenderer.srcObject != stream) {
@@ -314,7 +329,8 @@ class _ConferencePageState extends State<ConferencePage> {
   }
 
   void _toggleScreenSharing() async {
-    if (!kIsWeb && Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+    if (!kIsWeb &&
+        (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
       if (_callService.isScreenSharingValue) {
         _callService.toggleScreenShare().catchError((error) {
           _logger.e('Error toggling screen share: $error');

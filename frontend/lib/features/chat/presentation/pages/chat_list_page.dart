@@ -246,6 +246,8 @@ class _ChatListPageState extends State<ChatListPage>
       return 0;
     });
 
+    if (!mounted) return;
+
     Navigator.push(
       context,
       MaterialPageRoute(
