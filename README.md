@@ -51,13 +51,20 @@ Work in progress.
 ## TODO:
 
 ### All Platforms:
-- Implement push notifications for incoming calls and messages.
+- Add p2p encryption.
+- Add message sharing between devices.
+- Add message read status.
+- Add reaction support.
+- Add support for profile view / edit.
+- Add support for settings / preferences.
+- Implement push notifications for incoming calls and messages. (https://unifiedpush.org/)
 - Add support for multiple languages.
 - Add support for theme switching.
 - Optimize performance for large conversations.
-- Add keyboard shortcuts.
-- Add support for profile view / edit.
-- Add support for settings / preferences.
+- Add backups to third party services.
+- Add support for voice / video messages.
+- Add support for attachments.
+- Add profile settings / preferences.
 
 ### Android & iOS
 - Test with real devices.
