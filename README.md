@@ -4,7 +4,7 @@ This project implements a real-time communication application utilizing a modern
 
 ## Motivation
 
-There's no midern looking chat app, which doesn't require you to register for selfhosting.
+There's no modern looking chat app, which doesn't require you to register for selfhosting.
 
 ## Architecture Summary
 
