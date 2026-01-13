@@ -2,6 +2,10 @@
 
 This project implements a real-time communication application utilizing a modern, decoupled architecture with a dedicated backend service and a cross-platform mobile/web frontend.
 
+## Motivation
+
+There's no midern looking chat app, which doesn't require you to register for selfhosting.
+
 ## Architecture Summary
 
 This codebase is composed of two main parts:
