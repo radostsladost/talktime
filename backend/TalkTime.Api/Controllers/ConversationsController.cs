@@ -37,15 +37,17 @@ public class ConversationsController : ControllerBase
             {
                 return Unauthorized(new { message = "User not authenticated" });
             }
-            var user = await _userRepository.GetByEmailAsync(userName);
             var user2 = await _userRepository.GetByUsernameAsync(userName);
 
             return Ok(new
             {
-                data = (new User[] { user, user2 }).Where(u => u != null).Select(p => new UserDto(
+                data = (new User[] { user2 }).Where(u => u != null).Select(p => new UserDto(
                     p.Id,
                     p.Username,
-                    p.AvatarUrl
+                    p.AvatarUrl,
+                    p.Description,
+                    p.IsOnline,
+                    p.LastSeenAt
                 ))
             });
         }
@@ -77,7 +79,10 @@ public class ConversationsController : ControllerBase
                 c.Participants.Select(p => new UserDto(
                     p.User.Id,
                     p.User.Username,
-                    p.User.AvatarUrl
+                    p.User.AvatarUrl,
+                    p.User.Description,
+                    p.User.IsOnline,
+                    p.User.LastSeenAt
                 )).ToList(),
                 c.Messages.FirstOrDefault()?.EncryptedContent,
                 c.Messages.FirstOrDefault()?.SentAt.ToString("o")
@@ -126,7 +131,10 @@ public class ConversationsController : ControllerBase
                     conversation.Participants.Select(p => new UserDto(
                         p.User.Id,
                         p.User.Username,
-                        p.User.AvatarUrl
+                        p.User.AvatarUrl,
+                        p.User.Description,
+                        p.User.IsOnline,
+                        p.User.LastSeenAt
                     )).ToList(),
                     conversation.CreatedAt
                 )
@@ -172,7 +180,10 @@ public class ConversationsController : ControllerBase
                             existingConversation.Participants.Select(p => new UserDto(
                                 p.User.Id,
                                 p.User.Username,
-                                p.User.AvatarUrl
+                                p.User.AvatarUrl,
+                                p.User.Description,
+                                p.User.IsOnline,
+                                p.User.LastSeenAt
                             )).ToList(),
                             null,
                             null
@@ -225,8 +236,10 @@ public class ConversationsController : ControllerBase
                         createdConversation.Participants.Select(p => new UserDto(
                             p.User.Id,
                             p.User.Username,
-                            p.User.AvatarUrl
-                        )).ToList(),
+                            p.User.AvatarUrl,
+                            p.User.Description,
+                            p.User.IsOnline,
+                            p.User.LastSeenAt)).ToList(),
                         null,
                         null
                     )

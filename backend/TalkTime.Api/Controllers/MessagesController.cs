@@ -63,7 +63,7 @@ public class MessagesController : ControllerBase
             var messageDtos = messages.Select(m => new MessageDto(
                 m.Id,
                 m.ConversationId,
-                new UserDto(m.Sender.Id, m.Sender.Username, m.Sender.AvatarUrl),
+                new UserDto(m.Sender.Id, m.Sender.Username, m.Sender.AvatarUrl, m.Sender.Description, m.Sender.IsOnline, m.Sender.LastSeenAt),
                 m.EncryptedContent,
                 m.Type.ToString().ToLower(),
                 m.SentAt.ToString("o")
@@ -139,7 +139,7 @@ public class MessagesController : ControllerBase
             var messageDto = new MessageDto(
                 message.Id,
                 message.ConversationId,
-                new UserDto(sender.Id, sender.Username, sender.AvatarUrl),
+                new UserDto(sender.Id, sender.Username, sender.AvatarUrl, sender.Description, sender.IsOnline, sender.LastSeenAt),
                 message.EncryptedContent,
                 message.Type.ToString().ToLower(),
                 message.SentAt.ToString("o")
@@ -190,7 +190,7 @@ public class MessagesController : ControllerBase
             var messageDtos = messages.Select(m => new MessageDto(
                 m.Id,
                 m.ConversationId,
-                new UserDto(m.Sender.Id, m.Sender.Username, m.Sender.AvatarUrl),
+                new UserDto(m.Sender.Id, m.Sender.Username, m.Sender.AvatarUrl, m.Sender.Description, m.Sender.IsOnline, m.Sender.LastSeenAt),
                 m.EncryptedContent,
                 m.Type.ToString().ToLower(),
                 m.SentAt.ToString("o")

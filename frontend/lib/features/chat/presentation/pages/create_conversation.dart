@@ -17,7 +17,7 @@ class CreateConversationPage extends StatefulWidget {
 
 class _CreateConversationPageState extends State<CreateConversationPage> {
   final Logger _logger = Logger(output: ConsoleOutput());
-  final TextEditingController _emailController = TextEditingController();
+  final TextEditingController _querySearchController = TextEditingController();
   final FocusNode _emailFocus = FocusNode();
 
   String? _errorText;
@@ -26,20 +26,15 @@ class _CreateConversationPageState extends State<CreateConversationPage> {
 
   @override
   void dispose() {
-    _emailController.dispose();
+    _querySearchController.dispose();
     _emailFocus.dispose();
     super.dispose();
   }
 
   Future<void> _lookupUser() async {
-    final email = _emailController.text.trim();
-    if (email.isEmpty) {
-      _setError('Please enter an email');
-      return;
-    }
-
-    if (!RegExp(r'^[^@]+@[^@]+\.[^@]+').hasMatch(email)) {
-      _setError('Please enter a valid email');
+    final username = _querySearchController.text.trim();
+    if (username.isEmpty) {
+      _setError('Please enter an username');
       return;
     }
 
@@ -52,7 +47,7 @@ class _CreateConversationPageState extends State<CreateConversationPage> {
     try {
       final apiClient = ConversationService();
       final auth = AuthService();
-      final user = (await apiClient.searchUser(email)).firstOrNull;
+      final user = (await apiClient.searchUser(username)).firstOrNull;
 
       if (user == null) {
         _setError('User not found with this email');
@@ -144,13 +139,13 @@ class _CreateConversationPageState extends State<CreateConversationPage> {
             const SizedBox(height: 24),
 
             TextField(
-              controller: _emailController,
+              controller: _querySearchController,
               focusNode: _emailFocus,
               keyboardType: TextInputType.emailAddress,
               textInputAction: TextInputAction.done,
               onSubmitted: (_) => _lookupUser(),
               decoration: InputDecoration(
-                labelText: 'Email',
+                labelText: 'User Name',
                 border: const OutlineInputBorder(),
                 errorText: _errorText,
                 suffixIcon: _foundUser != null
@@ -188,7 +183,7 @@ class _CreateConversationPageState extends State<CreateConversationPage> {
                           ),
                         ),
                         Text(
-                          _emailController.text.trim(),
+                          _querySearchController.text.trim(),
                           style: const TextStyle(color: Colors.grey),
                         ),
                       ],

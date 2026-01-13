@@ -63,7 +63,7 @@ public class AuthController : ControllerBase
                 refreshToken,
                 accessTokenExpires,
                 refreshTokenExpires,
-                new UserDto(user.Id, user.Username, user.AvatarUrl)
+                new UserProfileDto(user.Id, user.Username, user.AvatarUrl, user.Email, user.Description)
             ));
         }
         catch (Exception ex)
@@ -113,7 +113,7 @@ public class AuthController : ControllerBase
                 refreshToken,
                 accessTokenExpires,
                 refreshTokenExpires,
-                new UserDto(user.Id, user.Username, user.AvatarUrl)
+                new UserProfileDto(user.Id, user.Username, user.AvatarUrl, user.Email, user.Description)
             ));
         }
         catch (Exception ex)
@@ -151,7 +151,7 @@ public class AuthController : ControllerBase
                 // If someone tries to use a revoked token, revoke all tokens for this user (potential token theft)
                 if (storedToken.IsRevoked)
                 {
-                    await _refreshTokenRepository.RevokeAllByUserIdAsync(storedToken.UserId);
+                    // await _refreshTokenRepository.RevokeAllByUserIdAsync(storedToken.UserId);
                     _logger.LogWarning("Potential token theft detected for user {UserId}. All tokens revoked.", storedToken.UserId);
                 }
 
@@ -248,7 +248,7 @@ public class AuthController : ControllerBase
             else
             {
                 // Revoke all refresh tokens for this user
-                await _refreshTokenRepository.RevokeAllByUserIdAsync(userId);
+                // await _refreshTokenRepository.RevokeAllByUserIdAsync(userId);
             }
 
             await _userRepository.SetOnlineStatusAsync(userId, false);
@@ -312,13 +312,51 @@ public class AuthController : ControllerBase
                 return NotFound(new { message = "User not found" });
             }
 
-            return Ok(new UserDto(user.Id, user.Username, user.AvatarUrl));
+            return Ok(new UserProfileDto(user.Id, user.Username, user.AvatarUrl, user.Email, user.Description));
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error getting current user");
             return StatusCode(500, new { message = "An error occurred" });
         }
+    }
+
+    [HttpPut("me")]
+    [Authorize]
+    public async Task<IActionResult> UpdateProfile([FromBody] UpdateProfileRequest dto)
+    {
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
+
+        var userId = User.FindFirst("userId")?.Value;
+        var user = await _userRepository.GetByIdAsync(userId!);
+        if (user == null || dto == null)
+        {
+            return NotFound(new { message = "User not found" });
+        }
+
+        if (dto.Username != null && dto.Username.Trim().Length >= 1) user.Username = dto.Username.Trim();
+        // if (dto.AvatarUrl != null) user.AvatarUrl = dto.AvatarUrl;
+        if (dto.Email != null && dto.Email.Trim().Length >= 1 && dto.Email.Contains('@')) user.Email = dto.Email.Trim();
+        if (dto.Description != null) user.Description = dto.Description;
+
+
+        if (dto.NewPassword != null && dto.NewPassword.Length >= 1)
+        {
+            if (!BCrypt.Net.BCrypt.Verify(dto.Password ?? "", user.PasswordHash))
+            {
+                _logger.LogWarning("Update profile failed: Invalid password for user {UserId}", user.Id);
+                return Unauthorized(new { message = "Invalid old password" });
+            }
+
+            user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.NewPassword);
+        }
+
+        await _userRepository.UpdateAsync(user);
+
+        return Ok(new UserProfileDto(user.Id, user.Username, user.AvatarUrl, user.Email, user.Description));
     }
 
     /// <summary>

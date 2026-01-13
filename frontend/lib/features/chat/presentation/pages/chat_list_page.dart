@@ -7,6 +7,7 @@ import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/features/chat/data/conversation_service.dart';
 import 'package:talktime/features/chat/data/message_service.dart';
 import 'package:talktime/features/chat/presentation/pages/create_group_chat.dart';
+import 'package:talktime/features/profile/presentation/pages/edit_profile_page.dart';
 import 'package:talktime/shared/models/conversation.dart';
 import 'package:talktime/features/chat/presentation/pages/message_list_page.dart';
 import 'package:talktime/features/chat/presentation/pages/create_conversation.dart';
@@ -104,10 +105,10 @@ class _ChatListPageState extends State<ChatListPage>
       appBar: AppBar(
         title: const Text('Talktime'),
         actions: [
-          // IconButton(
-          //   icon: const Icon(Icons.video_call),
-          //   onPressed: () => _startNewCall(context),
-          // ),
+          IconButton(
+            icon: const Icon(Icons.settings),
+            onPressed: () => _openProfile(context),
+          ),
         ],
       ),
       body: FutureBuilder<List<Conversation>>(
@@ -281,6 +282,13 @@ class _ChatListPageState extends State<ChatListPage>
     Navigator.push(
       context,
       MaterialPageRoute(builder: (context) => CreateGroupChatPage()),
+    );
+  }
+
+  void _openProfile(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const EditProfilePage()),
     );
   }
 

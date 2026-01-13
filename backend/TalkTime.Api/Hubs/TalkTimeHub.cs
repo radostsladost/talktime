@@ -82,7 +82,7 @@ public class TalkTimeHub : Hub
             var messageDto = new MessageDto(
                 message.Id,
                 message.ConversationId,
-                new UserDto(message.Sender.Id, message.Sender.Username, message.Sender.AvatarUrl),
+                new UserDto(message.Sender.Id, message.Sender.Username, message.Sender.AvatarUrl, message.Sender.Description, message.Sender.IsOnline, message.Sender.LastSeenAt),
                 message.EncryptedContent,
                 message.Type.ToString().ToLower(),
                 message.SentAt.ToString("o")
@@ -240,7 +240,9 @@ public class TalkTimeHub : Hub
         await Clients.Caller.SendAsync("RoomCreated", new RoomInfo(
             roomId,
             roomName,
-            new List<UserDto> { new(user.Id, user.Username, user.AvatarUrl) },
+            new List<UserDto> {
+                new UserDto(user.Id, user.Username, user.AvatarUrl, user.Description, user.IsOnline, user.LastSeenAt),
+            },
             userId,
             roomState.CreatedAt
         ));
@@ -276,7 +278,7 @@ public class TalkTimeHub : Hub
         var user = await _userRepository.GetByIdAsync(userId);
         if (user == null) return;
 
-        var userDto = new UserDto(user.Id, user.Username, user.AvatarUrl);
+        var userDto = new UserDto(user.Id, user.Username, user.AvatarUrl, user.Description, user.IsOnline, user.LastSeenAt);
 
         // Add user to room
         roomState.Participants[userId] = userDto;

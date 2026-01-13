@@ -32,6 +32,8 @@ class _ConferencePageState extends State<ConferencePage> {
   // UI Specific Renderers (must be disposed when page closes)
   final RTCVideoRenderer _localRenderer = RTCVideoRenderer();
   final Map<String, RTCVideoRenderer> _remoteRenderers = {};
+  bool _isPresentationMode = false;
+  String? _focusedParticipantId; // Optional: manually select who to focus
 
   // Stream Subscriptions for dynamic updates
   StreamSubscription? _stateSubscription;
@@ -189,6 +191,26 @@ class _ConferencePageState extends State<ConferencePage> {
     setState(() {});
   }
 
+  void _presentationMode(String id, bool hasVideo) {
+    setState(() {
+      if (!hasVideo) {
+        return;
+      }
+
+      if (_isPresentationMode && _focusedParticipantId != id) {
+        _focusedParticipantId = id;
+        return;
+      }
+
+      _isPresentationMode = !_isPresentationMode;
+      if (_isPresentationMode) {
+        _focusedParticipantId = id;
+      } else {
+        _focusedParticipantId = null;
+      }
+    });
+  }
+
   @override
   void dispose() {
     // IMPORTANT: Cancel subscriptions
@@ -298,8 +320,67 @@ class _ConferencePageState extends State<ConferencePage> {
           participantId: id,
           stream: stream,
           username: user?.username ?? '???',
+          onParticipantTap: (id, hasVideo) => _presentationMode(id, hasVideo),
+          fitInRect: _isPresentationMode,
         ),
       );
+    }
+
+    if (_isPresentationMode) {
+      String? focusedId = _focusedParticipantId;
+
+      if (focusedId == null || !streams.containsKey(focusedId)) {
+        // Fallback: pick first participant
+        focusedId = participants.first;
+      }
+
+      final otherParticipants = participants
+          .where((id) => id != focusedId)
+          .toList();
+
+      // Main large tile
+      final mainTile = Center(
+        child: SizedBox.expand(
+          child: RemoteParticipantTile(
+            key: ValueKey(focusedId),
+            participantId: focusedId,
+            stream: streams[focusedId]!,
+            username: userInfoMap[focusedId]?.username ?? '???',
+            onParticipantTap: (id, hasVideo) => _presentationMode(id, hasVideo),
+            fitInRect: true,
+          ),
+        ),
+      );
+
+      // Small vertical list on the RIGHT side
+      final smallThumbnails = Positioned(
+        right: 16,
+        top: 80, // Leave space for controls & avoid overlap
+        bottom: 80, // Avoid bottom controls
+        child: SingleChildScrollView(
+          child: Column(
+            children: otherParticipants.map((id) {
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: SizedBox(
+                  width: 80,
+                  height: 100,
+                  child: RemoteParticipantTile(
+                    key: ValueKey(id),
+                    participantId: id,
+                    stream: streams[id]!,
+                    username: userInfoMap[id]?.username ?? '???',
+                    onParticipantTap: (id, hasVideo) =>
+                        _presentationMode(id, hasVideo),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+      );
+
+      return Stack(children: [mainTile, smallThumbnails]);
     }
 
     final columns = totalTiles <= 2
@@ -334,6 +415,8 @@ class _ConferencePageState extends State<ConferencePage> {
                     participantId: id,
                     stream: stream,
                     username: user?.username ?? '???',
+                    onParticipantTap: (id, hasVideo) =>
+                        _presentationMode(id, hasVideo),
                   ),
                 ),
               );

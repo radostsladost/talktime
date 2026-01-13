@@ -486,19 +486,12 @@ class CallService {
               "959212b0629ad5c3e7d8c3f9ccc20771e5c3596370847f1fd85feda871e11d56",
         },
         {
-          'urls': ['stun:v776682.macloud.host:3478'],
-          "username": "turnserver",
-          "credential":
-              "959212b0629ad5c3e7d8c3f9ccc20771e5c3596370847f1fd85feda871e11d56",
-        },
-        {
-          'urls': ['turns:v776682.macloud.host:3478'],
-          "username": "turnserver",
-          "credential":
-              "959212b0629ad5c3e7d8c3f9ccc20771e5c3596370847f1fd85feda871e11d56",
-        },
-        {
           'urls': ['stun:stun.l.google.com:19302'],
+          "username": "",
+          "credential": "",
+        },
+        {
+          'urls': ['stun:stun.rtc.yandex.net'],
           "username": "",
           "credential": "",
         },
@@ -557,7 +550,18 @@ class CallService {
       if (state == RTCIceConnectionState.RTCIceConnectionStateDisconnected ||
           state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
         _logger.w('Peer $participantId disconnected');
-        // Optionally reconnect or remove
+        _removePeerConnection(participantId).then(
+          (_) => Future.delayed(Duration(seconds: 1), () async {
+            final pc = _peerConnections[participantId]!;
+            final offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            await _signalingService!.sendOffer(
+              participantId,
+              offer.sdp!,
+              roomId: _currentRoomId,
+            );
+          }),
+        );
       }
     };
 

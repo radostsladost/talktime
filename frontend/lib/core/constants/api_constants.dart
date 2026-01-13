@@ -19,6 +19,7 @@ class ApiConstants {
   static const String logout = '$auth/logout';
   static const String logoutAll = '$auth/logout-all';
   static const String me = '$auth/me';
+  static const String updateProfile = '$auth/me';
   static const String refreshToken = '$auth/refresh';
   static const String revokeToken = '$auth/revoke';
 

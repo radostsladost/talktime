@@ -9,12 +9,16 @@ class RemoteParticipantTile extends StatefulWidget {
   final String participantId;
   final String username;
   final MediaStream stream;
+  final Function(String, bool)? onParticipantTap;
+  final bool? fitInRect;
 
   const RemoteParticipantTile({
     super.key,
     required this.participantId,
     required this.username,
     required this.stream,
+    this.onParticipantTap,
+    this.fitInRect,
   });
 
   @override
@@ -165,68 +169,84 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
       _renderer.srcObject = widget.stream;
     }
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(12),
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          // 1. Video Layer
-          if (_isRendererReady && hasVideo)
-            RTCVideoView(
-              _renderer,
-              objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-              mirror: false,
-            )
-          else
-            Container(
-              color: Colors.grey[800],
-              child: Center(
-                child: CircleAvatar(
-                  radius: 30,
-                  backgroundColor: Colors.deepPurple,
+    return Material(
+      child: InkWell(
+        onTap: () => widget.onParticipantTap?.call(
+          widget.participantId,
+          _isRendererReady && hasVideo,
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              // 1. Video Layer
+              if (_isRendererReady && hasVideo)
+                RTCVideoView(
+                  _renderer,
+                  objectFit: widget.fitInRect == true
+                      ? RTCVideoViewObjectFit.RTCVideoViewObjectFitContain
+                      : RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                  mirror: false,
+                )
+              else
+                Container(
+                  color: Colors.grey[800],
+                  child: Center(
+                    child: CircleAvatar(
+                      radius: 30,
+                      backgroundColor: Colors.deepPurple,
+                      child: Text(
+                        widget.username.isNotEmpty
+                            ? widget.username.substring(0, 1).toUpperCase()
+                            : '?',
+                        style: const TextStyle(
+                          fontSize: 24,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+
+              // 2. Name Tag
+              Positioned(
+                bottom: 8,
+                left: 8,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
                   child: Text(
-                    widget.username.isNotEmpty
-                        ? widget.username.substring(0, 1).toUpperCase()
-                        : '?',
-                    style: const TextStyle(fontSize: 24, color: Colors.white),
+                    widget.username,
+                    style: const TextStyle(color: Colors.white, fontSize: 12),
                   ),
                 ),
               ),
-            ),
 
-          // 2. Name Tag
-          Positioned(
-            bottom: 8,
-            left: 8,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.black54,
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: Text(
-                widget.username,
-                style: const TextStyle(color: Colors.white, fontSize: 12),
-              ),
-            ),
+              // 3. Audio Mute Indicator
+              if (!_hasActiveAudio)
+                const Positioned(
+                  top: 8,
+                  right: 8,
+                  child: Icon(Icons.mic_off, color: Colors.red, size: 20),
+                ),
+
+              // 4. Video Off Indicator (when in avatar mode)
+              if (!hasVideo)
+                const Positioned(
+                  top: 8,
+                  left: 8,
+                  child: Icon(Icons.videocam_off, color: Colors.red, size: 20),
+                ),
+            ],
           ),
-
-          // 3. Audio Mute Indicator
-          if (!_hasActiveAudio)
-            const Positioned(
-              top: 8,
-              right: 8,
-              child: Icon(Icons.mic_off, color: Colors.red, size: 20),
-            ),
-
-          // 4. Video Off Indicator (when in avatar mode)
-          if (!hasVideo)
-            const Positioned(
-              top: 8,
-              left: 8,
-              child: Icon(Icons.videocam_off, color: Colors.red, size: 20),
-            ),
-        ],
+        ),
       ),
     );
   }

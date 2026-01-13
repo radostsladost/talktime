@@ -4,7 +4,9 @@ This project implements a real-time communication application utilizing a modern
 
 ## Motivation
 
-There's no modern looking chat app, which doesn't require you to register for selfhosting.
+1) There's no modern looking chat app, which doesn't require you to register for selfhosting.
+2) An attempt to change the industry of making electron apps or web apps, which are not as performant and clean as native apps
+3) To learn and practice modern web development technologies.
 
 ## Architecture Summary
 
@@ -25,6 +27,7 @@ The user-facing application is developed using **Flutter**, enabling deployment 
 
 - The core logic and UI reside within the `talktime/frontend/lib` directory.
 - Platform-specific configurations and dependencies are managed in directories like `talktime/frontend/android`, `talktime/frontend/ios`, and configuration files like `talktime/frontend/pubspec.yaml`.
+- The PC build is taking about 52MB and the web build is taking about 35MB.
 
 ### Screenshots
 

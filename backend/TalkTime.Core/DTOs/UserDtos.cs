@@ -4,16 +4,18 @@ namespace TalkTime.Core.DTOs;
 public record UserDto(
     string Id,
     string Username,
-    string? AvatarUrl
-);
-
-public record UserDetailDto(
-    string Id,
-    string Username,
-    string Email,
     string? AvatarUrl,
+    string? Description,
     bool IsOnline,
     DateTime? LastSeenAt
+);
+
+public record UserProfileDto(
+    string Id,
+    string Username,
+    string? AvatarUrl,
+    string? Email,
+    string? Description
 );
 
 // Request DTOs
@@ -33,12 +35,15 @@ public record LoginResponse(
     string RefreshToken,
     DateTime AccessTokenExpires,
     DateTime RefreshTokenExpires,
-    UserDto User
+    UserProfileDto User
 );
 
 public record UpdateProfileRequest(
     string? Username,
-    string? AvatarUrl
+    string? Email,
+    string? Description,
+    string? Password,
+    string? NewPassword
 );
 
 // Refresh Token DTOs
