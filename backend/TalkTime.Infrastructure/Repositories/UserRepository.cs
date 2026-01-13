@@ -31,7 +31,7 @@ public class UserRepository : IUserRepository
     {
         await using var dbContext = _context.CreateDbContext();
         return await dbContext.Users
-            .FirstOrDefaultAsync(u => u.Username.Contains(username, StringComparison.InvariantCultureIgnoreCase));
+            .FirstOrDefaultAsync(u => u.Username.ToLower().Contains(username.ToLower()));
     }
 
     public async Task<List<User>> GetAllAsync()

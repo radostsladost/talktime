@@ -19,6 +19,7 @@ class User extends Equatable {
       id: json['id'],
       username: json['username'],
       avatarUrl: json['avatarUrl'],
+      description: json['description'],
     );
   }
 
