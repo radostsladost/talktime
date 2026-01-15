@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
@@ -8,6 +9,10 @@ using TalkTime.Api.Services;
 using TalkTime.Core.Interfaces;
 using TalkTime.Infrastructure.Data;
 using TalkTime.Infrastructure.Repositories;
+using TalkTime.Infrastructure.Services;
+using FirebaseAdmin;
+using Google.Apis.Auth.OAuth2;
+
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -22,6 +27,8 @@ builder.Services.AddScoped<IUserRepository, UserRepository>();
 builder.Services.AddScoped<IConversationRepository, ConversationRepository>();
 builder.Services.AddScoped<IMessageRepository, MessageRepository>();
 builder.Services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
+builder.Services.AddScoped<IUserFirebaseTokenRepository, UserFirebaseTokenRepository>();
+builder.Services.AddScoped<INotificationsService, NotificationsService>();
 
 // Services
 builder.Services.AddScoped<IJwtService, JwtService>();
@@ -161,5 +168,14 @@ app.MapHealthChecks("/health");
 using var scope = app.Services.CreateScope();
 var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 await dbContext.Database.MigrateAsync();
+
+var firebaseAdminJson = Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!, "firebase-adminsdk.json");
+if (File.Exists(firebaseAdminJson))
+{
+    FirebaseApp.Create(new AppOptions()
+    {
+        Credential = GoogleCredential.FromFile(firebaseAdminJson),
+    });
+}
 
 app.Run();

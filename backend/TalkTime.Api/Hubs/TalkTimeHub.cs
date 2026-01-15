@@ -333,11 +333,41 @@ public class TalkTimeHub : Hub
             {
                 if (participant.UserId != userId)
                 {
-                    await Clients.User(participant.UserId).SendAsync("CallInitiated", new RoomParticipantUpdate(
-                        roomId,
-                        userDto,
-                        "joined"
-                    ));
+                    // Send SignalR notification to online users
+                    if (ConnectedUsers.ContainsKey(participant.UserId))
+                    {
+                        await Clients.User(participant.UserId).SendAsync("CallInitiated", new RoomParticipantUpdate(
+                            roomId,
+                            userDto,
+                            "joined"
+                        ));
+                    }
+                    // else
+                    {
+                        // Send push notification to offline users
+                        try
+                        {
+                            var notificationData = System.Text.Json.JsonSerializer.Serialize(new
+                            {
+                                type = "call",
+                                conversationId = roomId,
+                                callerId = userId,
+                                callerUsername = user.Username
+                            });
+
+                            await _notificationsService.SendNotificationAsync(
+                                participant.UserId,
+                                user.Username ?? "Incoming call",
+                                conversations.Type == ConversationType.Direct ? "Calling you" : "Calling in group",
+                                user.AvatarUrl,
+                                notificationData
+                            );
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Failed to send push notification for call to user {UserId}", participant.UserId);
+                        }
+                    }
                 }
             }
         }

@@ -15,6 +15,7 @@ import 'package:talktime/features/call/presentation/pages/conference_page.dart';
 import 'package:talktime/features/chat/presentation/pages/chat_list_page.dart';
 import 'package:talktime/features/call/data/incoming_call_manager.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:logger/logger.dart';
 
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
@@ -27,7 +28,12 @@ Future<void> main() async {
   // Initialize the incoming call manager with the global navigator key
   IncomingCallManager().initialize(navigatorKey);
 
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  try {
+    await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  } 
+  catch (e) {
+    Logger().e("Firebase exception: $e", error: e);
+  }
 
   runApp(const MyApp());
 }
@@ -95,6 +101,14 @@ class _SplashScreenState extends State<SplashScreen> {
       if (!mounted) return;
 
       if (isAuthenticated) {
+        // Register Firebase token for push notifications
+        try {
+          await _authService.registerFirebaseToken();
+        } catch (e) {
+          // Log error but don't block navigation
+          Logger().e('Failed to register Firebase token: $e');
+        }
+
         // User is logged in, go to chat list
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (_) => const ChatListPage()),

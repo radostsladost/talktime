@@ -18,6 +18,7 @@ public class MessagesController : ControllerBase
     private readonly IConversationRepository _conversationRepository;
     private readonly IUserRepository _userRepository;
     private readonly IHubContext<TalkTimeHub> _hubContext;
+    private readonly INotificationsService _notificationsService;
     private readonly ILogger<MessagesController> _logger;
 
     public MessagesController(
@@ -25,12 +26,14 @@ public class MessagesController : ControllerBase
         IConversationRepository conversationRepository,
         IUserRepository userRepository,
         IHubContext<TalkTimeHub> hubContext,
+        INotificationsService notificationsService,
         ILogger<MessagesController> logger)
     {
         _messageRepository = messageRepository;
         _conversationRepository = conversationRepository;
         _userRepository = userRepository;
         _hubContext = hubContext;
+        _notificationsService = notificationsService;
         _logger = logger;
     }
 
@@ -159,6 +162,40 @@ public class MessagesController : ControllerBase
                 _logger.LogError(ex, "Failed to send SignalR message to conversation {ConversationId} for user {UserId}",
                     request.ConversationId, userId);
                 // Continue with the operation even if SignalR fails
+            }
+
+            // Send push notifications to offline recipients
+            try
+            {
+                foreach (var recipientId in recipientIds)
+                {
+                    var recipient = await _userRepository.GetByIdAsync(recipientId);
+                    if (recipient != null && !recipient.IsOnline)
+                    {
+                        // Send push notification
+                        var notificationData = System.Text.Json.JsonSerializer.Serialize(new
+                        {
+                            type = "message",
+                            conversationId = request.ConversationId,
+                            messageId = message.Id,
+                            senderId = userId,
+                            senderUsername = sender.Username
+                        });
+
+                        await _notificationsService.SendNotificationAsync(
+                            recipientId,
+                            sender.Username ?? "New message",
+                            "You have a new message",
+                            sender.AvatarUrl,
+                            notificationData
+                        );
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to send push notifications for message {MessageId}", message.Id);
+                // Continue with the operation even if push notifications fail
             }
 
             return Ok(new { data = messageDto });

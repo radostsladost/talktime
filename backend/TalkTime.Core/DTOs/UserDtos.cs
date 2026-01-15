@@ -22,12 +22,18 @@ public record UserProfileDto(
 public record RegisterRequest(
     string Username,
     string Email,
-    string Password
+    string Password,
+    string? FirebaseToken = null,
+    string? DeviceId = null,
+    string? DeviceInfo = null
 );
 
 public record LoginRequest(
     string Email,
-    string Password
+    string Password,
+    string? FirebaseToken = null,
+    string? DeviceId = null,
+    string? DeviceInfo = null
 );
 
 public record LoginResponse(
@@ -60,4 +66,11 @@ public record RefreshTokenResponse(
 
 public record RevokeTokenRequest(
     string RefreshToken
+);
+
+// Firebase Token DTOs
+public record RegisterFirebaseTokenRequest(
+    string Token,
+    string? DeviceId,
+    string? DeviceInfo
 );

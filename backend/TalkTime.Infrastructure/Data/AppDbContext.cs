@@ -16,6 +16,7 @@ public class AppDbContext : DbContext
     public DbSet<Message> Messages => Set<Message>();
     public DbSet<MessageDelivery> MessageDeliveries => Set<MessageDelivery>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+    public DbSet<UserFirebaseToken> UserFirebaseTokens => Set<UserFirebaseToken>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -266,6 +267,50 @@ public class AppDbContext : DbContext
             entity.HasIndex(e => e.TokenHash).IsUnique();
             entity.HasIndex(e => e.UserId);
             entity.HasIndex(e => e.ExpiresAt);
+        });
+
+        // UserFirebaseToken configuration
+        modelBuilder.Entity<UserFirebaseToken>(entity =>
+        {
+            entity.ToTable("user_firebase_tokens");
+
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+
+            entity.Property(e => e.UserId)
+                .HasColumnName("user_id")
+                .IsRequired();
+
+            entity.Property(e => e.Token)
+                .HasColumnName("token")
+                .HasMaxLength(500)
+                .IsRequired();
+
+            entity.Property(e => e.DeviceId)
+                .HasColumnName("device_id")
+                .HasMaxLength(255);
+
+            entity.Property(e => e.DeviceInfo)
+                .HasColumnName("device_info")
+                .HasMaxLength(500);
+
+            entity.Property(e => e.CreatedAt)
+                .HasColumnName("created_at")
+                .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.Property(e => e.LastUsedAt)
+                .HasColumnName("last_used_at");
+
+            // Relationships
+            entity.HasOne(e => e.User)
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Indexes
+            entity.HasIndex(e => e.UserId);
+            entity.HasIndex(e => e.Token);
+            entity.HasIndex(e => new { e.UserId, e.DeviceId });
         });
     }
 }

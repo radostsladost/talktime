@@ -22,6 +22,7 @@ class ApiConstants {
   static const String updateProfile = '$auth/me';
   static const String refreshToken = '$auth/refresh';
   static const String revokeToken = '$auth/revoke';
+  static const String registerFirebaseToken = '$auth/firebase-token';
 
   // ==================== Conversation Endpoints ====================
   static const String conversations = '$apiPrefix/conversations';

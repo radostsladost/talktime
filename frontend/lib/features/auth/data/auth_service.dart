@@ -1,16 +1,119 @@
+import 'dart:ui';
+import 'dart:io';
+import 'dart:math';
+
+import 'package:device_info_plus/device_info_plus.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:logger/logger.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:talktime/core/network/api_client.dart';
 import 'package:talktime/core/constants/api_constants.dart';
+import 'package:talktime/core/global_key.dart';
 import 'package:talktime/shared/models/user.dart';
 
 class AuthService {
   final ApiClient _apiClient = ApiClient();
 
+  /// Get Firebase Cloud Messaging token
+  Future<String?> _getFcmToken() async {
+    try {
+      // Request permission for notifications
+      // if (kIsWeb || Platform.isWindows || Platform.isAndroid) {
+      await FirebaseMessaging.instance.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
+      // }
+
+      // Get the FCM token
+      final token = await FirebaseMessaging.instance.getToken();
+      return token;
+    } catch (e) {
+      Logger().e('Failed to get FCM token: $e');
+      return null;
+    }
+  }
+
+  /// Register Firebase token with the backend
+  Future<void> _registerFirebaseToken(String? token) async {
+    if (token == null || token.isEmpty) {
+      return;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+
+    var deviceIdVal = prefs.getString('deviceId');
+    if (deviceIdVal == null || deviceIdVal.isEmpty) {
+      final rng = Random();
+      deviceIdVal =
+          (rng.nextDouble() + 0.001).toString().substring(2) +
+          (rng.nextDouble() + 0.001).toString().substring(2);
+      await prefs.setString('deviceId', deviceIdVal);
+    }
+
+    try {
+      DeviceInfoPlugin deviceInfoPlugin = DeviceInfoPlugin();
+      String deviceId = "unknown";
+      String deviceInfo = "";
+      if (kIsWeb) {
+        deviceId = "web";
+        deviceInfo = (await deviceInfoPlugin.webBrowserInfo).userAgent!;
+      } else {
+        deviceInfo = deviceInfo;
+        if (Platform.isIOS) {
+          deviceId = 'ios';
+          deviceInfo = (await deviceInfoPlugin.iosInfo).utsname.machine;
+        } else if (Platform.isAndroid) {
+          deviceId = 'android';
+          deviceInfo = (await deviceInfoPlugin.androidInfo).name;
+        } else if (Platform.isWindows) {
+          deviceId = 'windows';
+          deviceInfo = (await deviceInfoPlugin.windowsInfo).productName;
+        } else if (Platform.isLinux) {
+          deviceId = 'linux';
+          deviceInfo = (await deviceInfoPlugin.linuxInfo).prettyName;
+        } else if (Platform.isMacOS) {
+          deviceId = 'macOS';
+          deviceInfo = (await deviceInfoPlugin.macOsInfo).computerName;
+        } else {
+          deviceInfo = Platform.operatingSystem;
+        }
+      }
+      deviceId = '$deviceId-$deviceIdVal';
+
+      await _apiClient.post(
+        ApiConstants.registerFirebaseToken,
+        body: {'token': token, 'deviceId': deviceId, 'deviceInfo': deviceInfo},
+        requiresAuth: true,
+      );
+      Logger().i('Firebase token registered successfully');
+    } catch (e) {
+      Logger().e('Failed to register Firebase token: $e');
+      // Don't throw - this is not critical for login/registration
+    }
+  }
+
   /// Login with email and password
   Future<AuthResponse> login(String email, String password) async {
+    // Get FCM token before login
+    final fcmToken = await _getFcmToken();
+
+    final body = {'email': email, 'password': password};
+
+    // Add FCM token if available
+    if (fcmToken != null) {
+      body['firebaseToken'] = fcmToken;
+      body['deviceId'] = Platform.isAndroid ? 'android' : 'ios';
+      body['deviceInfo'] = Platform.operatingSystem;
+    }
+
     final response = await _apiClient.post(
       ApiConstants.login,
-      body: {'email': email, 'password': password},
+      body: body,
       requiresAuth: false,
     );
 
@@ -33,6 +136,11 @@ class AuthService {
       refreshTokenExpires: refreshTokenExpires,
     );
 
+    // Register FCM token if not already sent (fallback)
+    if (fcmToken != null) {
+      await _registerFirebaseToken(fcmToken);
+    }
+
     return AuthResponse(
       accessToken: accessToken,
       refreshToken: refreshToken,
@@ -48,9 +156,21 @@ class AuthService {
     String email,
     String password,
   ) async {
+    // Get FCM token before registration
+    final fcmToken = await _getFcmToken();
+
+    final body = {'username': username, 'email': email, 'password': password};
+
+    // Add FCM token if available
+    if (fcmToken != null) {
+      body['firebaseToken'] = fcmToken;
+      body['deviceId'] = Platform.isAndroid ? 'android' : 'ios';
+      body['deviceInfo'] = Platform.operatingSystem;
+    }
+
     final response = await _apiClient.post(
       ApiConstants.register,
-      body: {'username': username, 'email': email, 'password': password},
+      body: body,
       requiresAuth: false,
     );
 
@@ -191,6 +311,15 @@ class AuthService {
   /// Get the current refresh token
   Future<String?> getRefreshToken() async {
     return await _apiClient.getRefreshToken();
+  }
+
+  /// Register Firebase Cloud Messaging token
+  /// Call this when the app is already authenticated and opened
+  Future<void> registerFirebaseToken() async {
+    final fcmToken = await _getFcmToken();
+    if (fcmToken != null) {
+      await _registerFirebaseToken(fcmToken);
+    }
   }
 }
 

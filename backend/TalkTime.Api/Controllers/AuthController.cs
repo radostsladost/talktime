@@ -13,6 +13,7 @@ public class AuthController : ControllerBase
 {
     private readonly IUserRepository _userRepository;
     private readonly IRefreshTokenRepository _refreshTokenRepository;
+    private readonly IUserFirebaseTokenRepository _firebaseTokenRepository;
     private readonly IJwtService _jwtService;
     private readonly ILogger<AuthController> _logger;
     private readonly IConfiguration _configuration;
@@ -20,12 +21,14 @@ public class AuthController : ControllerBase
     public AuthController(
         IUserRepository userRepository,
         IRefreshTokenRepository refreshTokenRepository,
+        IUserFirebaseTokenRepository firebaseTokenRepository,
         IJwtService jwtService,
         ILogger<AuthController> logger,
         IConfiguration configuration)
     {
         _userRepository = userRepository;
         _refreshTokenRepository = refreshTokenRepository;
+        _firebaseTokenRepository = firebaseTokenRepository;
         _jwtService = jwtService;
         _logger = logger;
         _configuration = configuration;
@@ -55,6 +58,12 @@ public class AuthController : ControllerBase
 
             // Update online status
             await _userRepository.SetOnlineStatusAsync(user.Id, true);
+
+            // Save Firebase token if provided
+            if (!string.IsNullOrWhiteSpace(request.FirebaseToken))
+            {
+                await SaveFirebaseTokenAsync(user.Id, request.FirebaseToken, request.DeviceId, request.DeviceInfo);
+            }
 
             _logger.LogInformation("User {UserId} logged in successfully", user.Id);
 
@@ -105,6 +114,12 @@ public class AuthController : ControllerBase
             await _userRepository.CreateAsync(user);
 
             var (accessToken, refreshToken, accessTokenExpires, refreshTokenExpires) = await GenerateTokensAsync(user);
+
+            // Save Firebase token if provided
+            if (!string.IsNullOrWhiteSpace(request.FirebaseToken))
+            {
+                await SaveFirebaseTokenAsync(user.Id, request.FirebaseToken, request.DeviceId, request.DeviceInfo);
+            }
 
             _logger.LogInformation("New user registered: {UserId} ({Username})", user.Id, user.Username);
 
@@ -393,5 +408,75 @@ public class AuthController : ControllerBase
         await _refreshTokenRepository.CreateAsync(refreshTokenEntity);
 
         return (accessToken, refreshToken, accessTokenExpires, refreshTokenExpires);
+    }
+
+    /// <summary>
+    /// Register or update Firebase token for push notifications
+    /// </summary>
+    [HttpPost("firebase-token")]
+    [Authorize]
+    public async Task<ActionResult> RegisterFirebaseToken([FromBody] RegisterFirebaseTokenRequest request)
+    {
+        try
+        {
+            var userId = User.FindFirst("userId")?.Value;
+
+            if (string.IsNullOrEmpty(userId))
+            {
+                return BadRequest(new { message = "User not found in token" });
+            }
+
+            if (string.IsNullOrWhiteSpace(request.Token))
+            {
+                return BadRequest(new { message = "Firebase token is required" });
+            }
+
+            await SaveFirebaseTokenAsync(userId, request.Token, request.DeviceId, request.DeviceInfo);
+
+            _logger.LogInformation("Firebase token registered for user {UserId}", userId);
+
+            return Ok(new { message = "Firebase token registered successfully" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error registering Firebase token");
+            return StatusCode(500, new { message = "An error occurred during token registration" });
+        }
+    }
+
+    /// <summary>
+    /// Save Firebase token for a user
+    /// </summary>
+    private async Task SaveFirebaseTokenAsync(string userId, string token, string? deviceId, string? deviceInfo)
+    {
+        try
+        {
+            // Get device info from request headers if not provided
+            if (string.IsNullOrEmpty(deviceInfo))
+            {
+                deviceInfo = HttpContext.Request.Headers.UserAgent.ToString();
+                if (deviceInfo?.Length > 500)
+                {
+                    deviceInfo = deviceInfo[..500];
+                }
+            }
+
+            var firebaseToken = new UserFirebaseToken
+            {
+                UserId = userId,
+                Token = token,
+                DeviceId = deviceId,
+                DeviceInfo = deviceInfo,
+                CreatedAt = DateTime.UtcNow,
+                LastUsedAt = DateTime.UtcNow
+            };
+
+            await _firebaseTokenRepository.UpsertAsync(firebaseToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error saving Firebase token for user {UserId}", userId);
+            // Don't throw - this is not critical for login/registration
+        }
     }
 }
