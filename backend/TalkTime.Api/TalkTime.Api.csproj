@@ -20,4 +20,12 @@
     <ProjectReference Include="..\TalkTime.Infrastructure\TalkTime.Infrastructure.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Remove="firebase-admin.json" />
+    <Content Include="firebase-admin.json">
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
 </Project>

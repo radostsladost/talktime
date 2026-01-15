@@ -168,3 +168,4 @@ app.*.symbols
 firebase.json
 lib/firebase_options.dart
 android/app/google-services.json
+web/firebase-messaging-sw.js

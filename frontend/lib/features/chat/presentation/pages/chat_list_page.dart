@@ -107,7 +107,7 @@ class _ChatListPageState extends State<ChatListPage>
         actions: [
           IconButton(
             icon: const Icon(Icons.settings),
-            onPressed: () => _openProfile(context),
+            onPressed: () => _openProfile(),
           ),
         ],
       ),
@@ -204,7 +204,7 @@ class _ChatListPageState extends State<ChatListPage>
                       ),
                     ],
                   ),
-                  onTap: () => _openChat(context, convo),
+                  onTap: () => _openChat(convo),
                 ),
               );
             },
@@ -217,13 +217,13 @@ class _ChatListPageState extends State<ChatListPage>
           FloatingActionButton(
             heroTag: "NewGroup",
             child: const Icon(Icons.group),
-            onPressed: () => _createGroup(context),
+            onPressed: () => _createGroup(),
           ),
           SizedBox(height: 8),
           FloatingActionButton(
             heroTag: "NewConversation",
             child: const Icon(Icons.edit),
-            onPressed: () => _createConversation(context),
+            onPressed: () => _createConversation(),
           ),
         ],
       ),
@@ -247,10 +247,7 @@ class _ChatListPageState extends State<ChatListPage>
     }
   }
 
-  Future<void> _openChat(
-    BuildContext context,
-    Conversation conversation,
-  ) async {
+  Future<void> _openChat(Conversation conversation) async {
     final auth = new AuthService();
     final user = await auth.getCurrentUser();
     conversation.participants?.sort((a, b) {
@@ -269,7 +266,7 @@ class _ChatListPageState extends State<ChatListPage>
     );
   }
 
-  void _createConversation(BuildContext context) {
+  void _createConversation() {
     // TODO: Show group creation dialog
     Navigator.push(
       context,
@@ -277,7 +274,7 @@ class _ChatListPageState extends State<ChatListPage>
     );
   }
 
-  void _createGroup(BuildContext context) {
+  void _createGroup() {
     // TODO: Show group creation dialog
     Navigator.push(
       context,
@@ -285,7 +282,7 @@ class _ChatListPageState extends State<ChatListPage>
     );
   }
 
-  void _openProfile(BuildContext context) {
+  void _openProfile() {
     Navigator.push(
       context,
       MaterialPageRoute(builder: (context) => const EditProfilePage()),

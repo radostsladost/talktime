@@ -14,6 +14,13 @@ public class NotificationsService(
     {
         try
         {
+            // Check if Firebase is initialized
+            if (FirebaseMessaging.DefaultInstance == null)
+            {
+                logger.LogWarning("Firebase Admin SDK is not initialized. Cannot send notifications to user {UserId}", userId);
+                return;
+            }
+
             // Get all Firebase tokens for the user
             var tokens = await firebaseTokenRepository.GetByUserIdAsync(userId);
 
@@ -44,6 +51,13 @@ public class NotificationsService(
             {
                 try
                 {
+                    // Validate token is not null or empty
+                    if (string.IsNullOrWhiteSpace(token.Token))
+                    {
+                        logger.LogWarning("Firebase token is null or empty for token {TokenId} of user {UserId}", token.Id, userId);
+                        return;
+                    }
+
                     var firebaseMessage = new Message
                     {
                         Token = token.Token,
@@ -75,6 +89,13 @@ public class NotificationsService(
                             }
                         }
                     };
+
+                    // Double-check Firebase is initialized before sending
+                    if (FirebaseMessaging.DefaultInstance == null)
+                    {
+                        logger.LogError("Firebase Admin SDK became uninitialized while processing notification for user {UserId}", userId);
+                        return;
+                    }
 
                     var response = await FirebaseMessaging.DefaultInstance.SendAsync(firebaseMessage);
                     logger.LogInformation("Firebase notification sent successfully to token {TokenId} for user {UserId}. MessageId: {MessageId}",

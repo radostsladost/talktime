@@ -44,46 +44,8 @@ class AuthService {
       return;
     }
 
-    final prefs = await SharedPreferences.getInstance();
-
-    var deviceIdVal = prefs.getString('deviceId');
-    if (deviceIdVal == null || deviceIdVal.isEmpty) {
-      final rng = Random();
-      deviceIdVal =
-          (rng.nextDouble() + 0.001).toString().substring(2) +
-          (rng.nextDouble() + 0.001).toString().substring(2);
-      await prefs.setString('deviceId', deviceIdVal);
-    }
-
     try {
-      DeviceInfoPlugin deviceInfoPlugin = DeviceInfoPlugin();
-      String deviceId = "unknown";
-      String deviceInfo = "";
-      if (kIsWeb) {
-        deviceId = "web";
-        deviceInfo = (await deviceInfoPlugin.webBrowserInfo).userAgent!;
-      } else {
-        deviceInfo = deviceInfo;
-        if (Platform.isIOS) {
-          deviceId = 'ios';
-          deviceInfo = (await deviceInfoPlugin.iosInfo).utsname.machine;
-        } else if (Platform.isAndroid) {
-          deviceId = 'android';
-          deviceInfo = (await deviceInfoPlugin.androidInfo).name;
-        } else if (Platform.isWindows) {
-          deviceId = 'windows';
-          deviceInfo = (await deviceInfoPlugin.windowsInfo).productName;
-        } else if (Platform.isLinux) {
-          deviceId = 'linux';
-          deviceInfo = (await deviceInfoPlugin.linuxInfo).prettyName;
-        } else if (Platform.isMacOS) {
-          deviceId = 'macOS';
-          deviceInfo = (await deviceInfoPlugin.macOsInfo).computerName;
-        } else {
-          deviceInfo = Platform.operatingSystem;
-        }
-      }
-      deviceId = '$deviceId-$deviceIdVal';
+      var (deviceId, deviceInfo) = await getDeviceInfo();
 
       await _apiClient.post(
         ApiConstants.registerFirebaseToken,
@@ -103,12 +65,13 @@ class AuthService {
     final fcmToken = await _getFcmToken();
 
     final body = {'email': email, 'password': password};
+    var (deviceId, deviceInfo) = await getDeviceInfo();
 
     // Add FCM token if available
     if (fcmToken != null) {
       body['firebaseToken'] = fcmToken;
-      body['deviceId'] = Platform.isAndroid ? 'android' : 'ios';
-      body['deviceInfo'] = Platform.operatingSystem;
+      body['deviceId'] = deviceId;
+      body['deviceInfo'] = deviceInfo;
     }
 
     final response = await _apiClient.post(
@@ -320,6 +283,50 @@ class AuthService {
     if (fcmToken != null) {
       await _registerFirebaseToken(fcmToken);
     }
+  }
+
+  Future<(String deviceId, String deviceInfo)> getDeviceInfo() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    var deviceIdVal = prefs.getString('deviceId');
+    if (deviceIdVal == null || deviceIdVal.isEmpty) {
+      final rng = Random();
+      deviceIdVal =
+          (rng.nextDouble() + 0.001).toString().substring(2) +
+          (rng.nextDouble() + 0.001).toString().substring(2);
+      await prefs.setString('deviceId', deviceIdVal);
+    }
+
+    DeviceInfoPlugin deviceInfoPlugin = DeviceInfoPlugin();
+    String deviceId = "unknown";
+    String deviceInfo = "";
+    if (kIsWeb) {
+      deviceId = "web";
+      deviceInfo = (await deviceInfoPlugin.webBrowserInfo).userAgent!;
+    } else {
+      deviceInfo = deviceInfo;
+      if (Platform.isIOS) {
+        deviceId = 'ios';
+        deviceInfo = (await deviceInfoPlugin.iosInfo).utsname.machine;
+      } else if (Platform.isAndroid) {
+        deviceId = 'android';
+        deviceInfo = (await deviceInfoPlugin.androidInfo).name;
+      } else if (Platform.isWindows) {
+        deviceId = 'windows';
+        deviceInfo = (await deviceInfoPlugin.windowsInfo).productName;
+      } else if (Platform.isLinux) {
+        deviceId = 'linux';
+        deviceInfo = (await deviceInfoPlugin.linuxInfo).prettyName;
+      } else if (Platform.isMacOS) {
+        deviceId = 'macOS';
+        deviceInfo = (await deviceInfoPlugin.macOsInfo).computerName;
+      } else {
+        deviceInfo = Platform.operatingSystem;
+      }
+    }
+    deviceId = '$deviceId-$deviceIdVal';
+
+    return (deviceId, deviceInfo);
   }
 }
 

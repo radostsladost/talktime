@@ -169,13 +169,28 @@ using var scope = app.Services.CreateScope();
 var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 await dbContext.Database.MigrateAsync();
 
-var firebaseAdminJson = Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!, "firebase-adminsdk.json");
+// Initialize Firebase Admin SDK
+var firebaseAdminJson = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "firebase-admin.json");
 if (File.Exists(firebaseAdminJson))
 {
-    FirebaseApp.Create(new AppOptions()
+    try
     {
-        Credential = GoogleCredential.FromFile(firebaseAdminJson),
-    });
+        var firebaseApp = FirebaseApp.Create(new AppOptions()
+        {
+            Credential = GoogleCredential.FromJson(File.ReadAllText(firebaseAdminJson)),
+        });
+        Console.WriteLine($"Firebase Admin SDK initialized successfully.");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Warning: Failed to initialize Firebase Admin SDK: {ex.Message}");
+        Console.WriteLine("Push notifications will not be available.");
+    }
+}
+else
+{
+    Console.WriteLine($"Warning: Firebase Admin SDK credentials file not found at: {firebaseAdminJson}");
+    Console.WriteLine("Push notifications will not be available.");
 }
 
 app.Run();

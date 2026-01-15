@@ -29,3 +29,8 @@ OR:
 3. Run `dotnet publish -c Release -o ./publish` to build the backend services.
 4. Run `cd publish && dotnet TalkTime.Api.dll` to start the backend services.
 5. Use port 9999 (or change both in TalkTime.Api/appsettings.json) for accessing the backend service.
+
+
+## Development
+
+- Add migration with: `dotnet ef migrations add <migration_name> --project TalkTime.Infrastructure --startup-project TalkTime.Api`

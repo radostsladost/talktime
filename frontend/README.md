@@ -21,6 +21,15 @@ samples, guidance on mobile development, and a full API reference.
 ```
 API_BASE_URL=https://<your_api_base_host>
 # ex: API_BASE_URL=https://example.com
+# firebase web variables used for scripts\build-firebase-sw.js
+FIREBASE_WEB_APIKEY=<FROM_FIREBASE_CONFIG>
+FIREBASE_WEB_APPID=<FROM_FIREBASE_CONFIG>
+FIREBASE_WEB_MESSAGINGSENDERID=<FROM_FIREBASE_CONFIG>
+FIREBASE_WEB_AUTHDOMAIN=<FROM_FIREBASE_CONFIG>
+IREBASE_WEB_DATABASEURL=<FROM_FIREBASE_CONFIG>
+FIREBASE_WEB_STORAGEBUCKET=<FROM_FIREBASE_CONFIG>
+FIREBASE_WEB_PROJECTID=<FROM_FIREBASE_CONFIG>
+#or just manually create web/firebase-messaging-sw.js and paste all variables as in https://firebase.google.com/docs/admin/setup
 ```
 2) Follow the instructions in the Notifications section to turn on or off notifications.
 
@@ -30,7 +39,7 @@ API_BASE_URL=https://<your_api_base_host>
 flutter pub get
 dart run sqflite_common_ffi_web:setup
 # build for web
-flutter build web --release --dart-define=ENV_PROF=production
+node scripts\build-firebase-sw.js && flutter build web --release --dart-define=ENV_PROF=production
 # build for android
 flutter build apk --release --dart-define=ENV_PROF=production
 # build for ios

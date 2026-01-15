@@ -120,7 +120,7 @@ public class MessagesController : ControllerBase
                 Id = Guid.NewGuid().ToString(),
                 ConversationId = request.ConversationId,
                 SenderId = userId,
-                EncryptedContent = request.Content, // Content is already encrypted by frontend
+                EncryptedContent = request.Content, // TODO: not yet encrypted
                 Type = MessageType.Text,
                 SentAt = DateTime.UtcNow
             };
@@ -170,7 +170,7 @@ public class MessagesController : ControllerBase
                 foreach (var recipientId in recipientIds)
                 {
                     var recipient = await _userRepository.GetByIdAsync(recipientId);
-                    if (recipient != null && !recipient.IsOnline)
+                    if (recipient != null)
                     {
                         // Send push notification
                         var notificationData = System.Text.Json.JsonSerializer.Serialize(new

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using TalkTime.Core.DTOs;
 using TalkTime.Core.Entities;
+using TalkTime.Core.Enums;
 using TalkTime.Core.Interfaces;
 
 namespace TalkTime.Api.Hubs;
@@ -16,6 +17,7 @@ public class TalkTimeHub : Hub
     private readonly IUserRepository _userRepository;
     private readonly IConversationRepository _conversationRepository;
     private readonly IMessageRepository _messageRepository;
+    private readonly INotificationsService _notificationsService;
     private readonly ILogger<TalkTimeHub> _logger;
 
     // Track connected users: userId -> connectionId
@@ -31,11 +33,13 @@ public class TalkTimeHub : Hub
         IUserRepository userRepository,
         IConversationRepository conversationRepository,
         IMessageRepository messageRepository,
+        INotificationsService notificationsService,
         ILogger<TalkTimeHub> logger)
     {
         _userRepository = userRepository;
         _conversationRepository = conversationRepository;
         _messageRepository = messageRepository;
+        _notificationsService = notificationsService;
         _logger = logger;
     }
 
