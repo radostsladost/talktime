@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:logger/web.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -86,6 +87,7 @@ class LocalConversationStorage {
             where: 'id = ?',
             whereArgs: [byId['id']],
           );
+          conversationId = byId['id'] as int;
         }
 
         // Save participants
@@ -108,11 +110,16 @@ class LocalConversationStorage {
               conflictAlgorithm: ConflictAlgorithm.replace,
             );
 
+            // print(
+            //   'Participant INSERT: DB: $conversationId => ${participant.id}',
+            // );
+
             var user = (await txn.query(
               'user',
               where: 'externalId = ?',
               whereArgs: [participant.id],
             )).firstOrNull;
+
             if (user == null) {
               await txn.insert('user', {
                 'externalId': participant.id,
@@ -167,6 +174,10 @@ class LocalConversationStorage {
         whereArgs: [convMap['id']],
       );
 
+      // print(
+      //   'Participant: DB: ${JsonEncoder.withIndent(' ').convert(participants)}',
+      // );
+
       // Create participant User objects from external IDs
       List<User> participantUsers = [];
       for (var participant in participants) {
@@ -181,6 +192,7 @@ class LocalConversationStorage {
               id: user['externalId'] as String,
               username: user['username'] as String,
               avatarUrl: user['avatarUrl'] as String?,
+              description: user['description'] as String?,
             ),
           );
         } else {
@@ -192,9 +204,7 @@ class LocalConversationStorage {
       result.add(
         Conversation(
           id: conversation.id,
-          type: participantUsers.length > 2
-              ? ConversationType.group
-              : ConversationType.direct,
+          type: conversation.type,
           name: conversation.name,
           participants: participantUsers,
           lastMessage: conversation.lastMessage,
@@ -203,6 +213,9 @@ class LocalConversationStorage {
       );
     }
 
+    // print(
+    //   'We got conversations: ${JsonEncoder.withIndent(' ').convert(result)} ',
+    // );
     return result;
   }
 
@@ -309,8 +322,9 @@ class LocalConversationStorage {
     // The actual participants will be added separately
     return Conversation(
       id: (map['externalId'] ?? '') as String,
-      type: ConversationType
-          .direct, // Default to direct, will be updated from API
+      type: map['type'] == 'group'
+          ? ConversationType.group
+          : ConversationType.direct,
       name: map['name'] as String?,
       participants: [],
       lastMessageAt: map['lastMessageAt'] != null

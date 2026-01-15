@@ -22,7 +22,7 @@ class AuthService {
     try {
       // Request permission for notifications
       // if (kIsWeb || Platform.isWindows || Platform.isAndroid) {
-      await FirebaseMessaging.instance.requestPermission(
+      var permission = await FirebaseMessaging.instance.requestPermission(
         alert: true,
         badge: true,
         sound: true,
@@ -31,9 +31,17 @@ class AuthService {
 
       // Get the FCM token
       final token = await FirebaseMessaging.instance.getToken();
+
+      Logger().d(
+        'Permission: ${permission.authorizationStatus} FCM token: $token',
+      );
+
       return token;
     } catch (e) {
       Logger().e('Failed to get FCM token: $e');
+      ScaffoldMessenger.of(
+        navigatorKey.currentContext!,
+      ).showSnackBar(SnackBar(content: Text('Failed to get FCM token: $e')));
       return null;
     }
   }
@@ -296,37 +304,44 @@ class AuthService {
           (rng.nextDouble() + 0.001).toString().substring(2);
       await prefs.setString('deviceId', deviceIdVal);
     }
-
-    DeviceInfoPlugin deviceInfoPlugin = DeviceInfoPlugin();
-    String deviceId = "unknown";
-    String deviceInfo = "";
-    if (kIsWeb) {
-      deviceId = "web";
-      deviceInfo = (await deviceInfoPlugin.webBrowserInfo).userAgent!;
-    } else {
-      deviceInfo = deviceInfo;
-      if (Platform.isIOS) {
-        deviceId = 'ios';
-        deviceInfo = (await deviceInfoPlugin.iosInfo).utsname.machine;
-      } else if (Platform.isAndroid) {
-        deviceId = 'android';
-        deviceInfo = (await deviceInfoPlugin.androidInfo).name;
-      } else if (Platform.isWindows) {
-        deviceId = 'windows';
-        deviceInfo = (await deviceInfoPlugin.windowsInfo).productName;
-      } else if (Platform.isLinux) {
-        deviceId = 'linux';
-        deviceInfo = (await deviceInfoPlugin.linuxInfo).prettyName;
-      } else if (Platform.isMacOS) {
-        deviceId = 'macOS';
-        deviceInfo = (await deviceInfoPlugin.macOsInfo).computerName;
+    try {
+      DeviceInfoPlugin deviceInfoPlugin = DeviceInfoPlugin();
+      String deviceId = "unknown";
+      String deviceInfo = "";
+      if (kIsWeb) {
+        deviceId = "web";
+        deviceInfo = (await deviceInfoPlugin.webBrowserInfo).userAgent!;
       } else {
-        deviceInfo = Platform.operatingSystem;
+        deviceInfo = deviceInfo;
+        if (Platform.isIOS) {
+          deviceId = 'ios';
+          deviceInfo = (await deviceInfoPlugin.iosInfo).utsname.machine;
+        } else if (Platform.isAndroid) {
+          deviceId = 'android';
+          deviceInfo = (await deviceInfoPlugin.androidInfo).name;
+        } else if (Platform.isWindows) {
+          deviceId = 'windows';
+          deviceInfo = (await deviceInfoPlugin.windowsInfo).productName;
+        } else if (Platform.isLinux) {
+          deviceId = 'linux';
+          deviceInfo = (await deviceInfoPlugin.linuxInfo).prettyName;
+        } else if (Platform.isMacOS) {
+          deviceId = 'macOS';
+          deviceInfo = (await deviceInfoPlugin.macOsInfo).computerName;
+        } else {
+          deviceInfo = Platform.operatingSystem;
+        }
       }
-    }
-    deviceId = '$deviceId-$deviceIdVal';
+      deviceId = '$deviceId-$deviceIdVal';
 
-    return (deviceId, deviceInfo);
+      return (deviceId, deviceInfo);
+    } catch (e, stack) {
+      Logger().e('Error getting device info', error: e, stackTrace: stack);
+      ScaffoldMessenger.of(navigatorKey.currentContext!).showSnackBar(
+        SnackBar(content: Text('Failed to get device info $e $stack')),
+      );
+      rethrow;
+    }
   }
 }
 

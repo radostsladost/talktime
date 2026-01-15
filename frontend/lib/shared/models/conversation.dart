@@ -46,6 +46,17 @@ class Conversation extends Equatable {
     return lastMessage ?? '';
   }
 
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'type': type == ConversationType.group ? 'group' : 'direct',
+      'name': name,
+      'participants': participants.map((p) => p.id).toList(),
+      'lastMessage': lastMessage,
+      'lastMessageAt': lastMessageAt,
+    };
+  }
+
   @override
   List<Object?> get props => [
     id,

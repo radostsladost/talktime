@@ -75,6 +75,8 @@ class _SplashScreenState extends State<SplashScreen> {
         // Register Firebase token for push notifications
         try {
           await _authService.registerFirebaseToken();
+
+          WebSocketManager().initialize();
         } catch (e) {
           // Log error but don't block navigation
           Logger().e('Failed to register Firebase token: $e');
@@ -84,15 +86,14 @@ class _SplashScreenState extends State<SplashScreen> {
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (_) => const ChatListPage()),
         );
-
-        WebSocketManager().initialize();
       } else {
         // User is not logged in, go to login page
         Navigator.of(
           context,
         ).pushReplacement(MaterialPageRoute(builder: (_) => const LoginPage()));
       }
-    } catch (e) {
+    } catch (e, stackTrace) {
+      Logger().e('Failed to _checkAuthentication: $e', stackTrace: stackTrace);
       // If there's an error, go to login page
       if (!mounted) return;
       Navigator.of(

@@ -17,25 +17,33 @@ import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 
 Future<void> main() async {
-  await dotenv.load(fileName: ".env");
   WidgetsFlutterBinding.ensureInitialized();
+  await initFirebaseServices();
+
+  await dotenv.load(fileName: ".env");
   await initializeBackgroundService(); // see below
 
   // Initialize the incoming call manager with the global navigator key
   IncomingCallManager().initialize(navigatorKey);
-  await initFirebaseServices();
 
   runApp(const MyApp());
 }
 
 Future<void> initFirebaseServices() async {
   try {
-    await Firebase.initializeApp(
+    final app = await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
+    await app.setAutomaticDataCollectionEnabled(false);
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
   } catch (e) {
     Logger().e("Firebase exception: $e", error: e);
+
+    Future.delayed(const Duration(seconds: 5), () {
+      ScaffoldMessenger.of(
+        navigatorKey.currentContext!,
+      ).showSnackBar(SnackBar(content: Text('Failed to get fcm $e')));
+    });
   }
 }
 

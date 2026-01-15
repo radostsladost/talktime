@@ -47,7 +47,7 @@ class ConversationService {
 
       await AuthService().refreshTokenIfNeeded();
 
-      _logger.d('Fetching conversations from API');
+      _logger.d('So Fetching conversations from API');
       final response = await _apiClient.get(ApiConstants.conversations);
 
       final List conversationsJson = response['data'] as List;

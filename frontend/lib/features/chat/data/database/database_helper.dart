@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:logger/web.dart';
 import 'package:path/path.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -23,6 +25,13 @@ class DatabaseHelper {
     var dbPath = !kIsWeb
         ? join(await factory.getDatabasesPath(), 'msg_database.db')
         : 'msg_database.db';
+
+    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+      final Directory documentsDirectory =
+          await getApplicationDocumentsDirectory();
+      await documentsDirectory.create(recursive: true);
+      dbPath = join(documentsDirectory.path, 'msg_database.db');
+    }
 
     Logger().i('Db path: $dbPath');
 

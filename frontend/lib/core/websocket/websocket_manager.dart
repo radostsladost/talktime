@@ -299,8 +299,12 @@ class WebSocketManager {
           callback(message);
         }
       }
-    } catch (e) {
-      _logger.e('Error processing received message: $e');
+    } catch (e, stackTrace) {
+      _logger.e(
+        'Error processing received message: $e',
+        error: e,
+        stackTrace: stackTrace,
+      );
     }
   }
 

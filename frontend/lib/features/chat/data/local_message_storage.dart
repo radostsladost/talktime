@@ -30,11 +30,12 @@ class LocalMessageStorage {
 
     var db = await _getDb();
     for (var message in messages) {
-      await db.insert(
+      var id = await db.insert(
         'message',
         message.toMap(),
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
+      print('Inserted message with ID: $id');
     }
   }
 

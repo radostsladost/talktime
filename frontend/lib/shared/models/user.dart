@@ -38,4 +38,13 @@ class User extends Equatable {
       avatarUrl: avatarUrl ?? this.avatarUrl,
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'username': username,
+      'avatarUrl': avatarUrl,
+      'description': description,
+    };
+  }
 }
