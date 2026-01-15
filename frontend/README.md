@@ -15,6 +15,15 @@ For help getting started with Flutter development, view the
 [online documentation](https://docs.flutter.dev/), which offers tutorials,
 samples, guidance on mobile development, and a full API reference.
 
+## Preparation
+
+1) Create the .env file in the root directory of the frontend project with the following content:
+```
+API_BASE_URL=https://<your_api_base_host>
+# ex: API_BASE_URL=https://example.com
+```
+2) Follow the instructions in the Notifications section to turn on or off notifications.
+
 ## Build Instructions
 
 ```sh
@@ -34,7 +43,11 @@ flutter build windows --release --dart-define=ENV_PROF=production
 flutter build linux --release --dart-define=ENV_PROF=production
 ```
 
-If in runtime it gives you a firebase error, just remove the code below from `main.dart`:
+## Notifications
+
+### Deactivate
+
+If in runtime it gives you a firebase error and/or you don't need notifications, just remove the code below from `main.dart`:
 
 ```dart
 await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
@@ -42,9 +55,9 @@ await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
 This will deactivate the firebase initialization, so no notifications will be sent. But if you want to enable notifications, read the section below.
 
-## Notifications
+### Activate
 
-To enable notifications, follow these steps:
+To activate notifications, follow these steps:
 
 1. Prepare your workspace
 The easiest way to get you started is to use the FlutterFire CLI.
