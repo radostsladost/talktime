@@ -16,6 +16,9 @@ import 'package:talktime/features/chat/presentation/pages/chat_list_page.dart';
 import 'package:talktime/features/call/data/incoming_call_manager.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
+import 'package:firebase_core/firebase_core.dart';
+import 'firebase_options.dart';
+
 Future<void> main() async {
   await dotenv.load(fileName: ".env");
   WidgetsFlutterBinding.ensureInitialized();
@@ -23,6 +26,8 @@ Future<void> main() async {
 
   // Initialize the incoming call manager with the global navigator key
   IncomingCallManager().initialize(navigatorKey);
+
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   runApp(const MyApp());
 }

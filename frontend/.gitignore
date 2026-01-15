@@ -165,3 +165,6 @@ app.*.symbols
 .gclient_previous_sync_commits
 
 .env
+firebase.json
+lib/firebase_options.dart
+android/app/google-services.json

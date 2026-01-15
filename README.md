@@ -64,7 +64,6 @@ Work in progress.
 - Add reaction support.
 - Add support for profile view / edit.
 - Add support for settings / preferences.
-- Implement push notifications for incoming calls and messages. (https://unifiedpush.org/)
 - Add support for multiple languages.
 - Add support for theme switching.
 - Optimize performance for large conversations.
@@ -79,3 +78,14 @@ Work in progress.
 ### Desktop
 - Add keyboard shortcuts.
 - Add overlay for incoming or ongoing calls (discord like).
+
+
+## How to setup everything
+
+Check both frontend and backend directories for setup instructions.
+
+## FAQ
+
+### Why using firebase?
+
+It's the only option for push notifications on ios.
