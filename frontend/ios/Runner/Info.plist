@@ -51,6 +51,8 @@
         <string>audio</string>
         <string>voip</string>
         <string>fetch</string>
+        <string>remote-notification</string>
+        <string>processing</string> <!-- you can add this if needed -->
     </array>
     <key>NSCameraUsageDescription</key>
     <string>We need camera access for video calls.</string>

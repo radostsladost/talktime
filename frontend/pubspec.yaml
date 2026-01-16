@@ -38,6 +38,7 @@ dependencies:
   firebase_messaging: ^16.1.0
   device_info_plus: ^12.3.0
   sqlite3_flutter_libs:
+  flutter_callkit_incoming: ^3.0.0
 
 dev_dependencies:
   flutter_test:

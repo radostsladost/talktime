@@ -371,6 +371,18 @@ public class TalkTimeHub : Hub
                         {
                             _logger.LogError(ex, "Failed to send push notification for call to user {UserId}", participant.UserId);
                         }
+
+                        try
+                        {
+                            await _notificationsService.SendCallNotificationAsync(
+                                participant.UserId,
+                                user.Username ?? "Incoming call",
+                                roomId);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Failed to send push notification for call (callKit) to user {UserId}", participant.UserId);
+                        }
                     }
                 }
             }
