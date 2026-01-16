@@ -29,11 +29,7 @@ Future<void> main() async {
   await initFirebaseServices();
 
   await dotenv.load(fileName: ".env");
-  await initializeBackgroundService(); // see below
-
-  // Initialize the incoming call manager with the global navigator key
   IncomingCallManager().initialize(navigatorKey);
-
   runApp(const MyApp());
 }
 
@@ -95,9 +91,13 @@ Future<void> initFirebaseServices() async {
             ),
           );
 
-          FlutterCallkitIncoming.setCallConnected(data.id!).catchError((error) {
-            Logger().e('Error setting call connected: $error');
-          });
+          if (!kIsWeb && Platform.isIOS) {
+            FlutterCallkitIncoming.setCallConnected(data.id!).catchError((
+              error,
+            ) {
+              Logger().e('Error setting call connected: $error');
+            });
+          }
           break;
         case Event.actionCallDecline:
         case Event.actionCallEnded:
@@ -134,100 +134,22 @@ Future<void> initFirebaseServices() async {
   }
 }
 
-// SEPARATE ISOLATE (or not on IOS)
-Future<void> initializeBackgroundService() async {
-  if (kIsWeb || !(Platform.isAndroid || Platform.isIOS)) {
-    return;
-  }
-
-  final service = FlutterBackgroundService();
-
-  await service.configure(
-    androidConfiguration: AndroidConfiguration(
-      onStart: onBgStart,
-      autoStart: false, // Start only when call starts
-      isForegroundMode: true,
-      notificationChannelId: 'calls',
-      initialNotificationTitle: 'Call in progress',
-      initialNotificationContent: 'Tap to return to call',
-      foregroundServiceNotificationId: 888,
-    ),
-    iosConfiguration: IosConfiguration(
-      autoStart: false,
-      onForeground: (service) {},
-      onBackground: (service) {
-        // Ensure we don't kill the app
-        return true;
-      },
-    ),
-  );
-}
-
-@pragma('vm:entry-point')
-void onBgStart(ServiceInstance service) async {
-  // This runs in a separate isolate (on Android) or same isolate (iOS)
-  // For WebRTC to work smoothly, prefer keeping logic in main isolate
-  // and just use the service to show the notification that keeps app alive.
-  //
-  // 1. Initialize Dart bindings ensuring plugins can be used
-  DartPluginRegistrant.ensureInitialized();
-
-  // 2. Configure for Android specific handling
-  if (service is AndroidServiceInstance) {
-    service.on('setAsForeground').listen((event) {
-      service.setAsForegroundService();
-    });
-
-    service.on('setAsBackground').listen((event) {
-      service.setAsBackgroundService();
-    });
-  }
-
-  // 3. Listen for the "stopService" event from the Main Isolate
-  service.on('stopService').listen((event) {
-    service.stopSelf();
-  });
-
-  // 4. Listen for updates from Main Isolate (e.g. to update name/timer)
-  service.on('updateNotification').listen((event) {
-    if (event != null && service is AndroidServiceInstance) {
-      service.setForegroundNotificationInfo(
-        title: event['title'] ?? 'TalkTime Call',
-        content: event['content'] ?? 'Tap to return to call',
-      );
-    }
-  });
-
-  // 5. Set initial notification immediately so the service doesn't crash
-  if (service is AndroidServiceInstance) {
-    await service.setForegroundNotificationInfo(
-      title: "TalkTime Call",
-      content: "Connecting...",
-    );
-  }
-
-  // 6. Keep the isolate alive
-  // We don't need a complex loop here. The service stays alive
-  // until stopSelf() is called.
-  // Optionally, you can run a timer to update the notification
-  // if you want to show a counter "00:01", "00:02" directly from here.
-  Timer.periodic(const Duration(seconds: 1), (timer) async {
-    if (service is AndroidServiceInstance) {
-      if (await service.isForegroundService()) {
-        // You could update a timestamp here if you wanted independent timing
-        // service.setForegroundNotificationInfo(...)
-      }
-    }
-  });
-}
-
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   // If you're going to use other Firebase services in the background, such as Firestore,
   // make sure you call `initializeApp` before using other Firebase services.
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  try {
+    await handleCall(message.data);
+  } catch (e, stackTrace) {
+    Logger().e('Error handling call: $e', error: e, stackTrace: stackTrace);
+  }
+}
 
-  if ((message.data['call_type'] as String?) == 'voip_incoming_call') {
+Future<void> handleCall(Map<String, dynamic> data) async {
+  Logger().i("Handling a background message: ${jsonEncode(data)}");
+
+  if ((data['type'] as String?) == 'call') {
     // await service.setForegroundNotificationInfo(
     //   title: "TalkTime Call",
     //   content: "Incoming Call",
@@ -235,8 +157,8 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 
     if (!kIsWeb && (Platform.isIOS || Platform.isAndroid)) {
       CallKitParams callKitParams = CallKitParams(
-        id: message.data['call_id'] as String,
-        nameCaller: message.data['caller_name'] as String,
+        id: data['call_id'] as String,
+        nameCaller: data['caller_name'] as String,
         appName: 'TalkTime',
         // avatar: 'https://i.pravatar.cc/100',
         // handle: '0123456789',
@@ -246,7 +168,7 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
         missedCallNotification: NotificationParams(
           showNotification: true,
           isShowCallback: true,
-          subtitle: 'Missed call from ${message.data['caller_name'] as String}',
+          subtitle: 'Missed call from ${data['caller_name'] as String}',
         ),
         callingNotification: const NotificationParams(
           showNotification: true,
@@ -289,6 +211,4 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
       await FlutterCallkitIncoming.showCallkitIncoming(callKitParams);
     }
   }
-
-  print("Handling a background message: ${jsonEncode(message.data)}");
 }

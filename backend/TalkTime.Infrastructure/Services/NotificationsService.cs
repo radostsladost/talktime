@@ -143,10 +143,12 @@ public class NotificationsService(
             }
 
             var dataDict = new Dictionary<string, string>() {
-                { "call_type", "voip_incoming_call"} ,
+                { "type", "call"} ,
+                { "call_type", "video"} ,
                 { "caller_id", userId } ,
                 { "caller_name", callerName ?? "Unknown"} ,
                 { "session_id", sessionId ?? Guid.NewGuid().ToString()} ,
+                { "call_id", sessionId ?? Guid.NewGuid().ToString()} ,
             };
 
             var tasks = tokens.Select(async token =>

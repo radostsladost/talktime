@@ -436,10 +436,14 @@ class CallService {
         ];
         final statuses = await permissions.request();
 
-        final videoGranted =
-            statuses[Permission.camera] == PermissionStatus.granted;
+        // final videoGranted =
+        //     statuses[Permission.camera] == PermissionStatus.granted;
         final audioGranted =
             statuses[Permission.microphone] == PermissionStatus.granted;
+
+        if (!audioGranted) {
+          break;
+        }
 
         var audioConstraints = audioGranted
             ? {'echoCancellation': true, 'noiseSuppression': true}
