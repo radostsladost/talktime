@@ -103,7 +103,7 @@ Future<void> initFirebaseServices() async {
         case Event.actionCallEnded:
         case Event.actionCallTimeout:
         case Event.actionCallCallback:
-        case Event.actionCallToggleHold:
+        case Event.actionCallToggleHold:ve
         case Event.actionCallToggleMute:
         case Event.actionCallToggleDmtf:
         case Event.actionCallToggleGroup:
