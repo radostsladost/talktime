@@ -51,7 +51,7 @@ Future<void> initFirebaseServices() async {
     });
   }
 
-  if (!kIsWeb && !(Platform.isAndroid || Platform.isIOS)) {
+  if (kIsWeb || !(Platform.isAndroid || Platform.isIOS)) {
     Logger().i("CallKit is not supported on this platform");
     return;
   }
@@ -84,12 +84,22 @@ Future<void> initFirebaseServices() async {
         case Event.actionCallStart:
           // Outgoing call started
           Logger().i('Outgoing call started');
+          var data = CallKitParams.fromJson(
+            jsonDecode(jsonEncode(event.body as Map<dynamic, dynamic>)),
+          );
+          try {
+            IncomingCallManager().dismissIncomingCall(data.id!);
+          } catch (_) {}
           break;
         case Event.actionCallAccept:
           // Accepted an incoming call
           var data = CallKitParams.fromJson(
             jsonDecode(jsonEncode(event.body as Map<dynamic, dynamic>)),
           );
+
+          try {
+            IncomingCallManager().dismissIncomingCall(data.id!);
+          } catch (_) {}
 
           // Navigate to conference page
           Navigator.push(
@@ -116,6 +126,10 @@ Future<void> initFirebaseServices() async {
           );
           Logger().i('Call declined: ${declineData.id}');
           // The CallKit UI will automatically be dismissed
+
+          try {
+            IncomingCallManager().dismissIncomingCall(declineData.id!);
+          } catch (_) {}
           break;
         case Event.actionCallEnded:
           // Call ended
@@ -141,6 +155,10 @@ Future<void> initFirebaseServices() async {
               Logger().e('Error ending CallKit call: $error');
             });
           }
+
+          try {
+            IncomingCallManager().dismissIncomingCall(endData.id!);
+          } catch (_) {}
           break;
         case Event.actionCallTimeout:
           // Incoming call timed out (missed call)
@@ -309,9 +327,9 @@ Future<void> handleCall(Map<String, dynamic> data) async {
           isShowLogo: false,
           // logoUrl: 'https://i.pravatar.cc/100',
           ringtonePath: 'system_ringtone_default',
-          backgroundColor: '#0955fa',
-          // backgroundUrl: 'https://i.pravatar.cc/500',
-          actionColor: '#4CAF50',
+          backgroundColor: '#152545',
+          backgroundUrl: 'https://v776682.macloud.host:7081/icons/call_bg.jpg',
+          actionColor: '#6b80de',
           textColor: '#ffffff',
           incomingCallNotificationChannelName: "Incoming Call",
           missedCallNotificationChannelName: "Missed Call",

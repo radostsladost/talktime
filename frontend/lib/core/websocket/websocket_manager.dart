@@ -73,6 +73,7 @@ class WebSocketManager {
               },
             ),
           )
+          .withAutomaticReconnect()
           .build();
 
       // Setup connection event handlers
@@ -85,9 +86,31 @@ class WebSocketManager {
       _isConnected = true;
       _isConnecting = false;
       _reconnectAttempts = 0;
+      Timer.periodic(const Duration(seconds: 30), (_) async {
+        if (await _apiClient.getToken() != null &&
+            await _apiClient.isAccessTokenExpired() == false) {
+          await checkConnection().catchError((error) {
+            _logger.e('Failed to check WebSocket connection: $error');
+          });
+        }
+      });
 
       // Setup message handlers
       _setupMessageHandlers();
+    } catch (e) {
+      _logger.e('Failed to initialize WebSocket: $e');
+    }
+  }
+
+  Future<void> checkConnection() async {
+    if (_hubConnection == null) {
+      return initialize();
+    }
+
+    try {
+      if (_hubConnection!.state == HubConnectionState.Disconnected) {
+        await _connect();
+      }
     } catch (e) {
       _logger.e('Failed to initialize WebSocket: $e');
     }
@@ -374,10 +397,11 @@ class WebSocketManager {
 
   /// When a call is initiated
   void onCallInitiated(String roomId, ConferenceParticipant participant) {
+    _logger.i('onCallInitiated: $roomId from ${participant?.username}');
     IncomingCallManager().showIncomingCall(
       callId: roomId,
       roomId: roomId,
-      callerName: participant.username,
+      callerName: participant?.username ?? 'Unknown',
       callType: 'audio',
       autoDeclineSeconds: 30,
     );

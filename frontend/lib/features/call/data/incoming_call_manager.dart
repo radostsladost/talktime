@@ -197,10 +197,10 @@ class IncomingCallManager {
 
   /// Clean up internal state
   void _cleanup() {
+    _currentCallId = null;
     _autoDeclineTimer?.cancel();
     _autoDeclineTimer = null;
     _isShowingIncomingCall = false;
-    _currentCallId = null;
   }
 
   /// Dispose of resources

@@ -9,6 +9,8 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:path/path.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:logger/logger.dart';
+import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
+import 'package:flutter_callkit_incoming/entities/call_kit_params.dart';
 import 'package:talktime/features/call/data/signaling_service.dart';
 import 'package:talktime/core/network/api_client.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
@@ -48,6 +50,7 @@ class CallService {
 
   // Public Getters
   Stream<bool> get isScreenSharing => _isScreenSharingController.stream;
+  bool get isScreenSharingValue => _isScreenSharing;
   Stream<CallState> get callStateStream => _stateController.stream;
   Stream<MediaStream?> get localStreamStream => _localStreamController.stream;
   Stream<MediaStream?> get cachedVideoStreamStream =>
@@ -75,26 +78,52 @@ class CallService {
   // =========================================================
 
   Future<void> initService() async {
-    // Basic setup, get token, etc.
+    _logger.i('Initializing CallService...');
+
+    // Always load current user
+    try {
+      _currentUser = await AuthService().getCurrentUser();
+      _logger.i('Current user loaded: ${_currentUser?.id}');
+    } catch (e) {
+      _logger.e('Failed to load current user: $e');
+    }
+
+    // Setup signaling service
     final token = await ApiClient().getToken();
-    if (token != null &&
-        (_signalingService == null || !_signalingService!.isConnected)) {
-      _signalingService = SignalingService(token);
+    if (token == null) {
+      _logger.w('No token available, skipping signaling setup');
+      return;
+    }
+
+    if (_signalingService == null || !_signalingService!.isConnected) {
+      _logger.i('Setting up signaling service...');
+      _signalingService = SignalingService();
       await _signalingService!.connect();
       await _setupSignalingListeners();
-      _currentUser = await AuthService().getCurrentUser();
+      _logger.i('Signaling service connected');
+    } else {
+      _logger.i('Signaling service already connected');
     }
+
+    _logger.i('CallService initialized successfully');
   }
 
   Future<void> startCall(
     String roomId,
     List<UserInfo> initialParticipants,
   ) async {
-    _logger.i("Start call called: $_state");
-    if (_state != CallState.idle) return; // Already in a call
+    _logger.i("Start call called: $_state for room: $roomId");
+    if (_state != CallState.idle) {
+      _logger.w("Call already in progress, ignoring startCall request");
+      return; // Already in a call
+    }
 
     _currentRoomId = roomId;
     _updateState(CallState.connecting);
+    _logger.i("Call state updated to connecting for room: $roomId");
+
+    // CallKit: Start outgoing call
+    _callKitStartCall();
 
     try {
       // 1. Get Permissions & Media
@@ -117,6 +146,9 @@ class CallService {
 
       _updateState(CallState.connected);
 
+      // CallKit: Set call as connected
+      _callKitSetConnected();
+
       // 4. Send Offers
       if (_participantIds.isNotEmpty) {
         await _createAndSendOffers();
@@ -137,12 +169,24 @@ class CallService {
   }
 
   Future<void> endCall() async {
+    final roomIdToEnd = _currentRoomId;
+    _logger.i("End call called for room: $roomIdToEnd, current state: $_state");
+
+    if (_state == CallState.idle) {
+      _logger.w("No active call to end");
+      return;
+    }
+
+    // CallKit: End call before cleanup
+    _callKitEndCall();
+
     _subscriptions.clear();
     try {
       if (_currentRoomId != null) {
         await _signalingService?.leaveRoom(_currentRoomId!);
         await _signalingService
             ?.disconnect(); // Critical fix: Properly disconnect signaling
+        _logger.i("Left room and disconnected signaling for: $_currentRoomId");
       }
     } catch (e) {
       _logger.e("Error leaving room: $e");
@@ -183,6 +227,8 @@ class CallService {
     _updateState(CallState.idle);
     _localStreamController.add(null);
     _remoteStreamsController.add({});
+
+    _logger.i("Call ended successfully, state reset to idle");
 
     // 2. Kill the service when call is done
     await _stopBackgroundService();
@@ -232,6 +278,7 @@ class CallService {
       }
 
       if ((_isCameraOff && !_isScreenSharing) || forceStop == true) {
+        _logger.i('_replaceVideoTrackInPeerConnections to null');
         _camStateController.add(!_isCameraOff);
         await _replaceVideoTrackInPeerConnections(null);
         return;
@@ -242,6 +289,7 @@ class CallService {
         cachedVideoStream = await _getScreenStream(source?.id);
       }
       if (!_isScreenSharing || cachedVideoStream == null) {
+        _logger.i('no cachedVideoStream');
         _isScreenSharing = false;
         // Get camera stream and extract video track
         cachedVideoStream = await _getCameraStream();
@@ -309,26 +357,63 @@ class CallService {
   Future<void> _replaceVideoTrackInPeerConnections(
     MediaStreamTrack? newTrack,
   ) async {
-    for (final pc in _peerConnections.values) {
-      final transceivers = await pc.getTransceivers();
-      var success = false;
-      for (final transceiver in transceivers) {
-        // Use transceiver.sender.track?.kind for active tracks,
-        // or check the transceiver's mid/receiver for video type when track is null
-        final senderTrackKind = transceiver.sender.track?.kind;
-        final receiverTrackKind = transceiver.receiver.track?.kind;
-        final isVideoTransceiver =
-            senderTrackKind == 'video' || receiverTrackKind == 'video';
-        if (isVideoTransceiver) {
-          await transceiver.sender.replaceTrack(newTrack);
-          success = true;
-        }
-      }
-      if (!success && newTrack != null && _localStream != null) {
+    _logger.i(
+      'Replacing video track in ${_peerConnections.length} peer connections, '
+      'newTrack: ${newTrack?.label ?? "null"}',
+    );
+
+    if (_peerConnections.isEmpty) {
+      _logger.w('No peer connections to update video track');
+      return;
+    }
+
+    bool needsRenegotiation = false;
+
+    for (final entry in _peerConnections.entries) {
+      final participantId = entry.key;
+      final pc = entry.value;
+
+      try {
+        final transceivers = await pc.getTransceivers();
         _logger.i(
-          'Failed to replace video track in peer connection, adding it instead',
+          'Peer $participantId has ${transceivers.length} transceivers',
         );
-        await pc.addTrack(newTrack, _localStream!);
+
+        var success = false;
+        for (final transceiver in transceivers) {
+          // Use transceiver.sender.track?.kind for active tracks,
+          // or check the transceiver's mid/receiver for video type when track is null
+          final senderTrackKind = transceiver.sender.track?.kind;
+          final receiverTrackKind = transceiver.receiver.track?.kind;
+          final isVideoTransceiver =
+              senderTrackKind == 'video' || receiverTrackKind == 'video';
+
+          if (isVideoTransceiver) {
+            await transceiver.sender.replaceTrack(newTrack);
+            _logger.i('Replaced video track for peer $participantId');
+            success = true;
+            needsRenegotiation = true;
+          }
+        }
+
+        if (!success && newTrack != null && _localStream != null) {
+          _logger.i(
+            'No video transceiver found for peer $participantId, adding track instead',
+          );
+          await pc.addTrack(newTrack, _localStream!);
+          needsRenegotiation = true;
+        }
+      } catch (e) {
+        _logger.e('Error replacing video track for peer $participantId: $e');
+      }
+
+      // If we added new tracks (not just replaced), we need to renegotiate
+      if (needsRenegotiation) {
+        _logger.i('New tracks added, triggering renegotiation');
+        await _createAndSendOffers(
+          onlyParticipantId: participantId,
+          forceRenegotiation: true,
+        );
       }
     }
   }
@@ -339,21 +424,21 @@ class CallService {
     final statuses = await permissions.request();
 
     if (statuses[Permission.camera] != PermissionStatus.granted) {
-      _logger.i('Camera permission not granted');
+      _logger.i('Camera permission not granted ${statuses[Permission.camera]}');
       ScaffoldMessenger.of(navigatorKey.currentContext!).showSnackBar(
         const SnackBar(content: Text('Camera permission not granted')),
       );
       return null;
     }
 
-    final constraints = {
-      'video': {
+    final constraints = Map<String, dynamic>.from({
+      'video': Map<String, dynamic>.from({
         'width': {'ideal': 640},
         'height': {'ideal': 480},
         'frameRate': {'ideal': 30},
         'facingMode': _facingMode,
-      },
-    };
+      }),
+    });
 
     return await navigator.mediaDevices.getUserMedia(constraints);
   }
@@ -376,18 +461,55 @@ class CallService {
   }
 
   void toggleMic({bool? forceValue}) {
-    _isMuted = forceValue != null ? !forceValue : !_isMuted;
+    final previousMutedState = _isMuted;
+
+    if (forceValue != null) {
+      // Force to a specific state: if forceValue is true, we want mic ON (not muted)
+      _isMuted = !forceValue;
+    } else {
+      // Toggle current state
+      _isMuted = !_isMuted;
+    }
+
+    if (previousMutedState == _isMuted) {
+      _logger.i("Mic state unchanged");
+      return;
+    }
+
+    _logger.i("Toggle mic: $previousMutedState => $_isMuted");
+
     if (_localStream != null) {
       final tracks = _localStream!.getAudioTracks();
       if (tracks.isNotEmpty) {
         tracks[0].enabled = !_isMuted;
         _micStateController.add(!_isMuted);
+        _logger.i("Audio track ${tracks[0].enabled ? 'enabled' : 'disabled'}");
+      } else {
+        _logger.w("No audio tracks available to toggle");
       }
+    } else {
+      _logger.w("Local stream is null, cannot toggle mic");
+    }
+
+    // CallKit: Update mute state
+    if (_currentRoomId != null && _state != CallState.idle) {
+      _callKitMuteCall();
     }
   }
 
   void toggleCamera({bool? forceValue}) {
-    _isCameraOff = forceValue != null ? !forceValue : !_isCameraOff;
+    final previousCameraState = _isCameraOff;
+
+    if (forceValue != null) {
+      // Force to a specific state: if forceValue is true, we want camera ON (not off)
+      _isCameraOff = !forceValue;
+    } else {
+      // Toggle current state
+      _isCameraOff = !_isCameraOff;
+    }
+
+    _logger.i("Toggle camera: $previousCameraState => $_isCameraOff");
+
     if (!_isScreenSharing) {
       if (_isCameraOff) {
         activateCameraOrScreenShare(
@@ -397,6 +519,8 @@ class CallService {
       } else {
         activateCameraOrScreenShare(newScreenShareValue: false);
       }
+    } else {
+      _logger.i("Camera toggle ignored while screen sharing is active");
     }
     _camStateController.add(!_isCameraOff);
   }
@@ -520,11 +644,14 @@ class CallService {
     // Handle Remote Stream
     pc.onTrack = (RTCTrackEvent event) {
       if (event.streams.isNotEmpty) {
+        _logger.i('Received remote stream ${event.streams.firstOrNull?.id}');
         // Store only the first/primary stream for this participant
         _remoteStreams[participantId] = event.streams.first;
         // Notify UI
         _remoteStreamsController.add(Map.from(_remoteStreams));
       } else {
+        _logger.i('Received remote stream {empty}');
+
         // Handle case where no stream is available
         if (_remoteStreams.containsKey(participantId)) {
           _remoteStreams.remove(participantId);
@@ -556,19 +683,26 @@ class CallService {
     };
 
     pc.onIceConnectionState = (state) {
-      if (state == RTCIceConnectionState.RTCIceConnectionStateDisconnected ||
-          state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
-        _logger.w('Peer $participantId disconnected');
+      _logger.i('ICE connection state for $participantId: $state');
+
+      final isDisconnectedOrFailed =
+          state == RTCIceConnectionState.RTCIceConnectionStateDisconnected ||
+          state == RTCIceConnectionState.RTCIceConnectionStateFailed;
+
+      if (isDisconnectedOrFailed &&
+          _peerConnections.containsKey(participantId)) {
+        _logger.w(
+          'Peer $participantId disconnected/failed, attempting reconnection',
+        );
         _removePeerConnection(participantId).then(
           (_) => Future.delayed(Duration(seconds: 1), () async {
-            final pc = _peerConnections[participantId]!;
-            final offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
-            await _signalingService!.sendOffer(
-              participantId,
-              offer.sdp!,
-              roomId: _currentRoomId,
-            );
+            if (_state != CallState.idle) {
+              await _createPeerConnection(participantId);
+              await _createAndSendOffers(
+                onlyParticipantId: participantId,
+                forceRenegotiation: true,
+              );
+            }
           }),
         );
       }
@@ -579,12 +713,23 @@ class CallService {
 
   // ... (Include _handleOffer, _handleAnswer, _handleIceCandidate logic here essentially copied from your original file but removing setState calls)
 
-  Future<void> _createAndSendOffers() async {
+  /// Creates and sends offers to participants.
+  /// [onlyParticipantId] - if set, only send to this participant
+  /// [forceRenegotiation] - if true, send offers regardless of polite/impolite rules
+  ///                       (used for mid-call renegotiation like adding video tracks)
+  Future<void> _createAndSendOffers({
+    String? onlyParticipantId,
+    bool forceRenegotiation = false,
+  }) async {
     for (final id in _participantIds) {
-      if (id == _currentUser!.id) continue;
+      if (id == _currentUser!.id ||
+          (onlyParticipantId != null && id != onlyParticipantId)) {
+        continue;
+      }
 
       // Only send offers if we are the impolite peer (higher ID)
-      if (_isPolite(id)) {
+      // Exception: forceRenegotiation bypasses this for mid-call track additions
+      if (!forceRenegotiation && _isPolite(id)) {
         _logger.i('Skipping offer to $id - we are polite');
         continue;
       }
@@ -600,7 +745,9 @@ class CallService {
         final offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
         _signalingService?.sendOffer(id, offer.sdp!, roomId: _currentRoomId);
-        _logger.i('Offer sent to $id');
+        _logger.i(
+          'Offer sent to $id${forceRenegotiation ? " (renegotiation)" : ""}',
+        );
       } else {
         _logger.w('Skipping offer to $id - not in stable state: $state');
       }
@@ -625,7 +772,7 @@ class CallService {
     if (token == null) throw Exception('No token');
 
     if (_signalingService == null || !_signalingService!.isConnected) {
-      _signalingService = SignalingService(token);
+      _signalingService = SignalingService();
       await _signalingService!.connect();
     }
 
@@ -889,5 +1036,111 @@ class CallService {
 
     final service = FlutterBackgroundService();
     service.invoke("stopService");
+  }
+
+  // =========================================================
+  // CALLKIT INTEGRATION
+  // =========================================================
+  /// CallKit integration: Start outgoing call (iOS/Android only)
+  Future<void> _callKitStartCall() async {
+    if (kIsWeb || !(Platform.isAndroid || Platform.isIOS)) {
+      return;
+    }
+
+    final params = _createCallKitParams();
+    if (params == null || params.id == null) {
+      _logger.w("Cannot start CallKit call - missing room ID");
+      return;
+    }
+
+    try {
+      await FlutterCallkitIncoming.startCall(params);
+      _logger.i("CallKit: Started outgoing call for room: ${params.id}");
+    } catch (e) {
+      _logger.e("CallKit: Error starting call: $e", error: e);
+    }
+  }
+
+  /// CallKit integration: Set call as connected (iOS/Android only)
+  Future<void> _callKitSetConnected() async {
+    if (kIsWeb || !(Platform.isAndroid || Platform.isIOS)) {
+      return;
+    }
+
+    if (_currentRoomId == null) {
+      _logger.w("Cannot set CallKit call connected - missing room ID");
+      return;
+    }
+
+    try {
+      await FlutterCallkitIncoming.setCallConnected(_currentRoomId!);
+      _logger.i("CallKit: Set call connected for room: $_currentRoomId");
+    } catch (e) {
+      _logger.e("CallKit: Error setting call connected: $e", error: e);
+    }
+  }
+
+  /// CallKit integration: Mute/unmute call (iOS/Android only)
+  Future<void> _callKitMuteCall() async {
+    if (kIsWeb || !(Platform.isAndroid || Platform.isIOS)) {
+      return;
+    }
+
+    if (_currentRoomId == null) {
+      _logger.w("Cannot mute CallKit call - missing room ID");
+      return;
+    }
+
+    try {
+      await FlutterCallkitIncoming.muteCall(_currentRoomId!, isMuted: _isMuted);
+      _logger.i(
+        "CallKit: Mute state updated - room: $_currentRoomId, muted: $_isMuted",
+      );
+    } catch (e) {
+      _logger.e("CallKit: Error muting call: $e", error: e);
+    }
+  }
+
+  /// CallKit integration: End call (iOS/Android only)
+  Future<void> _callKitEndCall() async {
+    if (kIsWeb || !(Platform.isAndroid || Platform.isIOS)) {
+      return;
+    }
+
+    final roomId = _currentRoomId;
+    if (roomId == null) {
+      _logger.w("Cannot end CallKit call - missing room ID");
+      return;
+    }
+
+    try {
+      await FlutterCallkitIncoming.endCall(roomId);
+      _logger.i("CallKit: Ended call for room: $roomId");
+    } catch (e) {
+      _logger.e("CallKit: Error ending call: $e", error: e);
+    }
+  }
+
+  /// Creates CallKitParams from current call state
+  CallKitParams? _createCallKitParams() {
+    if (_currentRoomId == null) return null;
+
+    // Build participant names for display
+    final participantNames = _participantInfo.values
+        .map((user) => user.username)
+        .where((name) => name.isNotEmpty)
+        .take(3)
+        .join(', ');
+
+    final callerName = participantNames.isNotEmpty
+        ? participantNames
+        : 'TalkTime Call';
+
+    return CallKitParams(
+      id: _currentRoomId!,
+      nameCaller: callerName,
+      appName: 'TalkTime',
+      type: 0, // Audio call (1 would be video, but we'll keep it as 0 for now)
+    );
   }
 }

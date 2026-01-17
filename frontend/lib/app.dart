@@ -23,6 +23,13 @@ class _MyAppState extends State<MyApp> {
       onDetach: () {
         CallService().endCall();
       },
+      onShow: () {
+        AuthService().isAuthenticated().then((value) {
+          if (!value) return;
+
+          WebSocketManager().checkConnection();
+        });
+      },
       // onRestart: () => _handleTransition('restart'),
     );
   }

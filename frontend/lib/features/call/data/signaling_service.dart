@@ -2,13 +2,15 @@ import 'dart:async';
 import 'package:logger/logger.dart';
 import 'package:signalr_netcore/signalr_client.dart';
 import 'package:talktime/core/constants/api_constants.dart';
+import 'package:talktime/core/network/api_client.dart';
+import 'package:talktime/features/auth/data/auth_service.dart';
 
 /// SignalR-based signaling service for WebRTC call signaling
 /// Handles connection to the TalkTime SignalR hub and manages call signaling
 class SignalingService {
   HubConnection? _hubConnection;
-  final String _accessToken;
   final Logger _logger = Logger(output: ConsoleOutput());
+  final ApiClient _apiClient = ApiClient();
 
   // Stream controllers for different signaling events
   final StreamController<IncomingCallEvent> _incomingCallController =
@@ -38,7 +40,7 @@ class SignalingService {
   final StreamController<String> _callInitiatedController =
       StreamController<String>.broadcast();
 
-  SignalingService(this._accessToken);
+  SignalingService();
 
   // Public streams
   Stream<IncomingCallEvent> get onIncomingCall =>
@@ -73,11 +75,19 @@ class SignalingService {
     }
 
     try {
-      final url = ApiConstants.getSignalingUrl(_accessToken);
-      _logger.i('Connecting to SignalR hub: $url');
+      final connectionUrl = ApiConstants.getSignalingUrlWithNoToken();
+      _logger.i('Connecting to SignalR hub: $connectionUrl');
 
       _hubConnection = HubConnectionBuilder()
-          .withUrl(url)
+          .withUrl(
+            connectionUrl,
+            options: HttpConnectionOptions(
+              accessTokenFactory: () async {
+                await AuthService().refreshTokenIfNeeded();
+                return (await _apiClient.getToken()) ?? "";
+              },
+            ),
+          )
           .withAutomaticReconnect()
           .build();
 

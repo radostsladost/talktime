@@ -1,6 +1,10 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:talktime/features/auth/data/auth_service.dart';
+import 'package:talktime/features/auth/presentation/pages/login_page.dart';
+import 'package:talktime/features/chat/data/database/database_helper.dart';
+import 'package:talktime/features/chat/presentation/pages/chat_list_page.dart';
 import 'package:talktime/features/profile/data/models/profile_privacy.dart';
 import 'package:talktime/features/profile/data/profile_service.dart';
 import 'package:talktime/shared/models/user.dart';
@@ -200,11 +204,131 @@ class _EditProfilePageState extends State<EditProfilePage> {
                     style: TextStyle(fontSize: 12, color: Colors.grey),
                   ),
                 ),
+                const SizedBox(height: 24),
+                const Divider(),
+                const SizedBox(height: 8),
+
+                // Clear Chats Data Button
+                ListTile(
+                  leading: const Icon(
+                    Icons.delete_outline,
+                    color: Colors.orange,
+                  ),
+                  title: const Text('Clear Chats Data'),
+                  subtitle: const Text('Delete all local chat history'),
+                  onTap: _showClearChatsConfirmation,
+                ),
+
+                // Logout Button
+                ListTile(
+                  leading: const Icon(Icons.logout, color: Colors.red),
+                  title: const Text(
+                    'Logout',
+                    style: TextStyle(color: Colors.red),
+                  ),
+                  subtitle: const Text('Sign out from your account'),
+                  onTap: _showLogoutConfirmation,
+                ),
+
+                const SizedBox(height: 16),
               ],
             ),
           );
         },
       ),
     );
+  }
+
+  Future<void> _showClearChatsConfirmation() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Clear Chats Data'),
+        content: const Text(
+          'This will delete all local chat history from this device. '
+          'Your messages will still be available on the server and other devices.\n\n'
+          'Are you sure you want to continue?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.orange),
+            child: const Text('Clear Data'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await _clearChatsData();
+    }
+  }
+
+  Future<void> _clearChatsData() async {
+    try {
+      await DatabaseHelper().clearDb();
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Chat data cleared successfully')),
+      );
+    } catch (e) {
+      _logger.e('Failed to clear chats data: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to clear data: $e')));
+    }
+  }
+
+  Future<void> _showLogoutConfirmation() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Logout'),
+        content: const Text(
+          'Are you sure you want to logout from your account?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Logout'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await _logout();
+    }
+  }
+
+  Future<void> _logout() async {
+    try {
+      await AuthService().logout();
+
+      if (!mounted) return;
+
+      // Navigate to login screen and clear navigation stack
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const LoginPage()),
+        (route) => false,
+      );
+    } catch (e) {
+      _logger.e('Logout failed: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Logout failed: $e')));
+    }
   }
 }

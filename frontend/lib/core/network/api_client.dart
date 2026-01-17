@@ -194,7 +194,7 @@ class ApiClient {
       }
     } catch (e) {
       _logger.e('Error refreshing token: $e');
-      await clearAllTokens();
+      // await clearAllTokens();
       return false;
     } finally {
       _isRefreshing = false;
