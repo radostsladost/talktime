@@ -34,6 +34,8 @@ class _ConferencePageState extends State<ConferencePage> {
   final Map<String, RTCVideoRenderer> _remoteRenderers = {};
   bool _isPresentationMode = false;
   String? _focusedParticipantId; // Optional: manually select who to focus
+  bool _cam = false;
+  bool _screenShare = false;
 
   // Stream Subscriptions for dynamic updates
   StreamSubscription? _stateSubscription;
@@ -42,6 +44,7 @@ class _ConferencePageState extends State<ConferencePage> {
   StreamSubscription? _remoteStreamsSubscription;
   StreamSubscription? _micSubscription;
   StreamSubscription? _camSubscription;
+  StreamSubscription? _screenShareSubscription;
 
   @override
   void initState() {
@@ -95,6 +98,7 @@ class _ConferencePageState extends State<ConferencePage> {
     _remoteStreamsSubscription?.cancel();
     _micSubscription?.cancel();
     _camSubscription?.cancel();
+    _screenShareSubscription?.cancel();
 
     // Listen for state changes to trigger UI rebuilds when necessary
     _stateSubscription = _callService.callStateStream.listen((state) {
@@ -128,8 +132,14 @@ class _ConferencePageState extends State<ConferencePage> {
       setState(() {});
       _attachExistingStreams();
     });
-    _camSubscription = _callService.camStateStream.listen((_) {
+    _camSubscription = _callService.camStateStream.listen((val) {
       setState(() {});
+      _cam = val;
+      _attachExistingStreams();
+    });
+    _screenShareSubscription = _callService.isScreenSharing.listen((isSharing) {
+      setState(() {});
+      _screenShare = isSharing;
       _attachExistingStreams();
     });
   }
@@ -220,6 +230,7 @@ class _ConferencePageState extends State<ConferencePage> {
     _remoteStreamsSubscription?.cancel();
     _micSubscription?.cancel();
     _camSubscription?.cancel();
+    _screenShareSubscription?.cancel();
 
     // Dispose the RENDERERS (UI), but DO NOT stop the call.
     // The call lives in the service.
@@ -245,39 +256,37 @@ class _ConferencePageState extends State<ConferencePage> {
           ),
 
           // LOCAL VIDEO (PIP)
-          Positioned(
-            right: 20,
-            bottom: 100,
-            child: SizedBox(
-              width: 100,
-              height: 150,
-              child: StreamBuilder<MediaStream?>(
-                stream: _callService.cachedVideoStreamStream,
-                initialData: _callService.cachedVideoStream,
-                builder: (context, snapshot) {
-                  final stream = snapshot.data;
-                  // print('Local stream: $stream');
+          if (_cam || _screenShare)
+            Positioned(
+              right: 20,
+              bottom: 100,
+              child: SizedBox(
+                width: 100,
+                height: 150,
+                child: StreamBuilder<MediaStream?>(
+                  stream: _callService.cachedVideoStreamStream,
+                  initialData: _callService.cachedVideoStream,
+                  builder: (context, snapshot) {
+                    final stream = snapshot.data;
+                    // print('Local stream: $stream');
 
-                  if (stream != null &&
-                      stream.getVideoTracks()?.isNotEmpty == true) {
-                    // CRITICAL FIX: Only update srcObject if reference changes
-                    // to prevent flickering/detaching native resources.
-                    if (_localRenderer.srcObject != stream) {
-                      _localRenderer.srcObject = stream;
+                    if (stream != null &&
+                        stream.getVideoTracks()?.isNotEmpty == true) {
+                      // CRITICAL FIX: Only update srcObject if reference changes
+                      // to prevent flickering/detaching native resources.
+                      if (_localRenderer.srcObject != stream) {
+                        _localRenderer.srcObject = stream;
+                      }
+                      return RTCVideoView(_localRenderer, mirror: _screenShare);
                     }
-                    return RTCVideoView(
-                      _localRenderer,
-                      mirror: _callService.isScreenSharingValue,
-                    );
-                  }
 
-                  // If stream is null, display placeholder.
-                  // This happens on endCall or during initialization if media acquisition fails.
-                  return Container(color: Colors.transparent);
-                },
+                    // If stream is null, display placeholder.
+                    // This happens on endCall or during initialization if media acquisition fails.
+                    return Container(color: Colors.transparent);
+                  },
+                ),
               ),
             ),
-          ),
 
           // CONTROLS AT BOTTOM
           Positioned(left: 0, right: 0, bottom: 20, child: _buildControls()),

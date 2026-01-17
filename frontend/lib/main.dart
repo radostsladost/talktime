@@ -22,6 +22,7 @@ import 'package:logger/logger.dart';
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:talktime/features/call/presentation/pages/conference_page.dart';
+import 'package:talktime/features/call/data/call_service.dart';
 import 'firebase_options.dart';
 
 Future<void> main() async {
@@ -73,16 +74,24 @@ Future<void> initFirebaseServices() async {
 
       switch (event.event) {
         case Event.actionCallIncoming:
+          // Incoming call notification shown
+          Logger().i('Incoming call notification displayed');
+          break;
         case Event.actionCallConnected:
+          // Call connected event (after accept)
+          Logger().i('Call connected event received');
+          break;
         case Event.actionCallStart:
+          // Outgoing call started
+          Logger().i('Outgoing call started');
           break;
         case Event.actionCallAccept:
-          // TODO: accepted an incoming call
-          // TODO: show screen calling in Flutter
+          // Accepted an incoming call
           var data = CallKitParams.fromJson(
             jsonDecode(jsonEncode(event.body as Map<dynamic, dynamic>)),
           );
 
+          // Navigate to conference page
           Navigator.push(
             navigatorKey.currentContext!,
             MaterialPageRoute(
@@ -91,6 +100,7 @@ Future<void> initFirebaseServices() async {
             ),
           );
 
+          // Mark call as connected on iOS
           if (!kIsWeb && Platform.isIOS) {
             FlutterCallkitIncoming.setCallConnected(data.id!).catchError((
               error,
@@ -100,17 +110,133 @@ Future<void> initFirebaseServices() async {
           }
           break;
         case Event.actionCallDecline:
+          // User declined the incoming call
+          var declineData = CallKitParams.fromJson(
+            jsonDecode(jsonEncode(event.body as Map<dynamic, dynamic>)),
+          );
+          Logger().i('Call declined: ${declineData.id}');
+          // The CallKit UI will automatically be dismissed
+          break;
         case Event.actionCallEnded:
+          // Call ended
+          var endData = CallKitParams.fromJson(
+            jsonDecode(jsonEncode(event.body as Map<dynamic, dynamic>)),
+          );
+          Logger().i('Call ended: ${endData.id}');
+
+          // End the call in CallService
+          CallService().endCall().catchError((error) {
+            Logger().e('Error ending call: $error');
+          });
+
+          // Navigate back if we're on the conference page
+          final navigator = Navigator.of(navigatorKey.currentContext!);
+          if (navigator.canPop()) {
+            navigator.pop();
+          }
+
+          // End the call in CallKit
+          if (endData.id != null) {
+            FlutterCallkitIncoming.endCall(endData.id!).catchError((error) {
+              Logger().e('Error ending CallKit call: $error');
+            });
+          }
+          break;
         case Event.actionCallTimeout:
+          // Incoming call timed out (missed call)
+          var timeoutData = CallKitParams.fromJson(
+            jsonDecode(jsonEncode(event.body as Map<dynamic, dynamic>)),
+          );
+          Logger().i('Call timed out (missed): ${timeoutData.id}');
+          // The missed call notification will be shown automatically
+          break;
         case Event.actionCallCallback:
-        case Event.actionCallToggleHold:ve
+          // User tapped "Call Back" from missed call notification (Android)
+          var callbackData = CallKitParams.fromJson(
+            jsonDecode(jsonEncode(event.body as Map<dynamic, dynamic>)),
+          );
+          Logger().i('Call back requested: ${callbackData.id}');
+          // TODO: Implement callback functionality - initiate outgoing call
+          // This would typically start an outgoing call to the caller
+          break;
+        case Event.actionCallToggleHold:
+          // Toggle hold state (iOS only)
+          var holdData = CallKitParams.fromJson(
+            jsonDecode(jsonEncode(event.body as Map<dynamic, dynamic>)),
+          );
+          Logger().i('Toggle hold: ${holdData.id}');
+          // Note: CallService doesn't have hold functionality yet
+          // For now, just sync with CallKit
+          if (holdData.id != null && !kIsWeb && Platform.isIOS) {
+            // Extract hold state from event if available, or toggle
+            // FlutterCallkitIncoming.holdCall(holdData.id!, isOnHold: !isCurrentlyHeld);
+            Logger().w('Hold toggle not fully implemented in CallService');
+            CallService().toggleMic(forceValue: false);
+            CallService().toggleCamera(forceValue: false);
+          }
+          break;
         case Event.actionCallToggleMute:
+          // Toggle mute/unmute
+          var muteData = CallKitParams.fromJson(
+            jsonDecode(jsonEncode(event.body as Map<dynamic, dynamic>)),
+          );
+          Logger().i('Toggle mute: ${muteData.id}');
+
+          // Use CallService to toggle mute
+          CallService().toggleMic(forceValue: event.body['isMuted'] == false);
+
+          // Sync with CallKit on iOS
+          if (muteData.id != null && !kIsWeb && Platform.isIOS) {
+            // CallKit mute state is handled automatically by the framework
+            // But we can explicitly sync if needed
+            // FlutterCallkitIncoming.muteCall(muteData.id!, isMuted: isMuted);
+          }
+          break;
         case Event.actionCallToggleDmtf:
+          // DTMF (dialpad) tone sent (iOS)
+          var dtmfData = CallKitParams.fromJson(
+            jsonDecode(jsonEncode(event.body as Map<dynamic, dynamic>)),
+          );
+          Logger().i('DTMF tone: ${dtmfData.id}');
+          // DTMF tones are typically handled by the WebRTC layer
+          // This event just notifies that a DTMF action occurred
+          break;
         case Event.actionCallToggleGroup:
+          // Group call toggle (iOS only)
+          var groupData = CallKitParams.fromJson(
+            jsonDecode(jsonEncode(event.body as Map<dynamic, dynamic>)),
+          );
+          Logger().i('Toggle group: ${groupData.id}');
+          // Group call management would need to be implemented in CallService
+          Logger().w('Group call toggle not fully implemented');
+          break;
         case Event.actionCallToggleAudioSession:
+          // Audio session change (e.g., speaker/bluetooth) (iOS)
+          var audioData = CallKitParams.fromJson(
+            jsonDecode(jsonEncode(event.body as Map<dynamic, dynamic>)),
+          );
+          Logger().i('Audio session changed: ${audioData.id}');
+          // Audio session routing is typically handled by the OS/CallKit
+          // This event just notifies that the routing changed
+          break;
         case Event.actionDidUpdateDevicePushTokenVoip:
+          // VoIP push token updated (iOS)
+          Logger().i('VoIP push token updated');
+          // Get the new token and update it on the server
+          if (!kIsWeb && Platform.isIOS) {
+            FlutterCallkitIncoming.getDevicePushTokenVoIP()
+                .then((token) {
+                  Logger().i('New VoIP push token: $token');
+                  // TODO: Send token to backend server
+                  // This would typically involve calling your backend API
+                  // to update the user's VoIP push token
+                })
+                .catchError((error) {
+                  Logger().e('Error getting VoIP push token: $error');
+                });
+          }
+          break;
         case Event.actionCallCustom:
-          // TODO: for custom action
           break;
       }
     });

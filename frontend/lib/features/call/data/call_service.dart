@@ -48,7 +48,6 @@ class CallService {
 
   // Public Getters
   Stream<bool> get isScreenSharing => _isScreenSharingController.stream;
-  bool get isScreenSharingValue => _isScreenSharing;
   Stream<CallState> get callStateStream => _stateController.stream;
   Stream<MediaStream?> get localStreamStream => _localStreamController.stream;
   Stream<MediaStream?> get cachedVideoStreamStream =>
@@ -66,7 +65,7 @@ class CallService {
 
   String? _currentRoomId;
   bool _isMuted = false;
-  bool _isCameraOff = false;
+  bool _isCameraOff = true;
   bool _isScreenSharing = false;
   Timer? _timer;
   User? _currentUser;
@@ -100,7 +99,7 @@ class CallService {
     try {
       // 1. Get Permissions & Media
       await _getUserMedia();
-      await activateCameraOrScreenShare(newScreenShareValue: false);
+      // await activateCameraOrScreenShare(newScreenShareValue: false);
       await _startBackgroundService(roomId);
 
       // 2. Setup initial participants
@@ -376,19 +375,19 @@ class CallService {
     return stream;
   }
 
-  void toggleMic() {
+  void toggleMic({bool? forceValue}) {
+    _isMuted = forceValue != null ? !forceValue : !_isMuted;
     if (_localStream != null) {
       final tracks = _localStream!.getAudioTracks();
       if (tracks.isNotEmpty) {
-        _isMuted = !_isMuted;
         tracks[0].enabled = !_isMuted;
         _micStateController.add(!_isMuted);
       }
     }
   }
 
-  void toggleCamera() {
-    _isCameraOff = !_isCameraOff;
+  void toggleCamera({bool? forceValue}) {
+    _isCameraOff = forceValue != null ? !forceValue : !_isCameraOff;
     if (!_isScreenSharing) {
       if (_isCameraOff) {
         activateCameraOrScreenShare(
@@ -456,6 +455,12 @@ class CallService {
 
         _localStream = stream;
         _localStreamController.sink.add(_localStream);
+
+        if (_isMuted) {
+          Future.delayed(Duration(milliseconds: 300), () {
+            toggleMic(forceValue: !_isMuted);
+          });
+        }
 
         _micStateController.add(audioGranted);
         return;
