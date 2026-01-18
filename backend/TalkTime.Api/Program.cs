@@ -152,16 +152,12 @@ if (app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 
 // Serve static files for uploaded media
-var uploadsPath = Path.Combine(app.Environment.ContentRootPath, "uploads");
+var uploadsPath = Path.Combine(app.Environment.WebRootPath, "uploads");
 if (!Directory.Exists(uploadsPath))
 {
     Directory.CreateDirectory(uploadsPath);
 }
-app.UseStaticFiles(new StaticFileOptions
-{
-    FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(uploadsPath),
-    RequestPath = "/uploads"
-});
+app.UseStaticFiles();
 
 // Use CORS before authentication
 app.UseCors();

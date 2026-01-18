@@ -401,6 +401,43 @@ public class TalkTimeHub : Hub
     }
 
     /// <summary>
+    /// Get current participants in a conference room
+    /// </summary>
+    public async Task GetRoomParticipants(string roomId)
+    {
+        var userId = GetUserId();
+        if (string.IsNullOrEmpty(userId)) return;
+
+        // Verify user is a participant of the conversation
+        if (!await _conversationRepository.IsParticipantAsync(roomId, userId))
+        {
+            await Clients.Caller.SendAsync("Error", new { message = "Not a participant of this conversation" });
+            return;
+        }
+
+        if (!ConferenceRooms.TryGetValue(roomId, out var roomState))
+        {
+            // No active conference in this room, return empty list
+            await Clients.Caller.SendAsync("RoomParticipants", new
+            {
+                roomId,
+                participants = new List<UserDto>()
+            });
+            return;
+        }
+
+        var participants = roomState.Participants.Values.ToList();
+        await Clients.Caller.SendAsync("RoomParticipants", new
+        {
+            roomId,
+            participants
+        });
+
+        _logger.LogInformation("User {UserId} requested participants for room {RoomId}, returned {Count} participants", 
+            userId, roomId, participants.Count);
+    }
+
+    /// <summary>
     /// Send offer to all participants in a room
     /// </summary>
     public async Task SendRoomOffer(string roomId, string sdp)

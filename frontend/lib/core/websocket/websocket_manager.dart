@@ -31,6 +31,7 @@ class WebSocketManager {
   final List<Function(String, bool)> _onTypingIndicatorCallbacks = [];
   final List<Function(String, ConferenceParticipant, String)>
   _onConferenceParticipantCallbacks = [];
+  final List<Function(String, String, ReactionUpdate)> _onReactionCallbacks = [];
   final List<String> _cachedConversations = [];
   final Map<String, bool> _onlineStates = {};
   final Map<String, List<ConferenceParticipant>> _conferenceParticipants = {};
@@ -272,6 +273,74 @@ class WebSocketManager {
         onCallInitiated(roomId, participant);
       }
     });
+
+    // Handle reaction added
+    _hubConnection!.on('ReactionAdded', (args) {
+      final data = args?.first as Map<String, dynamic>?;
+      _logger.d('Reaction added event: $data');
+      if (data != null) {
+        final conversationId = data['conversationId'] as String;
+        final messageId = data['messageId'] as String;
+        final reactionData = data['reaction'] as Map<String, dynamic>;
+        final reaction = ReactionUpdate.fromJson(reactionData);
+
+        for (var callback in _onReactionCallbacks) {
+          callback(conversationId, messageId, reaction);
+        }
+        _logger.i('Reaction added: ${reaction.emoji} to message $messageId');
+      }
+    });
+
+    // Handle reaction removed
+    _hubConnection!.on('ReactionRemoved', (args) {
+      final data = args?.first as Map<String, dynamic>?;
+      _logger.d('Reaction removed event: $data');
+      if (data != null) {
+        final conversationId = data['conversationId'] as String;
+        final messageId = data['messageId'] as String;
+        final emoji = data['emoji'] as String;
+        final userId = data['userId'] as String;
+
+        final reaction = ReactionUpdate(
+          id: '',
+          emoji: emoji,
+          userId: userId,
+          username: '',
+          isRemoved: true,
+        );
+
+        for (var callback in _onReactionCallbacks) {
+          callback(conversationId, messageId, reaction);
+        }
+        _logger.i('Reaction removed: $emoji from message $messageId');
+      }
+    });
+
+    // Handle room participants response
+    _hubConnection!.on('RoomParticipants', (args) {
+      final data = args?.first as Map<String, dynamic>?;
+      _logger.d('Room participants event: $data');
+      if (data != null) {
+        final roomId = data['roomId'] as String;
+        final participantsData = data['participants'] as List?;
+
+        if (participantsData != null) {
+          final participants = participantsData
+              .map((p) => ConferenceParticipant.fromJson(p as Map<String, dynamic>))
+              .toList();
+
+          _conferenceParticipants[roomId] = participants;
+
+          // Notify callbacks about each participant
+          for (var participant in participants) {
+            for (var callback in _onConferenceParticipantCallbacks) {
+              callback(roomId, participant, 'existing');
+            }
+          }
+          _logger.i('Received ${participants.length} participants for room $roomId');
+        }
+      }
+    });
   }
 
   /// Connect to SignalR hub
@@ -461,6 +530,29 @@ class WebSocketManager {
     _onConferenceParticipantCallbacks.remove(callback);
   }
 
+  /// Add callback for reaction updates
+  void onReaction(Function(String, String, ReactionUpdate) callback) {
+    _onReactionCallbacks.add(callback);
+  }
+
+  /// Remove callback for reaction updates
+  void removeReactionCallback(Function(String, String, ReactionUpdate) callback) {
+    _onReactionCallbacks.remove(callback);
+  }
+
+  /// Request current participants in a room/conference
+  Future<void> requestRoomParticipants(String roomId) async {
+    if (!_isConnected || _hubConnection == null) return;
+
+    _logger.i('Requesting room participants for: $roomId');
+
+    try {
+      await _hubConnection!.invoke('GetRoomParticipants', args: [roomId]);
+    } catch (e) {
+      _logger.e('Failed to request room participants for $roomId: $e');
+    }
+  }
+
   /// Dispose resources
   void dispose() {
     _logger.i('Disposing WebSocket manager');
@@ -473,6 +565,7 @@ class WebSocketManager {
     _onUserOfflineCallbacks.clear();
     _onTypingIndicatorCallbacks.clear();
     _onConferenceParticipantCallbacks.clear();
+    _onReactionCallbacks.clear();
     _conferenceParticipants.clear();
   }
 }
@@ -494,6 +587,32 @@ class ConferenceParticipant {
       id: json['id'] as String,
       username: json['username'] as String,
       avatarUrl: json['avatarUrl'] as String?,
+    );
+  }
+}
+
+/// Represents a reaction update from WebSocket
+class ReactionUpdate {
+  final String id;
+  final String emoji;
+  final String userId;
+  final String username;
+  final bool isRemoved;
+
+  ReactionUpdate({
+    required this.id,
+    required this.emoji,
+    required this.userId,
+    required this.username,
+    this.isRemoved = false,
+  });
+
+  factory ReactionUpdate.fromJson(Map<String, dynamic> json) {
+    return ReactionUpdate(
+      id: json['id'] as String? ?? '',
+      emoji: json['emoji'] as String,
+      userId: json['userId'] as String,
+      username: json['username'] as String? ?? '',
     );
   }
 }

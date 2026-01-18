@@ -108,6 +108,11 @@ class _MessageListPageState extends State<MessageListPage> {
             }
           });
           mngr.onConferenceParticipant(_onConferenceParticipantUpdate);
+          mngr.onReaction(_onReactionUpdate);
+          
+          // Request current room participants (for when app is reopened)
+          mngr.requestRoomParticipants(widget.conversation.id);
+          
           // Load initial conference participants if any
           setState(() {
             _conferenceParticipants = mngr.getConferenceParticipants(
@@ -164,20 +169,68 @@ class _MessageListPageState extends State<MessageListPage> {
     _syncMessages();
   }
 
+  void _onReactionUpdate(
+    String conversationId,
+    String messageId,
+    ReactionUpdate reaction,
+  ) {
+    // Only process reactions for this conversation
+    if (conversationId != widget.conversation.id) return;
+
+    setState(() {
+      final currentReactions = _messageReactions[messageId] ?? [];
+
+      if (reaction.isRemoved) {
+        // Remove the reaction
+        _messageReactions[messageId] = currentReactions
+            .where((r) => !(r.emoji == reaction.emoji && r.userId == reaction.userId))
+            .toList();
+      } else {
+        // Check if reaction already exists
+        final exists = currentReactions.any(
+          (r) => r.emoji == reaction.emoji && r.userId == reaction.userId,
+        );
+        if (!exists) {
+          // Add new reaction
+          final newReaction = Reaction(
+            id: reaction.id,
+            emoji: reaction.emoji,
+            userId: reaction.userId,
+            username: reaction.username,
+          );
+          _messageReactions[messageId] = [...currentReactions, newReaction];
+        }
+      }
+    });
+  }
+
   void _onConferenceParticipantUpdate(
     String roomId,
     ConferenceParticipant participant,
     String action,
   ) {
     if (roomId == widget.conversation.id) {
-      final participants = WebSocketManager().getConferenceParticipants(
-        widget.conversation.id,
-      );
-      // Only update if participants have actually changed
-      if (!listEquals(_conferenceParticipants, participants)) {
-        setState(() {
-          _conferenceParticipants = participants;
-        });
+      if (action == 'existing') {
+        // This is from requestRoomParticipants - refresh from manager
+        final participants = WebSocketManager().getConferenceParticipants(
+          widget.conversation.id,
+        );
+        if (!listEquals(_conferenceParticipants, participants)) {
+          setState(() {
+            _conferenceParticipants = participants;
+          });
+        }
+      } else {
+        // Regular join/leave event
+        final participants = WebSocketManager().getConferenceParticipants(
+          widget.conversation.id,
+        );
+        // Only update if participants have actually changed
+        if (!listEquals(_conferenceParticipants, participants)) {
+          setState(() {
+            _conferenceParticipants = participants;
+          });
+        }
       }
     }
   }
@@ -232,6 +285,7 @@ class _MessageListPageState extends State<MessageListPage> {
     mngr.leaveConversation(widget.conversation.id);
     mngr.removeMessageReceivedCallback(_onSignalMsgReceived);
     mngr.removeConferenceParticipantCallback(_onConferenceParticipantUpdate);
+    mngr.removeReactionCallback(_onReactionUpdate);
   }
 
   void _sendMessage() async {
