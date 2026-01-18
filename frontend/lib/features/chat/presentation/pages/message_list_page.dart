@@ -1,22 +1,30 @@
 import 'dart:async';
-import 'dart:io' show Platform;
+import 'dart:io' show File, Platform;
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:collection/collection.dart';
 import 'package:emoji_picker_flutter/emoji_picker_flutter.dart' as emoji_picker;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:giphy_get/giphy_get.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:logger/logger.dart';
 import 'package:talktime/core/websocket/websocket_manager.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/features/call/presentation/pages/conference_page.dart';
 import 'package:talktime/features/chat/data/conversation_service.dart';
+import 'package:talktime/features/chat/data/media_service.dart';
 import 'package:talktime/features/chat/data/message_service.dart';
+import 'package:talktime/features/chat/data/reaction_service.dart';
 import 'package:talktime/shared/models/conversation.dart';
 import 'package:talktime/shared/models/message.dart';
 import 'package:talktime/shared/models/user.dart';
 import 'package:visibility_detector/visibility_detector.dart';
+
+// Common quick reactions like Telegram
+const List<String> quickReactions = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 
 class MessageListPage extends StatefulWidget {
   final Conversation conversation;
@@ -34,17 +42,25 @@ class _MessageListPageState extends State<MessageListPage> {
   late String _myId = '';
   late Timer _syncTimer;
   late MessageService _messageService;
+  late ReactionService _reactionService;
+  late MediaService _mediaService;
   final Logger _logger = Logger(output: ConsoleOutput());
   Map<String, User> _chatParticipants = {};
   List<ConferenceParticipant> _conferenceParticipants = [];
   bool _isEmojiPickerVisible = false;
   final Map<String, Message> _newMessages = {};
   int _upperBound = 50;
+  bool _isSendingMedia = false;
+
+  // Giphy API Key - replace with your own
+  static const String _giphyApiKey = 'GlVGYHkr3WSBnllca54iNt0yFbjz7L65';
 
   @override
   void initState() {
     super.initState();
     _messageService = MessageService();
+    _reactionService = ReactionService();
+    _mediaService = MediaService();
     _messageService.getMessages(widget.conversation.id, take: _upperBound).then(
       (messages) {
         setState(() {
@@ -168,6 +184,7 @@ class _MessageListPageState extends State<MessageListPage> {
     _scrollController.dispose();
     _syncTimer?.cancel();
     _messageService.dispose();
+    _reactionService.dispose();
     super.dispose();
 
     final mngr = WebSocketManager();
@@ -183,34 +200,102 @@ class _MessageListPageState extends State<MessageListPage> {
     // Clear input
     _textController.clear();
 
-    // Optimistic update: add message locally
-    final newMessage = Message(
-      id: 'temp_${DateTime.now().millisecondsSinceEpoch}',
-      conversationId: widget.conversation.id,
-      sender: const User(id: 'u1', username: 'You'),
-      content: content,
-      sentAt: DateTime.now().toIso8601String(),
-    );
-
-    // Refresh UI with new message
-    // final ft = List<Message>.from(_messages);
-    // ft.insert(0, newMessage);
-    // setState(() {
-    //   _messages = ft;
-    // });
-
-    // Send to backend (fire and forget for now)
     try {
       await _messageService.sendMessage(widget.conversation.id, content);
-      // After sending, refresh the message list to get the real message from backend
       await _syncMessages();
     } catch (e) {
-      // TODO: Show error and retry
-      // Revert optimistic update if send fails
-      // setState(() {
-      //   _messages = ft;
-      // });
+      _logger.e('Error sending message: $e');
     }
+  }
+
+  Future<void> _sendImageMessage(String imageUrl) async {
+    try {
+      await _messageService.sendMessage(
+        widget.conversation.id,
+        '', // Empty content for image
+        type: 'image',
+        mediaUrl: imageUrl,
+      );
+      await _syncMessages();
+    } catch (e) {
+      _logger.e('Error sending image: $e');
+    }
+  }
+
+  Future<void> _sendGifMessage(String gifUrl) async {
+    try {
+      await _messageService.sendMessage(
+        widget.conversation.id,
+        gifUrl, // Store GIF URL in content for now
+        type: 'image',
+        mediaUrl: gifUrl,
+      );
+      await _syncMessages();
+    } catch (e) {
+      _logger.e('Error sending GIF: $e');
+    }
+  }
+
+  Future<void> _pickAndSendImage() async {
+    final ImagePicker picker = ImagePicker();
+    final XFile? image = await picker.pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 1920,
+      maxHeight: 1920,
+      imageQuality: 85,
+    );
+
+    if (image == null) return;
+
+    setState(() => _isSendingMedia = true);
+
+    try {
+      String? imageUrl;
+      if (kIsWeb) {
+        final bytes = await image.readAsBytes();
+        imageUrl = await _mediaService.uploadImageBytes(bytes, image.name);
+      } else {
+        imageUrl = await _mediaService.uploadImage(File(image.path));
+      }
+
+      if (imageUrl != null) {
+        await _sendImageMessage(imageUrl);
+      } else {
+        _showErrorSnackbar('Failed to upload image');
+      }
+    } catch (e) {
+      _logger.e('Error picking/uploading image: $e');
+      _showErrorSnackbar('Failed to send image');
+    } finally {
+      setState(() => _isSendingMedia = false);
+    }
+  }
+
+  Future<void> _pickAndSendGif() async {
+    try {
+      final gif = await GiphyGet.getGif(
+        context: context,
+        apiKey: _giphyApiKey,
+        lang: GiphyLanguage.english,
+        tabColor: Theme.of(context).colorScheme.primary,
+      );
+
+      if (gif != null && gif.images?.original?.url != null) {
+        setState(() => _isSendingMedia = true);
+        await _sendGifMessage(gif.images!.original!.url!);
+        setState(() => _isSendingMedia = false);
+      }
+    } catch (e) {
+      _logger.e('Error picking GIF: $e');
+      _showErrorSnackbar('Failed to send GIF');
+      setState(() => _isSendingMedia = false);
+    }
+  }
+
+  void _showErrorSnackbar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: Colors.red),
+    );
   }
 
   bool _isLoadingExtra = false;
@@ -244,6 +329,111 @@ class _MessageListPageState extends State<MessageListPage> {
       _newMessages[message.id] = message;
     });
     _messageService.markAsRead(message);
+  }
+
+  Future<void> _toggleReaction(Message message, String emoji) async {
+    try {
+      await _reactionService.toggleReaction(
+        message.id,
+        emoji,
+        _myId,
+        message.reactions,
+        message.conversationId,
+      );
+      // Sync to get updated reactions
+      await _syncMessages();
+    } catch (e) {
+      _logger.e('Error toggling reaction: $e');
+    }
+  }
+
+  void _showReactionPicker(Message message) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Quick reactions row
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: quickReactions.map((emoji) {
+                final hasReacted = message.reactions.any(
+                  (r) => r.emoji == emoji && r.userId == _myId,
+                );
+                return GestureDetector(
+                  onTap: () {
+                    Navigator.pop(context);
+                    _toggleReaction(message, emoji);
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: hasReacted
+                          ? Theme.of(context).colorScheme.primaryContainer
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(emoji, style: const TextStyle(fontSize: 28)),
+                  ),
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 16),
+            // Full emoji picker button
+            TextButton.icon(
+              onPressed: () {
+                Navigator.pop(context);
+                _showFullEmojiPicker(message);
+              },
+              icon: const Icon(Icons.add_reaction_outlined),
+              label: const Text('More reactions'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showFullEmojiPicker(Message message) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      builder: (context) => SizedBox(
+        height: MediaQuery.of(context).size.height * 0.5,
+        child: emoji_picker.EmojiPicker(
+          onEmojiSelected: (category, emoji) {
+            Navigator.pop(context);
+            _toggleReaction(message, emoji.emoji);
+          },
+          config: emoji_picker.Config(
+            height: MediaQuery.of(context).size.height * 0.5,
+            emojiViewConfig: emoji_picker.EmojiViewConfig(
+              emojiSizeMax: 32,
+              backgroundColor: Theme.of(context).colorScheme.surface,
+            ),
+            categoryViewConfig: emoji_picker.CategoryViewConfig(
+              iconColor: Theme.of(context).colorScheme.onSurface,
+              iconColorSelected: Theme.of(context).colorScheme.primary,
+              indicatorColor: Theme.of(context).colorScheme.primary,
+              backgroundColor: Theme.of(context).colorScheme.surface,
+            ),
+            searchViewConfig: emoji_picker.SearchViewConfig(
+              hintText: 'Search emojis...',
+              backgroundColor: Theme.of(context).colorScheme.surface,
+              buttonIconColor: Theme.of(context).colorScheme.onSurface,
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   User? get firstOtherUser =>
@@ -318,6 +508,24 @@ class _MessageListPageState extends State<MessageListPage> {
             ),
           ),
 
+          // Sending media indicator
+          if (_isSendingMedia)
+            Container(
+              padding: const EdgeInsets.all(8),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  SizedBox(width: 8),
+                  Text('Sending...'),
+                ],
+              ),
+            ),
+
           // Message Input
           _buildMessageInput(),
         ],
@@ -326,85 +534,208 @@ class _MessageListPageState extends State<MessageListPage> {
   }
 
   Widget _buildMessageTile(Message message, bool isOwn) {
-    return Padding(
-      key: Key(message.id),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Row(
-        mainAxisAlignment: isOwn
-            ? MainAxisAlignment.end
-            : MainAxisAlignment.start,
-        children: [
-          if (!isOwn)
-            Padding(
-              padding: const EdgeInsets.only(right: 12),
-              child: CircleAvatar(
-                radius: 16,
-                child: Text(
-                  (_chatParticipants[message.sender.id]?.username ??
-                      message.sender.username)[0],
-                ),
-              ),
-            ),
-          Flexible(
-            child: Container(
-              key: Key(message.id), // Add key for better performance
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              decoration: BoxDecoration(
-                color: isOwn ? Colors.blue : Colors.grey[300],
-                borderRadius: BorderRadius.circular(20),
-              ),
+    final isImageMessage =
+        message.type == MessageType.image ||
+        message.type == MessageType.gif ||
+        (message.mediaUrl != null && message.mediaUrl!.isNotEmpty);
 
-              child: VisibilityDetector(
-                key: Key(message.id),
-                onVisibilityChanged: (VisibilityInfo info) {
-                  if (info.visibleBounds.size.height > 5) {
-                    _markAsRead(message);
-                  }
-                },
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      message.content,
-                      style: TextStyle(
-                        color: isOwn ? Colors.white : Colors.black,
-                        fontSize: 16,
+    return GestureDetector(
+      onLongPress: () => _showReactionPicker(message),
+      child: Padding(
+        key: Key(message.id),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Column(
+          crossAxisAlignment: isOwn
+              ? CrossAxisAlignment.end
+              : CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: isOwn
+                  ? MainAxisAlignment.end
+                  : MainAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                if (!isOwn)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 12),
+                    child: CircleAvatar(
+                      radius: 16,
+                      child: Text(
+                        (_chatParticipants[message.sender.id]?.username ??
+                            message.sender.username)[0],
                       ),
                     ),
-                    const SizedBox(height: 4),
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (_newMessages.containsKey(message.id) && !isOwn)
-                          Padding(
-                            padding: const EdgeInsets.only(right: 4, top: 2),
-                            child: Icon(
-                              Icons.circle,
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.primaryContainer,
-                              size: 8,
+                  ),
+                Flexible(
+                  child: Container(
+                    key: Key(message.id),
+                    padding: isImageMessage
+                        ? const EdgeInsets.all(4)
+                        : const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 10,
+                          ),
+                    decoration: BoxDecoration(
+                      color: isOwn ? Colors.blue : Colors.grey[300],
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: VisibilityDetector(
+                      key: Key(message.id),
+                      onVisibilityChanged: (VisibilityInfo info) {
+                        if (info.visibleBounds.size.height > 5) {
+                          _markAsRead(message);
+                        }
+                      },
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // Message content (text or media)
+                          if (isImageMessage)
+                            _buildImageContent(message)
+                          else
+                            Text(
+                              message.content,
+                              style: TextStyle(
+                                color: isOwn ? Colors.white : Colors.black,
+                                fontSize: 16,
+                              ),
                             ),
+                          const SizedBox(height: 4),
+                          // Timestamp row
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (_newMessages.containsKey(message.id) &&
+                                  !isOwn)
+                                Padding(
+                                  padding: const EdgeInsets.only(
+                                    right: 4,
+                                    top: 2,
+                                  ),
+                                  child: Icon(
+                                    Icons.circle,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.primaryContainer,
+                                    size: 8,
+                                  ),
+                                ),
+                              Text(
+                                DateFormat(
+                                  'HH:mm',
+                                ).format(DateTime.parse(message.sentAt)),
+                                style: TextStyle(
+                                  color: isOwn
+                                      ? Colors.white70
+                                      : Colors.black54,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
                           ),
-                        Text(
-                          DateFormat(
-                            'HH:mm',
-                          ).format(DateTime.parse(message.sentAt)),
-                          style: TextStyle(
-                            color: isOwn ? Colors.white70 : Colors.black54,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                if (isOwn) const SizedBox(width: 10),
+              ],
+            ),
+            // Reactions display
+            if (message.reactions.isNotEmpty)
+              _buildReactionsDisplay(message, isOwn),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildImageContent(Message message) {
+    final imageUrl = message.mediaUrl ?? message.content;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 250, maxHeight: 300),
+        child: CachedNetworkImage(
+          imageUrl: imageUrl,
+          fit: BoxFit.cover,
+          placeholder: (context, url) => Container(
+            width: 150,
+            height: 150,
+            color: Colors.grey[200],
+            child: const Center(child: CircularProgressIndicator()),
+          ),
+          errorWidget: (context, url, error) => Container(
+            width: 150,
+            height: 100,
+            color: Colors.grey[200],
+            child: const Icon(Icons.broken_image, size: 40),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildReactionsDisplay(Message message, bool isOwn) {
+    // Group reactions by emoji
+    final reactionGroups = <String, List<Reaction>>{};
+    for (final reaction in message.reactions) {
+      reactionGroups.putIfAbsent(reaction.emoji, () => []).add(reaction);
+    }
+
+    return Padding(
+      padding: EdgeInsets.only(
+        top: 4,
+        left: isOwn ? 0 : 44,
+        right: isOwn ? 10 : 0,
+      ),
+      child: Wrap(
+        spacing: 4,
+        runSpacing: 4,
+        children: reactionGroups.entries.map((entry) {
+          final emoji = entry.key;
+          final reactions = entry.value;
+          final hasMyReaction = reactions.any((r) => r.userId == _myId);
+
+          return GestureDetector(
+            onTap: () => _toggleReaction(message, emoji),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: hasMyReaction
+                    ? Theme.of(context).colorScheme.primaryContainer
+                    : Theme.of(context).colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(12),
+                border: hasMyReaction
+                    ? Border.all(
+                        color: Theme.of(context).colorScheme.primary,
+                        width: 1,
+                      )
+                    : null,
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(emoji, style: const TextStyle(fontSize: 14)),
+                  if (reactions.length > 1) ...[
+                    const SizedBox(width: 4),
+                    Text(
+                      '${reactions.length}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: hasMyReaction
+                            ? Theme.of(context).colorScheme.primary
+                            : Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
                     ),
                   ],
-                ),
+                ],
               ),
             ),
-          ),
-          if (isOwn) const SizedBox(width: 10), // Match avatar width + padding
-        ],
+          );
+        }).toList(),
       ),
     );
   }
@@ -517,6 +848,7 @@ class _MessageListPageState extends State<MessageListPage> {
           padding: const EdgeInsets.all(8.0),
           child: Row(
             children: [
+              // Emoji button
               IconButton(
                 icon: Icon(
                   _isEmojiPickerVisible
@@ -529,21 +861,44 @@ class _MessageListPageState extends State<MessageListPage> {
                   });
                 },
               ),
+              // Text input
               Expanded(
                 child: TextField(
                   controller: _textController,
                   decoration: InputDecoration(
                     hintText: 'Message ${name}',
                     filled: true,
-                    // fillColor: Colors.grey[100],
-                    border: OutlineInputBorder(
+                    border: const OutlineInputBorder(
                       borderRadius: BorderRadius.all(Radius.circular(30)),
                       borderSide: BorderSide.none,
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                    // Media buttons inside the text field on the right
+                    suffixIcon: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // GIF button
+                        IconButton(
+                          icon: const Icon(Icons.gif_box_outlined),
+                          onPressed: _isSendingMedia ? null : _pickAndSendGif,
+                          tooltip: 'Send GIF',
+                        ),
+                        // Photo button
+                        IconButton(
+                          icon: const Icon(Icons.photo_outlined),
+                          onPressed: _isSendingMedia ? null : _pickAndSendImage,
+                          tooltip: 'Send Photo',
+                        ),
+                      ],
                     ),
                   ),
                   onSubmitted: (_) => _sendMessage(),
                 ),
               ),
+              // Send button
               IconButton(icon: const Icon(Icons.send), onPressed: _sendMessage),
             ],
           ),

@@ -28,6 +28,8 @@ public class MessageRepository : IMessageRepository
         await using var dbContext = _context.CreateDbContext();
         return await dbContext.Messages
             .Include(m => m.Sender)
+            .Include(m => m.Reactions)
+                .ThenInclude(r => r.User)
             .Where(m => m.ConversationId == conversationId)
             .OrderByDescending(m => m.SentAt)
             .Skip(skip)
@@ -42,6 +44,8 @@ public class MessageRepository : IMessageRepository
         return await dbContext.Messages
             .Include(m => m.Sender)
             .Include(m => m.Deliveries)
+            .Include(m => m.Reactions)
+                .ThenInclude(r => r.User)
             .Where(m => m.Deliveries.Any(d => d.RecipientId == userId && !d.IsDelivered))
             .OrderBy(m => m.SentAt)
             .ToListAsync();

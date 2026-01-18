@@ -55,6 +55,20 @@ class ApiConstants {
   // Delete message
   static String deleteMessage(String messageId) => '$messages/$messageId';
 
+  // ==================== Reaction Endpoints ====================
+  static const String reactions = '$apiPrefix/reactions';
+
+  // Get reactions for a message
+  static String getReactions(String messageId, String conversationId) =>
+      '$reactions/$messageId?conversationId=$conversationId';
+
+  // Add reaction (POST to /api/reactions)
+  // Remove reaction (DELETE to /api/reactions)
+
+  // ==================== Media Endpoints ====================
+  static const String media = '$apiPrefix/media';
+  static const String uploadMedia = '$media/upload';
+
   // ==================== User Endpoints ====================
   static const String users = '$apiPrefix/users';
 

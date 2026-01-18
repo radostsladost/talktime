@@ -69,7 +69,10 @@ public class MessagesController : ControllerBase
                 new UserDto(m.Sender.Id, m.Sender.Username, m.Sender.AvatarUrl, m.Sender.Description, m.Sender.IsOnline, m.Sender.LastSeenAt),
                 m.EncryptedContent,
                 m.Type.ToString().ToLower(),
-                m.SentAt.ToString("o")
+                m.SentAt.ToString("o"),
+                m.MediaUrl,
+                m.ThumbnailUrl,
+                m.Reactions?.Select(r => new ReactionDto(r.Id, r.Emoji, r.UserId, r.User?.Username ?? "")).ToList()
             )).ToList();
 
             return Ok(new { data = messageDtos });
@@ -114,6 +117,17 @@ public class MessagesController : ControllerBase
                 return Unauthorized(new { message = "User not found" });
             }
 
+            // Parse message type
+            var messageType = request.Type?.ToLower() switch
+            {
+                "image" => MessageType.Image,
+                "gif" => MessageType.Image, // GIFs are treated as images
+                "file" => MessageType.File,
+                "audio" => MessageType.Audio,
+                "video" => MessageType.Video,
+                _ => MessageType.Text
+            };
+
             // Create message
             var message = new Message
             {
@@ -121,7 +135,8 @@ public class MessagesController : ControllerBase
                 ConversationId = request.ConversationId,
                 SenderId = userId,
                 EncryptedContent = request.Content, // TODO: not yet encrypted
-                Type = MessageType.Text,
+                Type = messageType,
+                MediaUrl = request.MediaUrl,
                 SentAt = DateTime.UtcNow
             };
 
@@ -145,7 +160,10 @@ public class MessagesController : ControllerBase
                 new UserDto(sender.Id, sender.Username, sender.AvatarUrl, sender.Description, sender.IsOnline, sender.LastSeenAt),
                 message.EncryptedContent,
                 message.Type.ToString().ToLower(),
-                message.SentAt.ToString("o")
+                message.SentAt.ToString("o"),
+                message.MediaUrl,
+                message.ThumbnailUrl,
+                null
             );
 
             // Send real-time notification to all participants in the conversation
@@ -230,7 +248,10 @@ public class MessagesController : ControllerBase
                 new UserDto(m.Sender.Id, m.Sender.Username, m.Sender.AvatarUrl, m.Sender.Description, m.Sender.IsOnline, m.Sender.LastSeenAt),
                 m.EncryptedContent,
                 m.Type.ToString().ToLower(),
-                m.SentAt.ToString("o")
+                m.SentAt.ToString("o"),
+                m.MediaUrl,
+                m.ThumbnailUrl,
+                m.Reactions?.Select(r => new ReactionDto(r.Id, r.Emoji, r.UserId, r.User?.Username ?? "")).ToList()
             )).ToList();
 
             return Ok(new { data = messageDtos });

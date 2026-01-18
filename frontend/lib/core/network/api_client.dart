@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import 'package:logger/logger.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:talktime/core/constants/api_constants.dart';
@@ -260,6 +261,7 @@ class ApiClient {
 
   Future<Map<String, dynamic>> delete(
     String endpoint, {
+    Map<String, dynamic>? body,
     bool requiresAuth = true,
   }) async {
     final uri = Uri.parse('${ApiConstants.baseUrl}$endpoint');
@@ -267,18 +269,27 @@ class ApiClient {
     final headers = await _buildHeaders(includeAuth: requiresAuth);
 
     try {
-      final response = await _client
-          .delete(uri, headers: headers)
-          .timeout(const Duration(seconds: 30));
+      final request = http.Request('DELETE', uri);
+      request.headers.addAll(headers);
+      if (body != null) {
+        request.body = jsonEncode(body);
+      }
+
+      final streamedResponse = await _client.send(request).timeout(const Duration(seconds: 30));
+      final response = await http.Response.fromStream(streamedResponse);
 
       // Handle 401 by attempting token refresh and retry
       if (response.statusCode == 401 && requiresAuth) {
         final refreshed = await refreshAccessToken();
         if (refreshed) {
           final newHeaders = await _buildHeaders(includeAuth: true);
-          final retryResponse = await _client
-              .delete(uri, headers: newHeaders)
-              .timeout(const Duration(seconds: 30));
+          final retryRequest = http.Request('DELETE', uri);
+          retryRequest.headers.addAll(newHeaders);
+          if (body != null) {
+            retryRequest.body = jsonEncode(body);
+          }
+          final retryStreamedResponse = await _client.send(retryRequest).timeout(const Duration(seconds: 30));
+          final retryResponse = await http.Response.fromStream(retryStreamedResponse);
           return _processResponse(retryResponse);
         }
       }
@@ -368,6 +379,155 @@ class ApiClient {
       return _processResponse(response);
     } catch (e) {
       _logger.e('PUT request failed: $uri $e');
+      rethrow;
+    }
+  }
+
+  /// Upload a file using multipart form data
+  Future<Map<String, dynamic>> uploadFile(
+    String endpoint, {
+    required String filePath,
+    required String fieldName,
+    String? contentType,
+    bool requiresAuth = true,
+  }) async {
+    final uri = Uri.parse('${ApiConstants.baseUrl}$endpoint');
+
+    try {
+      // Refresh token if needed
+      if (requiresAuth && await isAccessTokenExpired()) {
+        await refreshAccessToken();
+      }
+
+      final token = await getToken();
+      final request = http.MultipartRequest('POST', uri);
+
+      if (requiresAuth && token != null) {
+        request.headers['Authorization'] = 'Bearer $token';
+      }
+
+      request.files.add(
+        await http.MultipartFile.fromPath(
+          fieldName,
+          filePath,
+          contentType: contentType != null
+              ? MediaType.parse(contentType)
+              : null,
+        ),
+      );
+
+      final streamedResponse = await request.send().timeout(
+        const Duration(seconds: 60),
+      );
+      final response = await http.Response.fromStream(streamedResponse);
+
+      // Handle 401 by attempting token refresh and retry
+      if (response.statusCode == 401 && requiresAuth) {
+        final refreshed = await refreshAccessToken();
+        if (refreshed) {
+          final newToken = await getToken();
+          final retryRequest = http.MultipartRequest('POST', uri);
+          if (newToken != null) {
+            retryRequest.headers['Authorization'] = 'Bearer $newToken';
+          }
+          retryRequest.files.add(
+            await http.MultipartFile.fromPath(
+              fieldName,
+              filePath,
+              contentType: contentType != null
+                  ? MediaType.parse(contentType)
+                  : null,
+            ),
+          );
+          final retryStreamedResponse = await retryRequest.send().timeout(
+            const Duration(seconds: 60),
+          );
+          final retryResponse = await http.Response.fromStream(
+            retryStreamedResponse,
+          );
+          return _processResponse(retryResponse);
+        }
+      }
+
+      return _processResponse(response);
+    } catch (e) {
+      _logger.e('Upload request failed: $uri $e');
+      rethrow;
+    }
+  }
+
+  /// Upload file from bytes using multipart form data
+  Future<Map<String, dynamic>> uploadFileBytes(
+    String endpoint, {
+    required List<int> bytes,
+    required String filename,
+    required String fieldName,
+    String? contentType,
+    bool requiresAuth = true,
+  }) async {
+    final uri = Uri.parse('${ApiConstants.baseUrl}$endpoint');
+
+    try {
+      // Refresh token if needed
+      if (requiresAuth && await isAccessTokenExpired()) {
+        await refreshAccessToken();
+      }
+
+      final token = await getToken();
+      final request = http.MultipartRequest('POST', uri);
+
+      if (requiresAuth && token != null) {
+        request.headers['Authorization'] = 'Bearer $token';
+      }
+
+      request.files.add(
+        http.MultipartFile.fromBytes(
+          fieldName,
+          bytes,
+          filename: filename,
+          contentType: contentType != null
+              ? MediaType.parse(contentType)
+              : null,
+        ),
+      );
+
+      final streamedResponse = await request.send().timeout(
+        const Duration(seconds: 60),
+      );
+      final response = await http.Response.fromStream(streamedResponse);
+
+      // Handle 401 by attempting token refresh and retry
+      if (response.statusCode == 401 && requiresAuth) {
+        final refreshed = await refreshAccessToken();
+        if (refreshed) {
+          final newToken = await getToken();
+          final retryRequest = http.MultipartRequest('POST', uri);
+          if (newToken != null) {
+            retryRequest.headers['Authorization'] = 'Bearer $newToken';
+          }
+          retryRequest.files.add(
+            http.MultipartFile.fromBytes(
+              fieldName,
+              bytes,
+              filename: filename,
+              contentType: contentType != null
+                  ? MediaType.parse(contentType)
+                  : null,
+            ),
+          );
+          final retryStreamedResponse = await retryRequest.send().timeout(
+            const Duration(seconds: 60),
+          );
+          final retryResponse = await http.Response.fromStream(
+            retryStreamedResponse,
+          );
+          return _processResponse(retryResponse);
+        }
+      }
+
+      return _processResponse(response);
+    } catch (e) {
+      _logger.e('Upload request failed: $uri $e');
       rethrow;
     }
   }

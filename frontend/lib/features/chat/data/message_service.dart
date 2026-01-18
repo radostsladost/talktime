@@ -81,7 +81,8 @@ class MessageService {
               ..senderId = message.sender!.id
               ..content = message.content
               ..type = getMessageType(message.type)
-              ..sentAt = DateTime.parse(message.sentAt).millisecondsSinceEpoch,
+              ..sentAt = DateTime.parse(message.sentAt).millisecondsSinceEpoch
+              ..mediaUrl = message.mediaUrl,
           )
           .toList();
 
@@ -138,7 +139,8 @@ class MessageService {
               ..senderId = message.sender!.id
               ..content = message.content
               ..type = getMessageType(message.type)
-              ..sentAt = DateTime.parse(message.sentAt).millisecondsSinceEpoch,
+              ..sentAt = DateTime.parse(message.sentAt).millisecondsSinceEpoch
+              ..mediaUrl = message.mediaUrl,
           )
           .toList();
 
@@ -191,16 +193,22 @@ class MessageService {
     String conversationId,
     String content, {
     String type = 'text',
+    String? mediaUrl,
   }) async {
     try {
       _logger.i('Sending message to conversation: $conversationId');
+      final body = {
+        'conversationId': conversationId,
+        'content': content,
+        'type': type,
+      };
+      if (mediaUrl != null) {
+        body['mediaUrl'] = mediaUrl;
+      }
+
       final response = await _apiClient.post(
         ApiConstants.messages,
-        body: {
-          'conversationId': conversationId,
-          'content': content,
-          'type': type,
-        },
+        body: body,
       );
 
       final message = Message.fromJson(
@@ -215,7 +223,8 @@ class MessageService {
         ..senderId = message.sender?.id ?? ""
         ..content = message.content
         ..type = getMessageType(message.type)
-        ..sentAt = DateTime.parse(message.sentAt).millisecondsSinceEpoch;
+        ..sentAt = DateTime.parse(message.sentAt).millisecondsSinceEpoch
+        ..mediaUrl = message.mediaUrl;
 
       await _localStorage.saveMessages([dbMessage]);
 
@@ -285,8 +294,16 @@ class MessageService {
     switch (type) {
       case MessageType.text:
         return DbModels.MessageSchemaMessageType.text;
-      default:
-        throw ArgumentError('Invalid message type');
+      case MessageType.image:
+        return DbModels.MessageSchemaMessageType.image;
+      case MessageType.gif:
+        return DbModels.MessageSchemaMessageType.gif;
+      case MessageType.file:
+        return DbModels.MessageSchemaMessageType.file;
+      case MessageType.audio:
+        return DbModels.MessageSchemaMessageType.audio;
+      case MessageType.video:
+        return DbModels.MessageSchemaMessageType.video;
     }
   }
 

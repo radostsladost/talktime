@@ -17,6 +17,8 @@ public class AppDbContext : DbContext
     public DbSet<MessageDelivery> MessageDeliveries => Set<MessageDelivery>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<UserFirebaseToken> UserFirebaseTokens => Set<UserFirebaseToken>();
+    public DbSet<Reaction> Reactions => Set<Reaction>();
+    public DbSet<MediaFile> MediaFiles => Set<MediaFile>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -171,6 +173,14 @@ public class AppDbContext : DbContext
                 .HasForeignKey(e => e.SenderId)
                 .OnDelete(DeleteBehavior.Cascade);
 
+            entity.Property(e => e.MediaUrl)
+                .HasColumnName("media_url")
+                .HasMaxLength(1000);
+
+            entity.Property(e => e.ThumbnailUrl)
+                .HasColumnName("thumbnail_url")
+                .HasMaxLength(1000);
+
             // Indexes
             entity.HasIndex(e => e.ConversationId);
             entity.HasIndex(e => e.SenderId);
@@ -311,6 +321,97 @@ public class AppDbContext : DbContext
             entity.HasIndex(e => e.UserId);
             entity.HasIndex(e => e.Token);
             entity.HasIndex(e => new { e.UserId, e.DeviceId });
+        });
+
+        // Reaction configuration
+        modelBuilder.Entity<Reaction>(entity =>
+        {
+            entity.ToTable("reactions");
+
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+
+            entity.Property(e => e.MessageId)
+                .HasColumnName("message_id")
+                .IsRequired();
+
+            entity.Property(e => e.UserId)
+                .HasColumnName("user_id")
+                .IsRequired();
+
+            entity.Property(e => e.Emoji)
+                .HasColumnName("emoji")
+                .HasMaxLength(10)
+                .IsRequired();
+
+            entity.Property(e => e.CreatedAt)
+                .HasColumnName("created_at")
+                .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            // Relationships
+            entity.HasOne(e => e.Message)
+                .WithMany(m => m.Reactions)
+                .HasForeignKey(e => e.MessageId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.User)
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Indexes - unique constraint: one emoji per user per message
+            entity.HasIndex(e => new { e.MessageId, e.UserId, e.Emoji }).IsUnique();
+            entity.HasIndex(e => e.MessageId);
+        });
+
+        // MediaFile configuration
+        modelBuilder.Entity<MediaFile>(entity =>
+        {
+            entity.ToTable("media_files");
+
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasColumnName("id");
+
+            entity.Property(e => e.UploaderId)
+                .HasColumnName("uploader_id")
+                .IsRequired();
+
+            entity.Property(e => e.FileName)
+                .HasColumnName("file_name")
+                .HasMaxLength(255)
+                .IsRequired();
+
+            entity.Property(e => e.ContentType)
+                .HasColumnName("content_type")
+                .HasMaxLength(100)
+                .IsRequired();
+
+            entity.Property(e => e.Size)
+                .HasColumnName("size")
+                .IsRequired();
+
+            entity.Property(e => e.StoragePath)
+                .HasColumnName("storage_path")
+                .HasMaxLength(500)
+                .IsRequired();
+
+            entity.Property(e => e.Url)
+                .HasColumnName("url")
+                .HasMaxLength(1000)
+                .IsRequired();
+
+            entity.Property(e => e.CreatedAt)
+                .HasColumnName("created_at")
+                .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            // Relationships
+            entity.HasOne(e => e.Uploader)
+                .WithMany()
+                .HasForeignKey(e => e.UploaderId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Indexes
+            entity.HasIndex(e => e.UploaderId);
         });
     }
 }

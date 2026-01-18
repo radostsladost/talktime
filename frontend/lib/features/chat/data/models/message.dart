@@ -1,4 +1,4 @@
-enum MessageSchemaMessageType { text }
+enum MessageSchemaMessageType { text, image, gif, file, audio, video }
 
 class Message {
   int id = 0; // you can also use id = null to auto increment
@@ -9,6 +9,7 @@ class Message {
   MessageSchemaMessageType type = MessageSchemaMessageType.text;
   int sentAt = 0;
   int? readAt;
+  String? mediaUrl;
 
   Message();
 
@@ -18,8 +19,9 @@ class Message {
     String senderId,
     String content,
     MessageSchemaMessageType type,
-    int sentAt,
-  ) {
+    int sentAt, {
+    String? mediaUrl,
+  }) {
     this.externalId = externalId;
     this.conversationId = conversationId;
     this.senderId = senderId;
@@ -27,6 +29,7 @@ class Message {
     this.type = type;
     this.sentAt = sentAt;
     this.readAt = null;
+    this.mediaUrl = mediaUrl;
   }
 
   Map<String, Object?> toMap() {
@@ -39,6 +42,7 @@ class Message {
       'type': type.index,
       'sentAt': sentAt,
       'readAt': readAt,
+      'mediaUrl': mediaUrl,
     };
   }
 
@@ -55,6 +59,7 @@ class Message {
         : MessageSchemaMessageType.text;
     sentAt = (map['sentAt'] ?? 0) as int;
     readAt = map['readAt'] as int?;
+    mediaUrl = map['mediaUrl'] as String?;
   }
 
   @override
@@ -67,7 +72,8 @@ class Message {
         ' content: $content,'
         ' type: $type,'
         ' sentAt: $sentAt,'
-        ' readAt: $readAt'
+        ' readAt: $readAt,'
+        ' mediaUrl: $mediaUrl'
         '}';
   }
 }

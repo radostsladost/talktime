@@ -49,7 +49,7 @@ class DatabaseHelper {
             ignoreMigrationErrors: ignoreMigrationErrors,
           );
         },
-        version: 7,
+        version: 8,
       ),
     );
 
@@ -68,7 +68,8 @@ class DatabaseHelper {
         'content TEXT, '
         'type TEXT, '
         'sentAt int, '
-        'readAt int)',
+        'readAt int, '
+        'mediaUrl TEXT)',
       );
 
       await db.execute(
@@ -152,6 +153,12 @@ class DatabaseHelper {
         );
         await db.execute(
           'UPDATE conversation SET type = \'group\' WHERE (SELECT COUNT(*) FROM conversation_participant WHERE conversationId = conversation.id) > 2;',
+        );
+      }
+
+      if (oldVersion < 8) {
+        await db.execute(
+          'ALTER TABLE message ADD COLUMN mediaUrl TEXT DEFAULT null;',
         );
       }
     } catch (e, stackTrace) {

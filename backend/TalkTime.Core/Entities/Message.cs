@@ -22,6 +22,21 @@ public class Message
     /// </summary>
     public ICollection<MessageDelivery> Deliveries { get; set; } = new List<MessageDelivery>();
 
+    /// <summary>
+    /// Reactions (emojis) on this message
+    /// </summary>
+    public ICollection<Reaction> Reactions { get; set; } = new List<Reaction>();
+
+    /// <summary>
+    /// For media messages, optional URL to the media file
+    /// </summary>
+    public string? MediaUrl { get; set; }
+
+    /// <summary>
+    /// Optional thumbnail URL for images/videos
+    /// </summary>
+    public string? ThumbnailUrl { get; set; }
+
     // Navigation properties
     public Conversation Conversation { get; set; } = null!;
     public User Sender { get; set; } = null!;
