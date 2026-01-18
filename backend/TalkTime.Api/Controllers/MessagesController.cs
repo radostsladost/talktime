@@ -63,6 +63,7 @@ public class MessagesController : ControllerBase
 
             var messages = await _messageRepository.GetByConversationIdAsync(conversationId, skip, take);
 
+            // Note: Reactions are fetched separately since messages are ephemeral
             var messageDtos = messages.Select(m => new MessageDto(
                 m.Id,
                 m.ConversationId,
@@ -72,7 +73,7 @@ public class MessagesController : ControllerBase
                 m.SentAt.ToString("o"),
                 m.MediaUrl,
                 m.ThumbnailUrl,
-                m.Reactions?.Select(r => new ReactionDto(r.Id, r.Emoji, r.UserId, r.User?.Username ?? "")).ToList()
+                null // Reactions fetched separately via /api/reactions/{messageId}
             )).ToList();
 
             return Ok(new { data = messageDtos });
@@ -242,6 +243,7 @@ public class MessagesController : ControllerBase
 
             var messages = await _messageRepository.GetPendingMessagesForUserAsync(userId);
 
+            // Note: Reactions are fetched separately since messages are ephemeral
             var messageDtos = messages.Select(m => new MessageDto(
                 m.Id,
                 m.ConversationId,
@@ -251,7 +253,7 @@ public class MessagesController : ControllerBase
                 m.SentAt.ToString("o"),
                 m.MediaUrl,
                 m.ThumbnailUrl,
-                m.Reactions?.Select(r => new ReactionDto(r.Id, r.Emoji, r.UserId, r.User?.Username ?? "")).ToList()
+                null // Reactions fetched separately via /api/reactions/{messageId}
             )).ToList();
 
             return Ok(new { data = messageDtos });

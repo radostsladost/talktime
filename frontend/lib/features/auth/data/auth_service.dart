@@ -37,8 +37,12 @@ class AuthService {
       );
 
       return token;
-    } catch (e) {
-      Logger().e('Failed to get FCM token: $e');
+    } catch (e, stackTrace) {
+      Logger().e(
+        'Failed to get FCM token: $e',
+        error: e,
+        stackTrace: stackTrace,
+      );
       ScaffoldMessenger.of(
         navigatorKey.currentContext!,
       ).showSnackBar(SnackBar(content: Text('Failed to get FCM token: $e')));
@@ -61,8 +65,12 @@ class AuthService {
         requiresAuth: true,
       );
       Logger().i('Firebase token registered successfully');
-    } catch (e) {
-      Logger().e('Failed to register Firebase token: $e');
+    } catch (e, stackTrace) {
+      Logger().e(
+        'Failed to register Firebase token: $e',
+        error: e,
+        stackTrace: stackTrace,
+      );
       // Don't throw - this is not critical for login/registration
     }
   }

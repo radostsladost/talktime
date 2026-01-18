@@ -62,6 +62,10 @@ class ApiConstants {
   static String getReactions(String messageId, String conversationId) =>
       '$reactions/$messageId?conversationId=$conversationId';
 
+  // Get reactions for multiple messages (batch)
+  static String getReactionsBatch(String conversationId, List<String> messageIds) =>
+      '$reactions/batch?conversationId=$conversationId&messageIds=${messageIds.join(',')}';
+
   // Add reaction (POST to /api/reactions)
   // Remove reaction (DELETE to /api/reactions)
 

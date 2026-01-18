@@ -23,6 +23,25 @@ public class ReactionRepository : IReactionRepository
             .ToListAsync();
     }
 
+    public async Task<IEnumerable<Reaction>> GetByMessageIdsAsync(IEnumerable<string> messageIds)
+    {
+        var ids = messageIds.ToList();
+        return await _context.Reactions
+            .Include(r => r.User)
+            .Where(r => ids.Contains(r.MessageId))
+            .OrderBy(r => r.CreatedAt)
+            .ToListAsync();
+    }
+
+    public async Task<IEnumerable<Reaction>> GetByConversationIdAsync(string conversationId)
+    {
+        return await _context.Reactions
+            .Include(r => r.User)
+            .Where(r => r.ConversationId == conversationId)
+            .OrderBy(r => r.CreatedAt)
+            .ToListAsync();
+    }
+
     public async Task<Reaction?> GetByIdAsync(string id)
     {
         return await _context.Reactions

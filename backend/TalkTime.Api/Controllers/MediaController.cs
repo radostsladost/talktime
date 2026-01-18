@@ -13,6 +13,7 @@ public class MediaController : ControllerBase
     private readonly IMediaFileRepository _mediaFileRepository;
     private readonly IWebHostEnvironment _environment;
     private readonly ILogger<MediaController> _logger;
+    private readonly IConfiguration _configuration;
 
     private static readonly string[] AllowedImageTypes = { "image/jpeg", "image/png", "image/gif", "image/webp" };
     private const long MaxFileSize = 10 * 1024 * 1024; // 10MB
@@ -20,11 +21,13 @@ public class MediaController : ControllerBase
     public MediaController(
         IMediaFileRepository mediaFileRepository,
         IWebHostEnvironment environment,
-        ILogger<MediaController> logger)
+        ILogger<MediaController> logger,
+        IConfiguration configuration)
     {
         _mediaFileRepository = mediaFileRepository;
         _environment = environment;
         _logger = logger;
+        _configuration = configuration;
     }
 
     /// <summary>
@@ -79,7 +82,8 @@ public class MediaController : ControllerBase
 
             // Generate URL
             var request = HttpContext.Request;
-            var baseUrl = $"{request.Scheme}://{request.Host}";
+            var baseUrl = _configuration.GetSection("PublicUrl").Value;
+            // var baseUrl = $"{request.Scheme}://{request.Host}";
             var fileUrl = $"{baseUrl}/uploads/images/{fileName}";
 
             // Save to database

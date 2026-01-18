@@ -52,6 +52,9 @@ class _MessageListPageState extends State<MessageListPage> {
   int _upperBound = 50;
   bool _isSendingMedia = false;
 
+  // Reactions cache - stored separately since messages are ephemeral on backend
+  Map<String, List<Reaction>> _messageReactions = {};
+
   // Giphy API Key - replace with your own
   static const String _giphyApiKey = 'GlVGYHkr3WSBnllca54iNt0yFbjz7L65';
 
@@ -61,13 +64,7 @@ class _MessageListPageState extends State<MessageListPage> {
     _messageService = MessageService();
     _reactionService = ReactionService();
     _mediaService = MediaService();
-    _messageService.getMessages(widget.conversation.id, take: _upperBound).then(
-      (messages) {
-        setState(() {
-          _messages = messages;
-        });
-      },
-    );
+    _loadMessagesWithReactions();
     _myId = '';
     (AuthService().getCurrentUser()).then(
       (user) => setState(() {
@@ -124,6 +121,42 @@ class _MessageListPageState extends State<MessageListPage> {
         });
   }
 
+  Future<void> _loadMessagesWithReactions() async {
+    try {
+      final messages = await _messageService.getMessages(
+        widget.conversation.id,
+        take: _upperBound,
+      );
+      setState(() {
+        _messages = messages;
+      });
+      // Fetch reactions for these messages
+      await _fetchReactionsForMessages(messages.map((m) => m.id).toList());
+    } catch (e) {
+      _logger.e('Error loading messages: $e');
+    }
+  }
+
+  Future<void> _fetchReactionsForMessages(List<String> messageIds) async {
+    if (messageIds.isEmpty) return;
+
+    try {
+      final reactions = await _reactionService.getReactionsBatch(
+        widget.conversation.id,
+        messageIds,
+      );
+      setState(() {
+        _messageReactions.addAll(reactions);
+      });
+    } catch (e) {
+      _logger.e('Error fetching reactions: $e');
+    }
+  }
+
+  List<Reaction> _getReactionsForMessage(String messageId) {
+    return _messageReactions[messageId] ?? [];
+  }
+
   _onSignalMsgReceived(Message p1) {
     setState(() {
       _messages.insert(0, p1);
@@ -157,12 +190,20 @@ class _MessageListPageState extends State<MessageListPage> {
         });
 
     _messageService.getMessages(widget.conversation.id, take: _upperBound).then(
-      (messages) {
+      (messages) async {
         // Only update if messages have actually changed
         if (!listEquals(_messages, messages)) {
           setState(() {
             _messages = messages;
           });
+          // Fetch reactions for new messages
+          final newMessageIds = messages
+              .where((m) => !_messageReactions.containsKey(m.id))
+              .map((m) => m.id)
+              .toList();
+          if (newMessageIds.isNotEmpty) {
+            await _fetchReactionsForMessages(newMessageIds);
+          }
         }
       },
     );
@@ -308,10 +349,22 @@ class _MessageListPageState extends State<MessageListPage> {
       _upperBound = _messages.length + 50;
       _messageService
           .getMessages(widget.conversation.id, take: _upperBound)
-          .then((messages) {
+          .then((messages) async {
+            // Find new message IDs that we don't have reactions for
+            final newMessageIds = messages
+                .where((m) => !_messageReactions.containsKey(m.id))
+                .map((m) => m.id)
+                .toList();
+
             setState(() {
               _messages = messages;
             });
+
+            // Fetch reactions for new messages
+            if (newMessageIds.isNotEmpty) {
+              await _fetchReactionsForMessages(newMessageIds);
+            }
+
             _isLoadingExtra = false;
           })
           .catchError((error) {
@@ -332,22 +385,51 @@ class _MessageListPageState extends State<MessageListPage> {
   }
 
   Future<void> _toggleReaction(Message message, String emoji) async {
+    final currentReactions = _getReactionsForMessage(message.id);
+    final hasReacted = currentReactions.any(
+      (r) => r.emoji == emoji && r.userId == _myId,
+    );
+
+    // Optimistic update
+    setState(() {
+      if (hasReacted) {
+        // Remove reaction
+        _messageReactions[message.id] = currentReactions
+            .where((r) => !(r.emoji == emoji && r.userId == _myId))
+            .toList();
+      } else {
+        // Add reaction
+        final newReaction = Reaction(
+          id: 'temp_${DateTime.now().millisecondsSinceEpoch}',
+          emoji: emoji,
+          userId: _myId,
+          username: 'You',
+        );
+        _messageReactions[message.id] = [...currentReactions, newReaction];
+      }
+    });
+
     try {
       await _reactionService.toggleReaction(
         message.id,
         emoji,
         _myId,
-        message.reactions,
+        currentReactions,
         message.conversationId,
       );
-      // Sync to get updated reactions
-      await _syncMessages();
+      // Refresh reactions from server to get correct data
+      await _fetchReactionsForMessages([message.id]);
     } catch (e) {
       _logger.e('Error toggling reaction: $e');
+      // Revert on error
+      setState(() {
+        _messageReactions[message.id] = currentReactions;
+      });
     }
   }
 
   void _showReactionPicker(Message message) {
+    final reactions = _getReactionsForMessage(message.id);
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -364,7 +446,7 @@ class _MessageListPageState extends State<MessageListPage> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: quickReactions.map((emoji) {
-                final hasReacted = message.reactions.any(
+                final hasReacted = reactions.any(
                   (r) => r.emoji == emoji && r.userId == _myId,
                 );
                 return GestureDetector(
@@ -643,7 +725,7 @@ class _MessageListPageState extends State<MessageListPage> {
               ],
             ),
             // Reactions display
-            if (message.reactions.isNotEmpty)
+            if (_getReactionsForMessage(message.id).isNotEmpty)
               _buildReactionsDisplay(message, isOwn),
           ],
         ),
@@ -680,8 +762,9 @@ class _MessageListPageState extends State<MessageListPage> {
 
   Widget _buildReactionsDisplay(Message message, bool isOwn) {
     // Group reactions by emoji
+    final reactions = _getReactionsForMessage(message.id);
     final reactionGroups = <String, List<Reaction>>{};
-    for (final reaction in message.reactions) {
+    for (final reaction in reactions) {
       reactionGroups.putIfAbsent(reaction.emoji, () => []).add(reaction);
     }
 

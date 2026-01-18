@@ -80,6 +80,48 @@ public class ReactionsController : ControllerBase
     }
 
     /// <summary>
+    /// Get reactions for multiple messages (batch)
+    /// </summary>
+    [HttpGet("batch")]
+    public async Task<ActionResult<Dictionary<string, List<ReactionDto>>>> GetReactionsBatch(
+        [FromQuery] string conversationId,
+        [FromQuery] string messageIds)
+    {
+        try
+        {
+            var userId = User.FindFirst("userId")?.Value;
+            if (string.IsNullOrEmpty(userId))
+            {
+                return Unauthorized(new { message = "User not authenticated" });
+            }
+
+            // Verify user is a participant in the conversation
+            if (!await _conversationRepository.IsParticipantAsync(conversationId, userId))
+            {
+                return Forbid();
+            }
+
+            var ids = messageIds.Split(',').Where(id => !string.IsNullOrWhiteSpace(id)).ToList();
+            var reactions = await _reactionRepository.GetByMessageIdsAsync(ids);
+            
+            // Group reactions by messageId
+            var grouped = reactions
+                .GroupBy(r => r.MessageId)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.Select(r => new ReactionDto(r.Id, r.Emoji, r.UserId, r.User.Username)).ToList()
+                );
+
+            return Ok(new { data = grouped });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting reactions batch");
+            return StatusCode(500, new { message = "An error occurred" });
+        }
+    }
+
+    /// <summary>
     /// Add a reaction to a message
     /// </summary>
     [HttpPost]
@@ -124,6 +166,7 @@ public class ReactionsController : ControllerBase
             {
                 Id = Guid.NewGuid().ToString(),
                 MessageId = request.MessageId,
+                ConversationId = request.ConversationId,
                 UserId = userId,
                 Emoji = request.Emoji,
                 CreatedAt = DateTime.UtcNow

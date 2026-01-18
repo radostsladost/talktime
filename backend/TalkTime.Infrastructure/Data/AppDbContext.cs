@@ -324,6 +324,7 @@ public class AppDbContext : DbContext
         });
 
         // Reaction configuration
+        // Note: No FK to Message since messages are ephemeral and deleted after delivery
         modelBuilder.Entity<Reaction>(entity =>
         {
             entity.ToTable("reactions");
@@ -333,6 +334,10 @@ public class AppDbContext : DbContext
 
             entity.Property(e => e.MessageId)
                 .HasColumnName("message_id")
+                .IsRequired();
+
+            entity.Property(e => e.ConversationId)
+                .HasColumnName("conversation_id")
                 .IsRequired();
 
             entity.Property(e => e.UserId)
@@ -348,12 +353,7 @@ public class AppDbContext : DbContext
                 .HasColumnName("created_at")
                 .HasDefaultValueSql("CURRENT_TIMESTAMP");
 
-            // Relationships
-            entity.HasOne(e => e.Message)
-                .WithMany(m => m.Reactions)
-                .HasForeignKey(e => e.MessageId)
-                .OnDelete(DeleteBehavior.Cascade);
-
+            // Relationships - only to User (messages are ephemeral)
             entity.HasOne(e => e.User)
                 .WithMany()
                 .HasForeignKey(e => e.UserId)
@@ -362,6 +362,7 @@ public class AppDbContext : DbContext
             // Indexes - unique constraint: one emoji per user per message
             entity.HasIndex(e => new { e.MessageId, e.UserId, e.Emoji }).IsUnique();
             entity.HasIndex(e => e.MessageId);
+            entity.HasIndex(e => e.ConversationId);
         });
 
         // MediaFile configuration

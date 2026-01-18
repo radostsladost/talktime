@@ -22,10 +22,7 @@ public class Message
     /// </summary>
     public ICollection<MessageDelivery> Deliveries { get; set; } = new List<MessageDelivery>();
 
-    /// <summary>
-    /// Reactions (emojis) on this message
-    /// </summary>
-    public ICollection<Reaction> Reactions { get; set; } = new List<Reaction>();
+    // Note: Reactions are stored separately without FK since messages are ephemeral
 
     /// <summary>
     /// For media messages, optional URL to the media file

@@ -28,6 +28,35 @@ class ReactionService {
     }
   }
 
+  /// Get reactions for multiple messages (batch)
+  Future<Map<String, List<Reaction>>> getReactionsBatch(
+    String conversationId,
+    List<String> messageIds,
+  ) async {
+    if (messageIds.isEmpty) return {};
+
+    try {
+      final response = await _apiClient.get(
+        ApiConstants.getReactionsBatch(conversationId, messageIds),
+      );
+
+      final Map<String, dynamic> data = response['data'] as Map<String, dynamic>;
+      final result = <String, List<Reaction>>{};
+
+      data.forEach((messageId, reactionsJson) {
+        final reactions = (reactionsJson as List)
+            .map((json) => Reaction.fromJson(json as Map<String, dynamic>))
+            .toList();
+        result[messageId] = reactions;
+      });
+
+      return result;
+    } catch (e) {
+      _logger.e('Error fetching reactions batch: $e');
+      rethrow;
+    }
+  }
+
   /// Add a reaction to a message
   Future<Reaction> addReaction(
     String messageId,
