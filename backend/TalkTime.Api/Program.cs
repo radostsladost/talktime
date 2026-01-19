@@ -152,7 +152,7 @@ if (app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 
 // Serve static files for uploaded media
-var uploadsPath = Path.Combine(app.Environment.WebRootPath, "uploads");
+var uploadsPath = Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), "wwwroot", "uploads");
 if (!Directory.Exists(uploadsPath))
 {
     Directory.CreateDirectory(uploadsPath);
