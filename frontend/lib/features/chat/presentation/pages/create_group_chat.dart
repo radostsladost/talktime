@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:talktime/core/navigation_manager.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/features/chat/data/conversation_service.dart';
 import 'package:talktime/features/chat/presentation/pages/message_list_page.dart';
@@ -142,13 +143,8 @@ class _CreateGroupChatPageState extends State<CreateGroupChatPage> {
 
       if (!mounted) return;
 
+      NavigationManager().openMessagesList(conversation);
       // Navigate to the new group chat
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (context) => MessageListPage(conversation: conversation),
-        ),
-      );
     } catch (e) {
       _logger.e('Create group chat failed: $e');
       setState(() {

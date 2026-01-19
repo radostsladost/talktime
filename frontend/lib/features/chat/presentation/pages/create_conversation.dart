@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:talktime/core/navigation_manager.dart';
 import 'package:talktime/core/network/api_client.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/features/call/presentation/pages/conference_page.dart';
@@ -99,12 +100,8 @@ class _CreateConversationPageState extends State<CreateConversationPage> {
 
       // Navigate to Conference (or Chat) page
       // For now, we go to ConferencePage (you can change to ChatPage if needed)
-      await Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => MessageListPage(conversation: conversation),
-        ),
-      );
+      NavigationManager().openMessagesList(conversation);
+
 
       // Optionally create room via signaling here instead of relying on backend auto-create
       // But your backend already creates room on `CreateRoom(conversationId)`

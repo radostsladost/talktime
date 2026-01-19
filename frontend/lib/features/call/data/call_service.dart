@@ -11,6 +11,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:logger/logger.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:flutter_callkit_incoming/entities/call_kit_params.dart';
+import 'package:pip/pip.dart';
 import 'package:talktime/features/call/data/signaling_service.dart';
 import 'package:talktime/core/network/api_client.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
@@ -118,6 +119,10 @@ class CallService {
       return; // Already in a call
     }
 
+    setupPip().catchError((error) {
+      _logger.e('Error setting auto pip mode: $error', error: error);
+    });
+
     _currentRoomId = roomId;
     _updateState(CallState.connecting);
     _logger.i("Call state updated to connecting for room: $roomId");
@@ -176,6 +181,8 @@ class CallService {
       _logger.w("No active call to end");
       return;
     }
+
+    disablePip();
 
     // CallKit: End call before cleanup
     _callKitEndCall();
@@ -280,6 +287,7 @@ class CallService {
       if ((_isCameraOff && !_isScreenSharing) || forceStop == true) {
         _logger.i('_replaceVideoTrackInPeerConnections to null');
         _camStateController.add(!_isCameraOff);
+        _isScreenSharingController.sink.add(_isScreenSharing);
         await _replaceVideoTrackInPeerConnections(null);
         return;
       }
@@ -303,6 +311,7 @@ class CallService {
         if (!_isScreenSharing) {
           _isCameraOff = true;
           _camStateController.add(!_isCameraOff);
+          _isScreenSharingController.sink.add(_isScreenSharing);
         }
         await _replaceVideoTrackInPeerConnections(null);
         return;
@@ -317,6 +326,7 @@ class CallService {
         );
         if (!_isScreenSharing) {
           _isCameraOff = true;
+          _isScreenSharingController.sink.add(_isScreenSharing);
           _camStateController.add(!_isCameraOff);
         }
         await _replaceVideoTrackInPeerConnections(null);
@@ -339,6 +349,7 @@ class CallService {
         _cachedVideoStream = cachedVideoStream;
         _localStreamController.sink.add(_localStream);
         _cachedVideoStreamController.sink.add(_cachedVideoStream);
+        _isScreenSharingController.sink.add(_isScreenSharing);
       } else {
         _logger.e('_localStream is null');
         await _replaceVideoTrackInPeerConnections(null);
@@ -1142,5 +1153,62 @@ class CallService {
       appName: 'TalkTime',
       type: 0, // Audio call (1 would be video, but we'll keep it as 0 for now)
     );
+  }
+
+  final _pip = Pip();
+  Future<void> setupPip() async {
+    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+      // Check if device supports PiP
+      bool isPipSupported = await _pip.isSupported();
+      // Check if auto-enter PiP mode is supported
+      bool isPipAutoEnterSupported = await _pip.isAutoEnterSupported();
+      // Check if currently in PiP mode
+      // bool isPipActived = await _pip.isActived();
+
+      if (isPipSupported && isPipAutoEnterSupported) {
+        final options = PipOptions(
+          autoEnterEnabled: true, // Enable/disable auto-enter PiP mode
+          // Android specific options
+          aspectRatioX: 1, // Aspect ratio X value
+          aspectRatioY: 1, // Aspect ratio Y value
+          sourceRectHintLeft: 0, // Source rectangle left position
+          sourceRectHintTop: 0, // Source rectangle top position
+          sourceRectHintRight: 720, // Source rectangle right position
+          sourceRectHintBottom: 720, // Source rectangle bottom position
+          // iOS specific options
+          sourceContentView: 0, // Source content view
+          contentView: 0, // Content view to be displayed in PiP
+          preferredContentWidth: 480, // Preferred content width
+          preferredContentHeight: 480, // Preferred content height
+          controlStyle: 2, // Control style for PiP window
+        );
+
+        await _pip.setup(options);
+      }
+    }
+  }
+
+  Future<void> disablePip() async {
+    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+      // Check if device supports PiP
+      bool isPipSupported = await _pip.isSupported();
+      // Check if auto-enter PiP mode is supported
+      bool isPipAutoEnterSupported = await _pip.isAutoEnterSupported();
+      // Check if currently in PiP mode
+      // bool isPipActived = await _pip.isActived();
+
+      if (isPipSupported && isPipAutoEnterSupported) {
+        final options = PipOptions(
+          autoEnterEnabled: false, // Enable/disable auto-enter PiP mode
+          // Android specific options
+          // iOS specific options
+          sourceContentView: 0, // Source content view
+          contentView: 0, // Content view to be displayed in PiP
+          controlStyle: 2, // Control style for PiP window
+        );
+
+        await _pip.setup(options);
+      }
+    }
   }
 }

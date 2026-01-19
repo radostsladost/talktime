@@ -16,6 +16,7 @@ import 'package:flutter_callkit_incoming/entities/notification_params.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:talktime/app.dart';
 import 'package:talktime/core/global_key.dart';
+import 'package:talktime/core/navigation_manager.dart';
 import 'package:talktime/features/call/data/incoming_call_manager.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:logger/logger.dart';
@@ -102,13 +103,7 @@ Future<void> initFirebaseServices() async {
           } catch (_) {}
 
           // Navigate to conference page
-          Navigator.push(
-            navigatorKey.currentContext!,
-            MaterialPageRoute(
-              builder: (context) =>
-                  ConferencePage(roomId: data.id!, initialParticipants: []),
-            ),
-          );
+          NavigationManager().openConference(data.id!, []);
 
           // Mark call as connected on iOS
           if (!kIsWeb && Platform.isIOS) {

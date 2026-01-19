@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:logger/logger.dart';
 import 'package:provider/provider.dart';
+import 'package:talktime/core/navigation_manager.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/features/chat/data/conversation_service.dart';
 import 'package:talktime/features/chat/data/message_service.dart';
@@ -258,35 +259,21 @@ class _ChatListPageState extends State<ChatListPage>
 
     if (!mounted) return;
 
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => MessageListPage(conversation: conversation),
-      ),
-    );
+    NavigationManager().openMessagesList(conversation);
   }
 
   void _createConversation() {
     // TODO: Show group creation dialog
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => CreateConversationPage()),
-    );
+    NavigationManager().openCreateConversation();
   }
 
   void _createGroup() {
     // TODO: Show group creation dialog
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => CreateGroupChatPage()),
-    );
+    NavigationManager().openCreateGroup();
   }
 
   void _openProfile() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => const EditProfilePage()),
-    );
+    NavigationManager().openEditProfile();
   }
 
   @override

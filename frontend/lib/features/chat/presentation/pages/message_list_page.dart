@@ -11,6 +11,7 @@ import 'package:giphy_get/giphy_get.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:logger/logger.dart';
+import 'package:talktime/core/navigation_manager.dart';
 import 'package:talktime/core/websocket/websocket_manager.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/features/call/presentation/pages/conference_page.dart';
@@ -109,10 +110,10 @@ class _MessageListPageState extends State<MessageListPage> {
           });
           mngr.onConferenceParticipant(_onConferenceParticipantUpdate);
           mngr.onReaction(_onReactionUpdate);
-          
+
           // Request current room participants (for when app is reopened)
           mngr.requestRoomParticipants(widget.conversation.id);
-          
+
           // Load initial conference participants if any
           setState(() {
             _conferenceParticipants = mngr.getConferenceParticipants(
@@ -183,7 +184,10 @@ class _MessageListPageState extends State<MessageListPage> {
       if (reaction.isRemoved) {
         // Remove the reaction
         _messageReactions[messageId] = currentReactions
-            .where((r) => !(r.emoji == reaction.emoji && r.userId == reaction.userId))
+            .where(
+              (r) =>
+                  !(r.emoji == reaction.emoji && r.userId == reaction.userId),
+            )
             .toList();
       } else {
         // Check if reaction already exists
@@ -1127,14 +1131,6 @@ class _MessageListPageState extends State<MessageListPage> {
   void _startCall() {
     // Navigate to call screen
     // TODO: Pass real peer info based on conversation
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => ConferencePage(
-          roomId: widget.conversation.id,
-          initialParticipants: [],
-        ),
-      ),
-    );
+    NavigationManager().openConference(widget.conversation.id, []);
   }
 }
