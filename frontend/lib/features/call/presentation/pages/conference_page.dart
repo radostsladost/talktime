@@ -289,7 +289,7 @@ class _ConferencePageState extends State<ConferencePage> {
             ),
 
           // CONTROLS AT BOTTOM
-          Positioned(left: 0, right: 0, bottom: 20, child: _buildControls()),
+          Positioned(left: 0, right: 0, bottom: 40, child: _buildControls()),
         ],
       ),
     );
