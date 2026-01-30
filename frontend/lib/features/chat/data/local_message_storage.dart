@@ -88,4 +88,37 @@ class LocalMessageStorage {
       whereArgs: [messageExternalId],
     );
   }
+
+  /// Get all messages across all conversations for sync
+  /// Optionally filter by sinceTimestamp (messages newer than this timestamp)
+  Future<List<Message>> getAllMessagesForSync({
+    int? sinceTimestamp,
+    int limit = 500,
+  }) async {
+    var db = await _getDb();
+    
+    String? where;
+    List<Object?>? whereArgs;
+    
+    if (sinceTimestamp != null && sinceTimestamp > 0) {
+      where = 'sentAt > ?';
+      whereArgs = [sinceTimestamp];
+    }
+    
+    final List<Map<String, Object?>> messages = await db.query(
+      'message',
+      where: where,
+      whereArgs: whereArgs,
+      orderBy: 'sentAt DESC',
+      limit: limit,
+    );
+    return messages.map((e) => Message.fromMap(e)).toList();
+  }
+
+  /// Get count of all messages in local storage
+  Future<int> getMessageCount() async {
+    var db = await _getDb();
+    final result = await db.rawQuery('SELECT COUNT(*) as count FROM message');
+    return result.first['count'] as int? ?? 0;
+  }
 }

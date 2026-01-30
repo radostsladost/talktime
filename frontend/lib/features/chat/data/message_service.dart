@@ -1,5 +1,6 @@
 import 'package:talktime/core/network/api_client.dart';
 import 'package:talktime/core/constants/api_constants.dart';
+import 'package:talktime/core/websocket/websocket_manager.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/features/chat/data/local_message_storage.dart';
 import 'package:talktime/shared/models/message.dart';
@@ -304,6 +305,238 @@ class MessageService {
         return DbModels.MessageSchemaMessageType.audio;
       case MessageType.video:
         return DbModels.MessageSchemaMessageType.video;
+    }
+  }
+
+  // ==================== Device Sync Methods ====================
+
+  /// Export messages for sync to another device
+  /// Returns a list of SyncMessageDto that can be sent to another device
+  Future<List<SyncMessageDto>> exportMessagesForSync({
+    String? conversationId,
+    int? sinceTimestamp,
+    int limit = 500,
+  }) async {
+    try {
+      _logger.i('Exporting messages for sync: conversationId=$conversationId, since=$sinceTimestamp, limit=$limit');
+      
+      List<DbModels.Message> messages;
+      
+      if (conversationId != null && conversationId.isNotEmpty) {
+        // Export messages for a specific conversation
+        messages = await _localStorage.getMessages(
+          conversationId,
+          offset: 0,
+          limit: limit,
+        );
+        
+        // Filter by timestamp if provided
+        if (sinceTimestamp != null && sinceTimestamp > 0) {
+          messages = messages.where((m) => m.sentAt > sinceTimestamp).toList();
+        }
+      } else {
+        // Export all messages across all conversations
+        messages = await _localStorage.getAllMessagesForSync(
+          sinceTimestamp: sinceTimestamp,
+          limit: limit,
+        );
+      }
+      
+      _logger.i('Found ${messages.length} messages to export for sync');
+      
+      if (messages.isEmpty) {
+        _logger.i('No messages to export');
+        return [];
+      }
+      
+      // Convert to SyncMessageDto
+      final syncMessages = messages.map((m) => SyncMessageDto(
+        id: m.externalId,
+        conversationId: m.conversationId,
+        senderId: m.senderId,
+        senderUsername: '', // We don't store sender username locally, will be filled by receiver
+        senderAvatarUrl: null,
+        content: m.content,
+        type: _messageTypeToString(m.type),
+        sentAtTimestamp: m.sentAt,
+        mediaUrl: m.mediaUrl,
+        thumbnailUrl: null,
+        readAtTimestamp: m.readAt,
+      )).toList();
+      
+      _logger.i('Exporting ${syncMessages.length} messages for sync');
+      return syncMessages;
+    } catch (e) {
+      _logger.e('Error exporting messages for sync: $e');
+      return [];
+    }
+  }
+
+  /// Import messages from another device
+  /// Takes a list of SyncMessageDto and saves them to local storage
+  Future<void> importMessagesFromSync(List<SyncMessageDto> syncMessages) async {
+    if (syncMessages.isEmpty) return;
+    
+    try {
+      _logger.i('Importing ${syncMessages.length} messages from sync');
+      
+      final messages = syncMessages.map((m) => DbModels.Message()
+        ..externalId = m.id
+        ..conversationId = m.conversationId
+        ..senderId = m.senderId
+        ..content = m.content
+        ..type = _stringToMessageType(m.type)
+        ..sentAt = m.sentAtTimestamp
+        ..mediaUrl = m.mediaUrl
+        ..readAt = m.readAtTimestamp,
+      ).toList();
+      
+      await _localStorage.saveMessages(messages);
+      
+      // Update conversation lastMessageAt for each affected conversation
+      final conversationIds = syncMessages.map((m) => m.conversationId).toSet();
+      for (var conversationId in conversationIds) {
+        final conversationMessages = syncMessages
+            .where((m) => m.conversationId == conversationId)
+            .toList();
+        if (conversationMessages.isNotEmpty) {
+          final lastMessage = conversationMessages.reduce(
+            (a, b) => a.sentAtTimestamp > b.sentAtTimestamp ? a : b,
+          );
+          await _conversationStorage.updateLastMessageAt(
+            conversationId,
+            DateTime.fromMillisecondsSinceEpoch(lastMessage.sentAtTimestamp).toIso8601String(),
+          );
+        }
+      }
+      
+      _logger.i('Successfully imported ${syncMessages.length} messages from sync');
+    } catch (e) {
+      _logger.e('Error importing messages from sync: $e');
+    }
+  }
+
+  /// Handle incoming device sync request
+  /// Exports messages and sends them back to the requesting device
+  Future<void> handleDeviceSyncRequest(DeviceSyncRequest request) async {
+    try {
+      _logger.i('=== HANDLING SYNC REQUEST ===');
+      _logger.i('From device: ${request.requestingDeviceId}');
+      _logger.i('ConversationId: ${request.conversationId}');
+      _logger.i('SinceTimestamp: ${request.sinceTimestamp}');
+      _logger.i('ChunkSize: ${request.chunkSize}');
+      
+      // Check how many messages we have locally
+      final totalLocalMessages = await _localStorage.getMessageCount();
+      _logger.i('Total messages in local storage: $totalLocalMessages');
+      
+      final messages = await exportMessagesForSync(
+        conversationId: request.conversationId,
+        sinceTimestamp: request.sinceTimestamp,
+        limit: request.chunkSize > 0 ? request.chunkSize : 500,
+      );
+      
+      _logger.i('Messages to send: ${messages.length}');
+      
+      if (messages.isEmpty) {
+        _logger.i('No messages to sync - sending empty response');
+        // Send empty response to let the other device know sync is complete
+        await WebSocketManager().sendDeviceSyncData(
+          toDeviceId: request.requestingDeviceId,
+          conversationId: request.conversationId,
+          messages: [],
+          chunkIndex: 0,
+          totalChunks: 1,
+          isLastChunk: true,
+        );
+        return;
+      }
+      
+      // Split into chunks
+      final chunkSize = request.chunkSize > 0 ? request.chunkSize : 100;
+      final totalChunks = (messages.length / chunkSize).ceil();
+      
+      _logger.i('Sending ${messages.length} messages in $totalChunks chunks (chunkSize: $chunkSize)');
+      
+      for (var i = 0; i < totalChunks; i++) {
+        final start = i * chunkSize;
+        final end = (start + chunkSize > messages.length) ? messages.length : start + chunkSize;
+        final chunk = messages.sublist(start, end);
+        
+        _logger.i('Sending chunk ${i + 1}/$totalChunks with ${chunk.length} messages');
+        
+        await WebSocketManager().sendDeviceSyncData(
+          toDeviceId: request.requestingDeviceId,
+          conversationId: request.conversationId,
+          messages: chunk,
+          chunkIndex: i,
+          totalChunks: totalChunks,
+          isLastChunk: i == totalChunks - 1,
+        );
+        
+        // Small delay between chunks to avoid overwhelming
+        if (i < totalChunks - 1) {
+          await Future.delayed(const Duration(milliseconds: 100));
+        }
+      }
+      
+      _logger.i('=== SYNC COMPLETE: Sent ${messages.length} messages in $totalChunks chunks ===');
+    } catch (e, stackTrace) {
+      _logger.e('Error handling sync request: $e');
+      _logger.e('Stack trace: $stackTrace');
+    }
+  }
+
+  /// Handle incoming sync data chunk
+  Future<void> handleDeviceSyncData(DeviceSyncChunk chunk) async {
+    try {
+      _logger.i('Handling sync data chunk ${chunk.chunkIndex}/${chunk.totalChunks}');
+      
+      if (chunk.messages.isNotEmpty) {
+        await importMessagesFromSync(chunk.messages);
+      }
+      
+      if (chunk.isLastChunk) {
+        _logger.i('Device sync completed');
+      }
+    } catch (e) {
+      _logger.e('Error handling sync data: $e');
+    }
+  }
+
+  String _messageTypeToString(DbModels.MessageSchemaMessageType type) {
+    switch (type) {
+      case DbModels.MessageSchemaMessageType.text:
+        return 'text';
+      case DbModels.MessageSchemaMessageType.image:
+        return 'image';
+      case DbModels.MessageSchemaMessageType.gif:
+        return 'gif';
+      case DbModels.MessageSchemaMessageType.file:
+        return 'file';
+      case DbModels.MessageSchemaMessageType.audio:
+        return 'audio';
+      case DbModels.MessageSchemaMessageType.video:
+        return 'video';
+    }
+  }
+
+  DbModels.MessageSchemaMessageType _stringToMessageType(String type) {
+    switch (type.toLowerCase()) {
+      case 'text':
+        return DbModels.MessageSchemaMessageType.text;
+      case 'image':
+        return DbModels.MessageSchemaMessageType.image;
+      case 'gif':
+        return DbModels.MessageSchemaMessageType.gif;
+      case 'file':
+        return DbModels.MessageSchemaMessageType.file;
+      case 'audio':
+        return DbModels.MessageSchemaMessageType.audio;
+      case 'video':
+        return DbModels.MessageSchemaMessageType.video;
+      default:
+        return DbModels.MessageSchemaMessageType.text;
     }
   }
 

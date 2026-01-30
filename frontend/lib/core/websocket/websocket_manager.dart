@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:logger/logger.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:talktime/core/constants/api_constants.dart';
 import 'package:talktime/core/network/api_client.dart';
 import 'package:talktime/features/call/data/incoming_call_manager.dart';
@@ -7,6 +8,7 @@ import 'package:talktime/shared/models/message.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:signalr_netcore/signalr_client.dart';
 import 'package:signalr_netcore/http_connection_options.dart';
+import 'dart:math';
 
 /// WebSocket manager for real-time messaging using SignalR
 class WebSocketManager {
@@ -32,9 +34,14 @@ class WebSocketManager {
   final List<Function(String, ConferenceParticipant, String)>
   _onConferenceParticipantCallbacks = [];
   final List<Function(String, String, ReactionUpdate)> _onReactionCallbacks = [];
+  final List<Function(DeviceConnectedEvent)> _onDeviceConnectedCallbacks = [];
+  final List<Function(DeviceSyncRequest)> _onDeviceSyncRequestCallbacks = [];
+  final List<Function(DeviceSyncChunk)> _onDeviceSyncDataCallbacks = [];
+  final List<Function(OtherDevicesAvailableEvent)> _onOtherDevicesAvailableCallbacks = [];
   final List<String> _cachedConversations = [];
   final Map<String, bool> _onlineStates = {};
   final Map<String, List<ConferenceParticipant>> _conferenceParticipants = {};
+  String? _deviceId;
 
   Map<String, bool> get onlineStates => _onlineStates;
   Map<String, List<ConferenceParticipant>> get conferenceParticipants =>
@@ -45,14 +52,54 @@ class WebSocketManager {
     return _conferenceParticipants[roomId] ?? [];
   }
 
+  static const String _deviceIdKey = 'talktime_device_id';
+
+  /// Get or generate a unique device ID for this device
+  /// The device ID is persisted so it remains the same across app restarts
+  Future<String> _getOrCreateDeviceId() async {
+    if (_deviceId != null) return _deviceId!;
+    
+    try {
+      // Try to get stored device ID
+      final prefs = await SharedPreferences.getInstance();
+      final storedId = prefs.getString(_deviceIdKey);
+      
+      if (storedId != null && storedId.isNotEmpty) {
+        _deviceId = storedId;
+        _logger.i('Using stored device ID: $_deviceId');
+        return _deviceId!;
+      }
+      
+      // Generate a new unique device ID
+      final random = Random.secure();
+      final randomPart = List.generate(8, (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0')).join();
+      _deviceId = 'device_${DateTime.now().millisecondsSinceEpoch}_$randomPart';
+      
+      // Persist the device ID
+      await prefs.setString(_deviceIdKey, _deviceId!);
+      _logger.i('Generated and stored new device ID: $_deviceId');
+      
+      return _deviceId!;
+    } catch (e) {
+      // Fallback if SharedPreferences fails
+      _deviceId = 'device_${DateTime.now().millisecondsSinceEpoch}_${DateTime.now().microsecond}';
+      _logger.w('Failed to persist device ID, using temporary: $_deviceId');
+      return _deviceId!;
+    }
+  }
+
+  /// Get the current device ID
+  String? get deviceId => _deviceId;
+
   /// Initialize WebSocket connection with SignalR
   Future<void> initialize() async {
     _logger.i('Initializing WebSocket manager');
 
     try {
-      final connectionUrl = ApiConstants.getSignalingUrlWithNoToken();
+      final deviceId = await _getOrCreateDeviceId();
+      final connectionUrl = '${ApiConstants.getSignalingUrlWithNoToken()}?deviceId=$deviceId';
 
-      _logger.i('SignalR connection URL: $connectionUrl');
+      _logger.i('SignalR connection URL: $connectionUrl (deviceId: $deviceId)');
 
       if (_hubConnection?.state == HubConnectionState.Connected) {
         _logger.i('SignalR already up');
@@ -341,6 +388,71 @@ class WebSocketManager {
         }
       }
     });
+
+    // Handle device connected event (another device of same user connected)
+    _hubConnection!.on('DeviceConnected', (args) {
+      final data = args?.first as Map<String, dynamic>?;
+      _logger.i('Device connected event: $data');
+      if (data != null) {
+        final event = DeviceConnectedEvent.fromJson(data);
+        for (var callback in _onDeviceConnectedCallbacks) {
+          callback(event);
+        }
+        _logger.i('New device connected: ${event.deviceId}, total devices: ${event.totalDevices}');
+      }
+    });
+
+    // Handle device disconnected event
+    _hubConnection!.on('DeviceDisconnected', (args) {
+      final data = args?.first as Map<String, dynamic>?;
+      _logger.i('Device disconnected event: $data');
+    });
+
+    // Handle device sync request (another device is requesting sync)
+    _hubConnection!.on('DeviceSyncRequest', (args) {
+      final data = args?.first as Map<String, dynamic>?;
+      _logger.i('Device sync request: $data');
+      if (data != null) {
+        final request = DeviceSyncRequest.fromJson(data);
+        for (var callback in _onDeviceSyncRequestCallbacks) {
+          callback(request);
+        }
+        _logger.i('Sync request from device: ${request.requestingDeviceId}');
+      }
+    });
+
+    // Handle device sync data (receiving messages from another device)
+    _hubConnection!.on('DeviceSyncData', (args) {
+      final data = args?.first as Map<String, dynamic>?;
+      _logger.i('Device sync data received: chunk ${data?['chunkIndex']}/${data?['totalChunks']}');
+      if (data != null) {
+        final chunk = DeviceSyncChunk.fromJson(data);
+        for (var callback in _onDeviceSyncDataCallbacks) {
+          callback(chunk);
+        }
+        _logger.i('Received sync chunk ${chunk.chunkIndex}/${chunk.totalChunks} with ${chunk.messages.length} messages');
+      }
+    });
+
+    // Handle connected devices response
+    _hubConnection!.on('ConnectedDevices', (args) {
+      final data = args?.first as Map<String, dynamic>?;
+      _logger.i('Connected devices: $data');
+    });
+
+    // Handle notification that other devices are available for sync
+    // This is sent to newly connected devices
+    _hubConnection!.on('OtherDevicesAvailable', (args) {
+      final data = args?.first as Map<String, dynamic>?;
+      _logger.i('Other devices available for sync: $data');
+      if (data != null) {
+        final event = OtherDevicesAvailableEvent.fromJson(data);
+        for (var callback in _onOtherDevicesAvailableCallbacks) {
+          callback(event);
+        }
+        _logger.i('${event.otherDeviceCount} other device(s) available for sync');
+      }
+    });
   }
 
   /// Connect to SignalR hub
@@ -553,6 +665,123 @@ class WebSocketManager {
     }
   }
 
+  // ==================== Device Sync Methods ====================
+
+  /// Request message sync from other devices
+  /// [conversationId] - specific conversation to sync, or null for all
+  /// [sinceTimestamp] - sync messages since this timestamp (milliseconds), or null for all
+  /// [chunkSize] - number of messages per chunk
+  Future<void> requestDeviceSync({
+    String? conversationId,
+    int? sinceTimestamp,
+    int chunkSize = 100,
+  }) async {
+    if (!_isConnected || _hubConnection == null) return;
+
+    _logger.i('Requesting device sync: conversationId=$conversationId, since=$sinceTimestamp');
+
+    try {
+      // SignalR requires non-null args, so we pass empty string/0 for null values
+      // Backend will interpret empty string as null for conversationId
+      // and 0 as "sync all" for sinceTimestamp
+      await _hubConnection!.invoke(
+        'RequestDeviceSync',
+        args: <Object>[
+          conversationId ?? '',
+          sinceTimestamp ?? 0,
+          chunkSize,
+        ],
+      );
+    } catch (e) {
+      _logger.e('Failed to request device sync: $e');
+    }
+  }
+
+  /// Send sync data to another device
+  /// Called in response to DeviceSyncRequest
+  Future<void> sendDeviceSyncData({
+    required String toDeviceId,
+    String? conversationId,
+    required List<SyncMessageDto> messages,
+    required int chunkIndex,
+    required int totalChunks,
+    required bool isLastChunk,
+  }) async {
+    if (!_isConnected || _hubConnection == null) return;
+
+    _logger.i('Sending sync data to device $toDeviceId: chunk $chunkIndex/$totalChunks');
+
+    try {
+      final messagesList = messages.map((m) => m.toJson()).toList();
+      await _hubConnection!.invoke(
+        'SendDeviceSyncData',
+        args: <Object>[
+          toDeviceId,
+          conversationId ?? '',
+          messagesList,
+          chunkIndex,
+          totalChunks,
+          isLastChunk,
+        ],
+      );
+    } catch (e) {
+      _logger.e('Failed to send device sync data: $e');
+    }
+  }
+
+  /// Get list of connected devices for current user
+  Future<void> getConnectedDevices() async {
+    if (!_isConnected || _hubConnection == null) return;
+
+    _logger.i('Getting connected devices');
+
+    try {
+      await _hubConnection!.invoke('GetConnectedDevices', args: []);
+    } catch (e) {
+      _logger.e('Failed to get connected devices: $e');
+    }
+  }
+
+  /// Add callback for device connected event
+  void onDeviceConnected(Function(DeviceConnectedEvent) callback) {
+    _onDeviceConnectedCallbacks.add(callback);
+  }
+
+  /// Remove callback for device connected event
+  void removeDeviceConnectedCallback(Function(DeviceConnectedEvent) callback) {
+    _onDeviceConnectedCallbacks.remove(callback);
+  }
+
+  /// Add callback for device sync request
+  void onDeviceSyncRequest(Function(DeviceSyncRequest) callback) {
+    _onDeviceSyncRequestCallbacks.add(callback);
+  }
+
+  /// Remove callback for device sync request
+  void removeDeviceSyncRequestCallback(Function(DeviceSyncRequest) callback) {
+    _onDeviceSyncRequestCallbacks.remove(callback);
+  }
+
+  /// Add callback for device sync data
+  void onDeviceSyncData(Function(DeviceSyncChunk) callback) {
+    _onDeviceSyncDataCallbacks.add(callback);
+  }
+
+  /// Remove callback for device sync data
+  void removeDeviceSyncDataCallback(Function(DeviceSyncChunk) callback) {
+    _onDeviceSyncDataCallbacks.remove(callback);
+  }
+
+  /// Add callback for other devices available event
+  void onOtherDevicesAvailable(Function(OtherDevicesAvailableEvent) callback) {
+    _onOtherDevicesAvailableCallbacks.add(callback);
+  }
+
+  /// Remove callback for other devices available event
+  void removeOtherDevicesAvailableCallback(Function(OtherDevicesAvailableEvent) callback) {
+    _onOtherDevicesAvailableCallbacks.remove(callback);
+  }
+
   /// Dispose resources
   void dispose() {
     _logger.i('Disposing WebSocket manager');
@@ -566,6 +795,10 @@ class WebSocketManager {
     _onTypingIndicatorCallbacks.clear();
     _onConferenceParticipantCallbacks.clear();
     _onReactionCallbacks.clear();
+    _onDeviceConnectedCallbacks.clear();
+    _onDeviceSyncRequestCallbacks.clear();
+    _onDeviceSyncDataCallbacks.clear();
+    _onOtherDevicesAvailableCallbacks.clear();
     _conferenceParticipants.clear();
   }
 }
@@ -613,6 +846,174 @@ class ReactionUpdate {
       emoji: json['emoji'] as String,
       userId: json['userId'] as String,
       username: json['username'] as String? ?? '',
+    );
+  }
+}
+
+// ==================== Device Sync Classes ====================
+
+/// Event sent when a new device of the same user connects
+class DeviceConnectedEvent {
+  final String userId;
+  final String deviceId;
+  final int totalDevices;
+
+  DeviceConnectedEvent({
+    required this.userId,
+    required this.deviceId,
+    required this.totalDevices,
+  });
+
+  factory DeviceConnectedEvent.fromJson(Map<String, dynamic> json) {
+    return DeviceConnectedEvent(
+      userId: json['userId'] as String,
+      deviceId: json['deviceId'] as String,
+      totalDevices: json['totalDevices'] as int,
+    );
+  }
+}
+
+/// Request to sync messages from other devices
+class DeviceSyncRequest {
+  final String requestingDeviceId;
+  final String? conversationId;
+  final int? sinceTimestamp;
+  final int chunkSize;
+
+  DeviceSyncRequest({
+    required this.requestingDeviceId,
+    this.conversationId,
+    this.sinceTimestamp,
+    this.chunkSize = 100,
+  });
+
+  factory DeviceSyncRequest.fromJson(Map<String, dynamic> json) {
+    return DeviceSyncRequest(
+      requestingDeviceId: json['requestingDeviceId'] as String,
+      conversationId: json['conversationId'] as String?,
+      sinceTimestamp: json['sinceTimestamp'] as int?,
+      chunkSize: json['chunkSize'] as int? ?? 100,
+    );
+  }
+}
+
+/// A chunk of messages for device sync
+class DeviceSyncChunk {
+  final String fromDeviceId;
+  final String toDeviceId;
+  final String? conversationId;
+  final List<SyncMessageDto> messages;
+  final int chunkIndex;
+  final int totalChunks;
+  final bool isLastChunk;
+
+  DeviceSyncChunk({
+    required this.fromDeviceId,
+    required this.toDeviceId,
+    this.conversationId,
+    required this.messages,
+    required this.chunkIndex,
+    required this.totalChunks,
+    required this.isLastChunk,
+  });
+
+  factory DeviceSyncChunk.fromJson(Map<String, dynamic> json) {
+    final messagesList = (json['messages'] as List?)
+        ?.map((m) => SyncMessageDto.fromJson(m as Map<String, dynamic>))
+        .toList() ?? [];
+    
+    return DeviceSyncChunk(
+      fromDeviceId: json['fromDeviceId'] as String,
+      toDeviceId: json['toDeviceId'] as String,
+      conversationId: json['conversationId'] as String?,
+      messages: messagesList,
+      chunkIndex: json['chunkIndex'] as int,
+      totalChunks: json['totalChunks'] as int,
+      isLastChunk: json['isLastChunk'] as bool,
+    );
+  }
+}
+
+/// Simplified message DTO for sync
+class SyncMessageDto {
+  final String id;
+  final String conversationId;
+  final String senderId;
+  final String senderUsername;
+  final String? senderAvatarUrl;
+  final String content;
+  final String type;
+  final int sentAtTimestamp;
+  final String? mediaUrl;
+  final String? thumbnailUrl;
+  final int? readAtTimestamp;
+
+  SyncMessageDto({
+    required this.id,
+    required this.conversationId,
+    required this.senderId,
+    required this.senderUsername,
+    this.senderAvatarUrl,
+    required this.content,
+    required this.type,
+    required this.sentAtTimestamp,
+    this.mediaUrl,
+    this.thumbnailUrl,
+    this.readAtTimestamp,
+  });
+
+  factory SyncMessageDto.fromJson(Map<String, dynamic> json) {
+    return SyncMessageDto(
+      id: json['id'] as String,
+      conversationId: json['conversationId'] as String,
+      senderId: json['senderId'] as String,
+      senderUsername: json['senderUsername'] as String,
+      senderAvatarUrl: json['senderAvatarUrl'] as String?,
+      content: json['content'] as String,
+      type: json['type'] as String,
+      sentAtTimestamp: json['sentAtTimestamp'] as int,
+      mediaUrl: json['mediaUrl'] as String?,
+      thumbnailUrl: json['thumbnailUrl'] as String?,
+      readAtTimestamp: json['readAtTimestamp'] as int?,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'conversationId': conversationId,
+      'senderId': senderId,
+      'senderUsername': senderUsername,
+      'senderAvatarUrl': senderAvatarUrl,
+      'content': content,
+      'type': type,
+      'sentAtTimestamp': sentAtTimestamp,
+      'mediaUrl': mediaUrl,
+      'thumbnailUrl': thumbnailUrl,
+      'readAtTimestamp': readAtTimestamp,
+    };
+  }
+}
+
+/// Event sent to a newly connected device informing about other devices
+class OtherDevicesAvailableEvent {
+  final int otherDeviceCount;
+  final int totalDevices;
+  final List<String> otherDeviceIds;
+
+  OtherDevicesAvailableEvent({
+    required this.otherDeviceCount,
+    required this.totalDevices,
+    required this.otherDeviceIds,
+  });
+
+  factory OtherDevicesAvailableEvent.fromJson(Map<String, dynamic> json) {
+    return OtherDevicesAvailableEvent(
+      otherDeviceCount: json['otherDeviceCount'] as int,
+      totalDevices: json['totalDevices'] as int,
+      otherDeviceIds: (json['otherDeviceIds'] as List?)
+          ?.map((e) => e as String)
+          .toList() ?? [],
     );
   }
 }

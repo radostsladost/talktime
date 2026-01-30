@@ -6,6 +6,7 @@ import 'package:talktime/core/websocket/websocket_manager.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/features/auth/presentation/pages/login_page.dart';
 import 'package:talktime/features/call/data/call_service.dart';
+import 'package:talktime/features/chat/data/device_sync_service.dart';
 import 'package:talktime/features/chat/presentation/pages/chat_list_page.dart';
 import 'package:logger/logger.dart';
 
@@ -83,7 +84,10 @@ class _SplashScreenState extends State<SplashScreen> {
         try {
           await _authService.registerFirebaseToken();
 
-          WebSocketManager().initialize();
+          await WebSocketManager().initialize();
+          
+          // Initialize device sync service for cross-device message synchronization
+          DeviceSyncService().initialize();
         } catch (e) {
           // Log error but don't block navigation
           Logger().e('Failed to register Firebase token: $e');

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:talktime/core/websocket/websocket_manager.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
+import 'package:talktime/features/chat/data/device_sync_service.dart';
 import 'package:talktime/features/chat/presentation/pages/chat_list_page.dart';
 
 class RegisterPage extends StatefulWidget {
@@ -48,6 +49,9 @@ class _RegisterPageState extends State<RegisterPage> {
       );
 
       await WebSocketManager().initialize();
+      
+      // Initialize device sync service for cross-device message synchronization
+      DeviceSyncService().initialize();
 
       if (!mounted) return;
 

@@ -20,8 +20,8 @@ public class TalkTimeHub : Hub
     private readonly INotificationsService _notificationsService;
     private readonly ILogger<TalkTimeHub> _logger;
 
-    // Track connected users: userId -> connectionId
-    private static readonly ConcurrentDictionary<string, string> ConnectedUsers = new();
+    // Track connected users: userId -> Set of connectionIds (multiple devices per user)
+    private static readonly ConcurrentDictionary<string, ConcurrentDictionary<string, DeviceInfo>> ConnectedUsers = new();
 
     // Track active calls: callId -> CallInfo
     private static readonly ConcurrentDictionary<string, CallInfo> ActiveCalls = new();
@@ -52,7 +52,53 @@ public class TalkTimeHub : Hub
             return;
         }
 
-        ConnectedUsers[userId] = Context.ConnectionId;
+        // Generate a device ID for this connection
+        var deviceId = Context.GetHttpContext()?.Request.Query["deviceId"].FirstOrDefault() 
+            ?? Context.ConnectionId;
+        
+        // Track this device connection
+        var userDevices = ConnectedUsers.GetOrAdd(userId, _ => new ConcurrentDictionary<string, DeviceInfo>());
+        var deviceInfo = new DeviceInfo(Context.ConnectionId, deviceId, DateTime.UtcNow);
+        userDevices[Context.ConnectionId] = deviceInfo;
+
+        // If user has other devices connected, notify them about new device
+        var otherDevices = userDevices.Values
+            .Where(d => d.ConnectionId != Context.ConnectionId)
+            .ToList();
+        
+        if (otherDevices.Any())
+        {
+            var deviceConnectedEvent = new DeviceConnectedEvent(
+                userId,
+                deviceId,
+                userDevices.Count
+            );
+            
+            // Notify other devices of the same user
+            foreach (var otherDevice in otherDevices)
+            {
+                await Clients.Client(otherDevice.ConnectionId)
+                    .SendAsync("DeviceConnected", deviceConnectedEvent);
+            }
+            
+            // Also notify the NEW device that there are other devices it can sync from
+            await Clients.Caller.SendAsync("OtherDevicesAvailable", new
+            {
+                otherDeviceCount = otherDevices.Count,
+                totalDevices = userDevices.Count,
+                otherDeviceIds = otherDevices.Select(d => d.DeviceId).ToList()
+            });
+            
+            _logger.LogInformation(
+                "User {UserId} connected new device {DeviceId}. Total devices: {TotalDevices}. Notified {OtherCount} other devices.",
+                userId, deviceId, userDevices.Count, otherDevices.Count);
+        }
+        else
+        {
+            _logger.LogInformation(
+                "User {UserId} connected device {DeviceId}. This is the only device.",
+                userId, deviceId);
+        }
 
         // Update user online status
         await _userRepository.SetOnlineStatusAsync(userId, true);
@@ -78,7 +124,6 @@ public class TalkTimeHub : Hub
             }
         }
 
-
         // Send pending messages to the user
         var pendingMessages = await _messageRepository.GetPendingMessagesForUserAsync(userId);
         foreach (var message in pendingMessages)
@@ -97,7 +142,8 @@ public class TalkTimeHub : Hub
             await _messageRepository.MarkAsDeliveredAsync(message.Id, userId);
         }
 
-        _logger.LogInformation("User {UserId} connected with connection {ConnectionId}", userId, Context.ConnectionId);
+        _logger.LogInformation("User {UserId} connected with connection {ConnectionId}, device {DeviceId}", 
+            userId, Context.ConnectionId, deviceId);
 
         await base.OnConnectedAsync();
     }
@@ -107,18 +153,44 @@ public class TalkTimeHub : Hub
         var userId = GetUserId();
         if (!string.IsNullOrEmpty(userId))
         {
-            ConnectedUsers.TryRemove(userId, out _);
-
-            // Update user online status
-            await _userRepository.SetOnlineStatusAsync(userId, false);
+            // Remove this specific device connection
+            if (ConnectedUsers.TryGetValue(userId, out var userDevices))
+            {
+                userDevices.TryRemove(Context.ConnectionId, out var removedDevice);
+                
+                // If user has no more devices connected, set offline
+                if (userDevices.IsEmpty)
+                {
+                    ConnectedUsers.TryRemove(userId, out _);
+                    
+                    // Update user online status
+                    await _userRepository.SetOnlineStatusAsync(userId, false);
+                    
+                    // Notify others that user is offline
+                    await Clients.Others.SendAsync("UserOffline", new { userId, lastSeenAt = DateTime.UtcNow.ToString("o") });
+                }
+                else
+                {
+                    // Notify other devices that this device disconnected
+                    var deviceDisconnectedEvent = new
+                    {
+                        UserId = userId,
+                        DeviceId = removedDevice?.DeviceId ?? Context.ConnectionId,
+                        TotalDevices = userDevices.Count
+                    };
+                    
+                    foreach (var otherDevice in userDevices.Values)
+                    {
+                        await Clients.Client(otherDevice.ConnectionId)
+                            .SendAsync("DeviceDisconnected", deviceDisconnectedEvent);
+                    }
+                }
+            }
 
             // Leave any active calls
             await LeaveAllCalls(userId);
 
-            // Notify others that user is offline
-            await Clients.Others.SendAsync("UserOffline", new { userId, lastSeenAt = DateTime.UtcNow.ToString("o") });
-
-            _logger.LogInformation("User {UserId} disconnected", userId);
+            _logger.LogInformation("User {UserId} disconnected (connection {ConnectionId})", userId, Context.ConnectionId);
         }
 
         await base.OnDisconnectedAsync(exception);
@@ -197,6 +269,119 @@ public class TalkTimeHub : Hub
         await _messageRepository.MarkAsDeliveredAsync(messageId, userId);
 
         _logger.LogInformation("User {UserId} acknowledged message {MessageId}", userId, messageId);
+    }
+
+    #endregion
+
+    #region Device Sync
+
+    /// <summary>
+    /// Request sync from other devices of the same user
+    /// Other devices will receive DeviceSyncRequest and should respond with SendDeviceSyncData
+    /// </summary>
+    public async Task RequestDeviceSync(string conversationId, long sinceTimestamp, int chunkSize = 100)
+    {
+        var userId = GetUserId();
+        if (string.IsNullOrEmpty(userId)) return;
+
+        if (!ConnectedUsers.TryGetValue(userId, out var userDevices)) return;
+
+        // Get this device's ID
+        var thisDeviceId = userDevices.Values
+            .FirstOrDefault(d => d.ConnectionId == Context.ConnectionId)?.DeviceId 
+            ?? Context.ConnectionId;
+
+        // Convert empty string to null for conversationId, 0 to null for sinceTimestamp
+        var actualConversationId = string.IsNullOrEmpty(conversationId) ? null : conversationId;
+        var actualSinceTimestamp = sinceTimestamp == 0 ? (long?)null : sinceTimestamp;
+
+        var syncRequest = new DeviceSyncRequest(
+            thisDeviceId,
+            actualConversationId,
+            actualSinceTimestamp,
+            chunkSize
+        );
+
+        // Send request to all other devices of this user
+        foreach (var device in userDevices.Values.Where(d => d.ConnectionId != Context.ConnectionId))
+        {
+            await Clients.Client(device.ConnectionId).SendAsync("DeviceSyncRequest", syncRequest);
+        }
+
+        _logger.LogInformation(
+            "User {UserId} device {DeviceId} requested sync from {OtherDeviceCount} other devices",
+            userId, thisDeviceId, userDevices.Count - 1);
+    }
+
+    /// <summary>
+    /// Send message sync data to another device
+    /// Called in response to DeviceSyncRequest
+    /// </summary>
+    public async Task SendDeviceSyncData(string toDeviceId, string conversationId, List<SyncMessageDto> messages, int chunkIndex, int totalChunks, bool isLastChunk)
+    {
+        var userId = GetUserId();
+        if (string.IsNullOrEmpty(userId)) return;
+
+        if (!ConnectedUsers.TryGetValue(userId, out var userDevices)) return;
+
+        // Get this device's ID
+        var thisDeviceId = userDevices.Values
+            .FirstOrDefault(d => d.ConnectionId == Context.ConnectionId)?.DeviceId 
+            ?? Context.ConnectionId;
+
+        // Find target device
+        var targetDevice = userDevices.Values.FirstOrDefault(d => d.DeviceId == toDeviceId);
+        if (targetDevice == null)
+        {
+            _logger.LogWarning(
+                "User {UserId} device {DeviceId} tried to send sync data to unknown device {ToDeviceId}",
+                userId, thisDeviceId, toDeviceId);
+            return;
+        }
+
+        // Convert empty string to null for conversationId
+        var actualConversationId = string.IsNullOrEmpty(conversationId) ? null : conversationId;
+
+        var syncChunk = new DeviceSyncChunk(
+            thisDeviceId,
+            toDeviceId,
+            actualConversationId,
+            messages,
+            chunkIndex,
+            totalChunks,
+            isLastChunk
+        );
+
+        await Clients.Client(targetDevice.ConnectionId).SendAsync("DeviceSyncData", syncChunk);
+
+        _logger.LogInformation(
+            "User {UserId} device {DeviceId} sent sync chunk {ChunkIndex}/{TotalChunks} ({MessageCount} messages) to device {ToDeviceId}",
+            userId, thisDeviceId, chunkIndex, totalChunks, messages.Count, toDeviceId);
+    }
+
+    /// <summary>
+    /// Get list of connected devices for current user
+    /// </summary>
+    public async Task GetConnectedDevices()
+    {
+        var userId = GetUserId();
+        if (string.IsNullOrEmpty(userId)) return;
+
+        if (!ConnectedUsers.TryGetValue(userId, out var userDevices))
+        {
+            await Clients.Caller.SendAsync("ConnectedDevices", new { devices = new List<object>() });
+            return;
+        }
+
+        var thisConnectionId = Context.ConnectionId;
+        var devices = userDevices.Values.Select(d => new
+        {
+            deviceId = d.DeviceId,
+            connectedAt = d.ConnectedAt.ToString("o"),
+            isCurrentDevice = d.ConnectionId == thisConnectionId
+        }).ToList();
+
+        await Clients.Caller.SendAsync("ConnectedDevices", new { devices });
     }
 
     #endregion
@@ -338,7 +523,7 @@ public class TalkTimeHub : Hub
                 if (participant.UserId != userId)
                 {
                     // Send SignalR notification to online users
-                    if (ConnectedUsers.ContainsKey(participant.UserId))
+                    if (IsUserConnected(participant.UserId))
                     {
                         await Clients.User(participant.UserId).SendAsync("CallInitiated", new RoomParticipantUpdate(
                             roomId,
@@ -456,10 +641,10 @@ public class TalkTimeHub : Hub
             return;
         }
 
-        // Send offer to all other participants
+        // Send offer to all other participants (to all their devices)
         foreach (var participantId in roomState.Participants.Keys.Where(p => p != fromUserId))
         {
-            if (ConnectedUsers.TryGetValue(participantId, out var connectionId))
+            foreach (var connectionId in GetAllConnectionIds(participantId))
             {
                 await Clients.Client(connectionId).SendAsync("ReceiveOffer", new SignalingOffer(
                     fromUserId,
@@ -490,10 +675,10 @@ public class TalkTimeHub : Hub
             return;
         }
 
-        // Send offer to all other participants
+        // Send offer to the specific participant (to all their devices)
         foreach (var participantId in roomState.Participants.Keys.Where(p => p != fromUserId && p == toUserId))
         {
-            if (ConnectedUsers.TryGetValue(participantId, out var connectionId))
+            foreach (var connectionId in GetAllConnectionIds(participantId))
             {
                 await Clients.Client(connectionId).SendAsync("ReceiveOffer", new SignalingOffer(
                     fromUserId,
@@ -524,10 +709,10 @@ public class TalkTimeHub : Hub
             return;
         }
 
-        // Send to all other participants
+        // Send to all other participants (to all their devices)
         foreach (var participantId in roomState.Participants.Keys.Where(p => p != fromUserId))
         {
-            if (ConnectedUsers.TryGetValue(participantId, out var connectionId))
+            foreach (var connectionId in GetAllConnectionIds(participantId))
             {
                 await Clients.Client(connectionId).SendAsync("ReceiveIceCandidate", new SignalingIceCandidate(
                     fromUserId,
@@ -549,7 +734,8 @@ public class TalkTimeHub : Hub
         var fromUserId = GetUserId();
         if (string.IsNullOrEmpty(fromUserId)) return;
 
-        if (ConnectedUsers.TryGetValue(toUserId, out var connectionId))
+        // Send to all devices of the target user
+        foreach (var connectionId in GetAllConnectionIds(toUserId))
         {
             await Clients.Client(connectionId).SendAsync("ReceiveIceCandidate", new SignalingIceCandidate(
                 fromUserId,
@@ -572,7 +758,8 @@ public class TalkTimeHub : Hub
         var fromUserId = GetUserId();
         if (string.IsNullOrEmpty(fromUserId)) return;
 
-        if (ConnectedUsers.TryGetValue(toUserId, out var connectionId))
+        // Send to all devices of the target user
+        foreach (var connectionId in GetAllConnectionIds(toUserId))
         {
             await Clients.Client(connectionId).SendAsync("ReceiveAnswer", new SignalingAnswer(
                 fromUserId,
@@ -594,6 +781,38 @@ public class TalkTimeHub : Hub
         return Context.User?.FindFirst("userId")?.Value;
     }
 
+    /// <summary>
+    /// Check if a user has any device connected
+    /// </summary>
+    private bool IsUserConnected(string userId)
+    {
+        return ConnectedUsers.TryGetValue(userId, out var devices) && !devices.IsEmpty;
+    }
+
+    /// <summary>
+    /// Get the first connection ID for a user (for backward compatibility)
+    /// </summary>
+    private string? GetFirstConnectionId(string userId)
+    {
+        if (ConnectedUsers.TryGetValue(userId, out var devices))
+        {
+            return devices.Values.FirstOrDefault()?.ConnectionId;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Get all connection IDs for a user
+    /// </summary>
+    private IEnumerable<string> GetAllConnectionIds(string userId)
+    {
+        if (ConnectedUsers.TryGetValue(userId, out var devices))
+        {
+            return devices.Values.Select(d => d.ConnectionId);
+        }
+        return Enumerable.Empty<string>();
+    }
+
     private async Task LeaveAllCalls(string userId)
     {
         // Find and end all active calls for this user
@@ -608,7 +827,8 @@ public class TalkTimeHub : Hub
                 var otherUserIds = call.Participants.Where(i => i != userId);
                 foreach (var otherUserId in otherUserIds)
                 {
-                    if (ConnectedUsers.TryGetValue(otherUserId, out var connectionId))
+                    // Send to all devices of the other user
+                    foreach (var connectionId in GetAllConnectionIds(otherUserId))
                     {
                         await Clients.Client(connectionId).SendAsync("CallEnded", new CallEnded(
                             call.CallId,
@@ -616,7 +836,6 @@ public class TalkTimeHub : Hub
                             "disconnected"
                         ));
                     }
-
                 }
             }
         }
@@ -692,6 +911,20 @@ internal class RoomState
     public string CreatedBy { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; }
     public ConcurrentDictionary<string, UserDto> Participants { get; } = new();
+}
+
+internal class DeviceInfo
+{
+    public string ConnectionId { get; }
+    public string DeviceId { get; }
+    public DateTime ConnectedAt { get; }
+
+    public DeviceInfo(string connectionId, string deviceId, DateTime connectedAt)
+    {
+        ConnectionId = connectionId;
+        DeviceId = deviceId;
+        ConnectedAt = connectedAt;
+    }
 }
 
 #endregion
