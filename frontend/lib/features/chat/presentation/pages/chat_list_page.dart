@@ -2,16 +2,12 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:logger/logger.dart';
-import 'package:provider/provider.dart';
 import 'package:talktime/core/navigation_manager.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/features/chat/data/conversation_service.dart';
 import 'package:talktime/features/chat/data/message_service.dart';
 import 'package:talktime/features/chat/presentation/pages/create_group_chat.dart';
-import 'package:talktime/features/profile/presentation/pages/edit_profile_page.dart';
 import 'package:talktime/shared/models/conversation.dart';
-import 'package:talktime/features/chat/presentation/pages/message_list_page.dart';
-import 'package:talktime/features/chat/presentation/pages/create_conversation.dart';
 import 'package:talktime/shared/models/message.dart';
 import 'package:talktime/shared/models/user.dart';
 
@@ -108,109 +104,136 @@ class _ChatListPageState extends State<ChatListPage>
         actions: [
           IconButton(
             icon: const Icon(Icons.settings),
-            onPressed: () => _openProfile(),
+            onPressed: () => _openSettings(),
           ),
         ],
       ),
-      body: FutureBuilder<List<Conversation>>(
-        future: _conversationsFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError) {
-            return Center(child: Text('Error: ${snapshot.error}'));
-          }
-          final conversations = snapshot.data!;
-          if (conversations.isEmpty) {
-            return Center(child: Text('Start a new conversation'));
-          }
+      body: Column(
+        children: [
+          // Saved Messages entry
+          _buildSavedMessagesEntry(),
+          const Divider(height: 1),
+          // Conversations list
+          Expanded(
+            child: FutureBuilder<List<Conversation>>(
+              future: _conversationsFuture,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (snapshot.hasError) {
+                  return Center(child: Text('Error: ${snapshot.error}'));
+                }
+                final conversations = snapshot.data!;
+                if (conversations.isEmpty) {
+                  return Center(child: Text('Start a new conversation'));
+                }
 
-          return ListView.builder(
-            itemCount: conversations.length,
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            itemBuilder: (context, index) {
-              final convo = conversations[index];
-              final name =
-                  convo.displayTitle ??
-                  convo.participants
-                      ?.firstWhere((i) => i.id != _myId)
-                      ?.username ??
-                  convo.participants?.first?.username ??
-                  "UNKNOWN";
-              final lastMessage =
-                  _lastMessageMap[convo.id] ??
-                  Message(
-                    id: '0',
-                    content: convo.lastMessage ?? "",
-                    conversationId: convo.id,
-                    sender:
-                        convo.participants?.first ??
-                        User(id: '0', username: 'Unknown'),
-                    sentAt: convo.lastMessageAt ?? "",
-                  );
+                return ListView.builder(
+                  itemCount: conversations.length,
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  itemBuilder: (context, index) {
+                    final convo = conversations[index];
+                    final name =
+                        convo.displayTitle ??
+                        convo.participants
+                            ?.firstWhere((i) => i.id != _myId)
+                            ?.username ??
+                        convo.participants?.first?.username ??
+                        "UNKNOWN";
+                    final lastMessage =
+                        _lastMessageMap[convo.id] ??
+                        Message(
+                          id: '0',
+                          content: convo.lastMessage ?? "",
+                          conversationId: convo.id,
+                          sender:
+                              convo.participants?.first ??
+                              User(id: '0', username: 'Unknown'),
+                          sentAt: convo.lastMessageAt ?? "",
+                        );
 
-              return Card(
-                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  side: BorderSide(
-                    color: Theme.of(context).dividerColor.withOpacity(0.2),
-                  ),
-                ),
-                clipBehavior: Clip.hardEdge,
-                child: ListTile(
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 14,
-                  ),
-                  leading: CircleAvatar(
-                    backgroundColor: Theme.of(
-                      context,
-                    ).colorScheme.primary.withOpacity(0.1),
-                    foregroundColor: Theme.of(context).colorScheme.primary,
-                    child: Text(
-                      name.isEmpty ? "?" : name[0].toUpperCase(),
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 18,
-                      ),
-                    ),
-                  ),
-                  title: Text(
-                    name,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  subtitle: Text(
-                    lastMessage.content,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  trailing: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text(
-                        _formatTimeAgo(lastMessage.sentAt),
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Theme.of(
-                            context,
-                          ).colorScheme.onSurface.withOpacity(0.6),
+                    return Card(
+                      margin: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 4),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        side: BorderSide(
+                          color:
+                              Theme.of(context).dividerColor.withOpacity(0.2),
                         ),
                       ),
-                    ],
-                  ),
-                  onTap: () => _openChat(convo),
-                ),
-              );
-            },
-          );
-        },
+                      clipBehavior: Clip.hardEdge,
+                      child: ListTile(
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 14,
+                        ),
+                        leading: CircleAvatar(
+                          backgroundColor: Theme.of(
+                            context,
+                          ).colorScheme.primary.withOpacity(0.1),
+                          foregroundColor:
+                              Theme.of(context).colorScheme.primary,
+                          child: Text(
+                            name.isEmpty ? "?" : name[0].toUpperCase(),
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleMedium
+                                ?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 18,
+                                ),
+                          ),
+                        ),
+                        title: Text(
+                          name,
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleMedium
+                              ?.copyWith(
+                                fontWeight: FontWeight.w600,
+                              ),
+                        ),
+                        subtitle: Text(
+                          lastMessage.content,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodyMedium
+                              ?.copyWith(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant,
+                              ),
+                        ),
+                        trailing: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text(
+                              _formatTimeAgo(lastMessage.sentAt),
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.onSurface.withOpacity(0.6),
+                                  ),
+                            ),
+                          ],
+                        ),
+                        onTap: () => _openChat(convo),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
       ),
       floatingActionButton: Column(
         mainAxisAlignment: MainAxisAlignment.end,
@@ -228,6 +251,34 @@ class _ChatListPageState extends State<ChatListPage>
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildSavedMessagesEntry() {
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(
+        horizontal: 16,
+        vertical: 8,
+      ),
+      leading: CircleAvatar(
+        backgroundColor:
+            Theme.of(context).colorScheme.primary.withOpacity(0.1),
+        foregroundColor: Theme.of(context).colorScheme.primary,
+        child: const Icon(Icons.bookmark),
+      ),
+      title: Text(
+        'Saved Messages',
+        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+      ),
+      subtitle: Text(
+        'Your bookmarks and notes',
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+      ),
+      onTap: () => NavigationManager().openSavedMessages(),
     );
   }
 
@@ -263,22 +314,21 @@ class _ChatListPageState extends State<ChatListPage>
   }
 
   void _createConversation() {
-    // TODO: Show group creation dialog
     NavigationManager().openCreateConversation();
   }
 
   void _createGroup() {
-    // TODO: Show group creation dialog
     NavigationManager().openCreateGroup();
   }
 
-  void _openProfile() {
-    NavigationManager().openEditProfile();
+  void _openSettings() {
+    NavigationManager().openSettings();
   }
 
   @override
   void dispose() {
-    _timer?.cancel();
+    _timer.cancel();
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 }

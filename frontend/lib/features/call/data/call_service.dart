@@ -552,6 +552,51 @@ class CallService {
     }
   }
 
+  /// Switch the audio input device (microphone) to the given [deviceId].
+  /// Replaces the audio track in the local stream and all peer connections.
+  Future<void> changeAudioDevice(String deviceId) async {
+    try {
+      _logger.i('Switching audio device to: $deviceId');
+
+      // Get a new stream with the selected audio device
+      final newStream = await navigator.mediaDevices.getUserMedia({
+        'audio': {
+          'deviceId': deviceId,
+          'echoCancellation': true,
+          'noiseSuppression': true,
+        },
+      });
+
+      final newAudioTrack = newStream.getAudioTracks().first;
+
+      // Replace audio track in local stream
+      if (_localStream != null) {
+        final oldAudioTracks = _localStream!.getAudioTracks();
+        for (final oldTrack in oldAudioTracks) {
+          _localStream!.removeTrack(oldTrack);
+          oldTrack.stop();
+        }
+        _localStream!.addTrack(newAudioTrack);
+      }
+
+      // Replace audio track in all peer connections
+      for (final pc in _peerConnections.values) {
+        final senders = await pc.getSenders();
+        for (final sender in senders) {
+          if (sender.track?.kind == 'audio') {
+            await sender.replaceTrack(newAudioTrack);
+          }
+        }
+      }
+
+      _localStreamController.sink.add(_localStream);
+      _logger.i('Audio device switched successfully');
+    } catch (e) {
+      _logger.e('Error changing audio device: $e');
+      rethrow;
+    }
+  }
+
   void _updateState(CallState newState) {
     _state = newState;
     _stateController.add(newState);

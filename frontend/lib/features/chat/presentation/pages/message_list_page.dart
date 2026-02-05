@@ -19,6 +19,7 @@ import 'package:talktime/features/chat/data/conversation_service.dart';
 import 'package:talktime/features/chat/data/media_service.dart';
 import 'package:talktime/features/chat/data/message_service.dart';
 import 'package:talktime/features/chat/data/reaction_service.dart';
+import 'package:talktime/features/saved_messages/data/saved_messages_service.dart';
 import 'package:talktime/shared/models/conversation.dart';
 import 'package:talktime/shared/models/message.dart';
 import 'package:talktime/shared/models/user.dart';
@@ -526,19 +527,51 @@ class _MessageListPageState extends State<MessageListPage> {
               }).toList(),
             ),
             const SizedBox(height: 16),
-            // Full emoji picker button
-            TextButton.icon(
-              onPressed: () {
-                Navigator.pop(context);
-                _showFullEmojiPicker(message);
-              },
-              icon: const Icon(Icons.add_reaction_outlined),
-              label: const Text('More reactions'),
+            // Action buttons row
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                TextButton.icon(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    _showFullEmojiPicker(message);
+                  },
+                  icon: const Icon(Icons.add_reaction_outlined),
+                  label: const Text('More'),
+                ),
+                TextButton.icon(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    _saveMessage(message);
+                  },
+                  icon: const Icon(Icons.bookmark_add_outlined),
+                  label: const Text('Save'),
+                ),
+              ],
             ),
           ],
         ),
       ),
     );
+  }
+
+  Future<void> _saveMessage(Message message) async {
+    try {
+      await SavedMessagesService().saveMessage(message);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Message saved to bookmarks')),
+      );
+    } catch (e) {
+      _logger.e('Error saving message: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Failed to save message'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   void _showFullEmojiPicker(Message message) {

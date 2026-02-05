@@ -9,6 +9,7 @@ import 'package:logger/web.dart';
 import 'package:talktime/features/call/data/call_service.dart';
 import 'package:talktime/features/call/data/signaling_service.dart';
 import 'package:talktime/features/call/presentation/remote_participant_tile.dart';
+import 'package:talktime/features/call/presentation/widgets/audio_chooser_popup.dart';
 import 'package:talktime/features/call/presentation/widgets/screen_window_chooser_popup.dart';
 
 class ConferencePage extends StatefulWidget {
@@ -463,12 +464,32 @@ class _ConferencePageState extends State<ConferencePage> {
     }
   }
 
-  void _showAudioDeviceSelector() {
-    // TODO: Implement audio device selection
-    _logger.i('Audio device selector not yet implemented');
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Audio device selection coming soon')),
-    );
+  void _showAudioDeviceSelector() async {
+    final selectedDevice = await AudioDevicePopupChooser.show(context: context);
+    if (selectedDevice != null) {
+      try {
+        await _callService.changeAudioDevice(selectedDevice.deviceId);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Switched to ${selectedDevice.label.isNotEmpty ? selectedDevice.label : "selected microphone"}',
+              ),
+            ),
+          );
+        }
+      } catch (e) {
+        _logger.e('Error switching audio device: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Failed to switch audio device'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    }
   }
 
   Widget _buildControls() {

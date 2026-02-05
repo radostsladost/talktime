@@ -1,10 +1,10 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:talktime/core/navigation_manager.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/features/auth/presentation/pages/login_page.dart';
 import 'package:talktime/features/chat/data/database/database_helper.dart';
-import 'package:talktime/features/chat/presentation/pages/chat_list_page.dart';
 import 'package:talktime/features/profile/data/models/profile_privacy.dart';
 import 'package:talktime/features/profile/data/profile_service.dart';
 import 'package:talktime/shared/models/user.dart';
@@ -207,6 +207,18 @@ class _EditProfilePageState extends State<EditProfilePage> {
                 const SizedBox(height: 24),
                 const Divider(),
                 const SizedBox(height: 8),
+
+                // App Settings
+                ListTile(
+                  leading: Icon(
+                    Icons.settings_outlined,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                  title: const Text('App Settings'),
+                  subtitle: const Text('Theme, notifications, and more'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => NavigationManager().openSettings(),
+                ),
 
                 // Clear Chats Data Button
                 ListTile(

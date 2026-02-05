@@ -6,6 +6,8 @@ import 'package:talktime/features/chat/presentation/pages/create_conversation.da
 import 'package:talktime/features/chat/presentation/pages/create_group_chat.dart';
 import 'package:talktime/features/chat/presentation/pages/message_list_page.dart';
 import 'package:talktime/features/profile/presentation/pages/edit_profile_page.dart';
+import 'package:talktime/features/saved_messages/presentation/pages/saved_messages_page.dart';
+import 'package:talktime/features/settings/presentation/pages/settings_page.dart';
 import 'package:talktime/shared/models/conversation.dart';
 
 class NavigationManager {
@@ -41,6 +43,20 @@ class NavigationManager {
     Navigator.push(
       navigatorKey.currentContext!,
       MaterialPageRoute(builder: (context) => const EditProfilePage()),
+    );
+  }
+
+  void openSettings() {
+    Navigator.push(
+      navigatorKey.currentContext!,
+      MaterialPageRoute(builder: (context) => const SettingsPage()),
+    );
+  }
+
+  void openSavedMessages() {
+    Navigator.push(
+      navigatorKey.currentContext!,
+      MaterialPageRoute(builder: (context) => const SavedMessagesPage()),
     );
   }
 

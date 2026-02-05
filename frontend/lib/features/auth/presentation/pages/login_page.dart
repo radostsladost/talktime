@@ -4,7 +4,7 @@ import 'package:talktime/core/websocket/websocket_manager.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/features/auth/presentation/pages/register_page.dart';
 import 'package:talktime/features/chat/data/device_sync_service.dart';
-import 'package:talktime/features/chat/presentation/pages/chat_list_page.dart';
+import 'package:talktime/features/chat/presentation/pages/chat_split_view.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -52,7 +52,7 @@ class _LoginPageState extends State<LoginPage> {
 
       // Navigate to chat list page
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const ChatListPage()),
+        MaterialPageRoute(builder: (_) => const ChatSplitView()),
       );
     } catch (e, stackTrace) {
       Logger().e('Failed to login: $e', error: e, stackTrace: stackTrace);

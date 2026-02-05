@@ -7,7 +7,8 @@ import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/features/auth/presentation/pages/login_page.dart';
 import 'package:talktime/features/call/data/call_service.dart';
 import 'package:talktime/features/chat/data/device_sync_service.dart';
-import 'package:talktime/features/chat/presentation/pages/chat_list_page.dart';
+import 'package:talktime/features/chat/presentation/pages/chat_split_view.dart';
+import 'package:talktime/features/settings/data/settings_service.dart';
 import 'package:logger/logger.dart';
 
 class MyApp extends StatefulWidget {
@@ -18,8 +19,17 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> {
+  final SettingsService _settingsService = SettingsService();
+  ThemeMode _themeMode = ThemeMode.system;
+  Color _colorSeed = Colors.blue;
+
+  StreamSubscription? _themeSub;
+  StreamSubscription? _colorSub;
+
   @override
   void initState() {
+    super.initState();
+
     var listener = AppLifecycleListener(
       onDetach: () {
         CallService().endCall();
@@ -31,8 +41,36 @@ class _MyAppState extends State<MyApp> {
           WebSocketManager().checkConnection();
         });
       },
-      // onRestart: () => _handleTransition('restart'),
     );
+
+    // Load initial settings
+    _loadSettings();
+
+    // Listen for settings changes
+    _themeSub = _settingsService.themeModeStream.listen((mode) {
+      setState(() => _themeMode = mode);
+    });
+    _colorSub = _settingsService.colorSeedStream.listen((color) {
+      setState(() => _colorSeed = color);
+    });
+  }
+
+  Future<void> _loadSettings() async {
+    final themeMode = await _settingsService.getThemeMode();
+    final colorSeed = await _settingsService.getColorSeed();
+    if (mounted) {
+      setState(() {
+        _themeMode = themeMode;
+        _colorSeed = colorSeed;
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _themeSub?.cancel();
+    _colorSub?.cancel();
+    super.dispose();
   }
 
   @override
@@ -43,10 +81,17 @@ class _MyAppState extends State<MyApp> {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
+        colorScheme: ColorScheme.fromSeed(seedColor: _colorSeed),
       ),
-      darkTheme: ThemeData.dark(useMaterial3: true), // standard dark theme
-      themeMode: ThemeMode.system, // device controls theme
+      darkTheme: ThemeData(
+        useMaterial3: true,
+        brightness: Brightness.dark,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: _colorSeed,
+          brightness: Brightness.dark,
+        ),
+      ),
+      themeMode: _themeMode,
       home: const SplashScreen(),
     );
   }
@@ -93,9 +138,9 @@ class _SplashScreenState extends State<SplashScreen> {
           Logger().e('Failed to register Firebase token: $e');
         }
 
-        // User is logged in, go to chat list
+        // User is logged in, go to chat split view (responsive)
         Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const ChatListPage()),
+          MaterialPageRoute(builder: (_) => const ChatSplitView()),
         );
       } else {
         // User is not logged in, go to login page

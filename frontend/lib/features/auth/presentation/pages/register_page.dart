@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:talktime/core/websocket/websocket_manager.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/features/chat/data/device_sync_service.dart';
-import 'package:talktime/features/chat/presentation/pages/chat_list_page.dart';
+import 'package:talktime/features/chat/presentation/pages/chat_split_view.dart';
 
 class RegisterPage extends StatefulWidget {
   const RegisterPage({super.key});
@@ -57,7 +57,7 @@ class _RegisterPageState extends State<RegisterPage> {
 
       // Navigate to chat list page
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const ChatListPage()),
+        MaterialPageRoute(builder: (_) => const ChatSplitView()),
       );
     } catch (e) {
       if (!mounted) return;
