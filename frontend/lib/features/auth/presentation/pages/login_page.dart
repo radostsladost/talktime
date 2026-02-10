@@ -44,7 +44,7 @@ class _LoginPageState extends State<LoginPage> {
         _passwordController.text,
       );
       await WebSocketManager().initialize();
-      
+
       // Initialize device sync service for cross-device message synchronization
       DeviceSyncService().initialize();
 
@@ -89,134 +89,138 @@ class _LoginPageState extends State<LoginPage> {
             padding: const EdgeInsets.all(24.0),
             child: Form(
               key: _formKey,
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // Logo or App Name
-                  Icon(
-                    Icons.chat_bubble_outline,
-                    size: 80,
-                    color: Theme.of(context).colorScheme.primary,
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'TalkTime',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.headlineLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
+              child: SizedBox(
+                width: 100,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Logo or App Name
+                    Icon(
+                      Icons.chat_bubble_outline,
+                      size: 80,
                       color: Theme.of(context).colorScheme.primary,
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Login to your account',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(
-                      context,
-                    ).textTheme.bodyLarge?.copyWith(color: Colors.grey[600]),
-                  ),
-                  const SizedBox(height: 48),
-
-                  // Email Field
-                  TextFormField(
-                    controller: _emailController,
-                    keyboardType: TextInputType.emailAddress,
-                    decoration: InputDecoration(
-                      labelText: 'Email',
-                      hintText: 'Enter your email',
-                      prefixIcon: const Icon(Icons.email_outlined),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'TalkTime',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.headlineLarge
+                          ?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: Theme.of(context).colorScheme.primary,
+                          ),
                     ),
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Please enter your email';
-                      }
-                      if (!value.contains('@')) {
-                        return 'Please enter a valid email';
-                      }
-                      return null;
-                    },
-                    enabled: !_isLoading,
-                  ),
-                  const SizedBox(height: 16),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Login to your account',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(
+                        context,
+                      ).textTheme.bodyLarge?.copyWith(color: Colors.grey[600]),
+                    ),
+                    const SizedBox(height: 48),
 
-                  // Password Field
-                  TextFormField(
-                    controller: _passwordController,
-                    obscureText: _obscurePassword,
-                    decoration: InputDecoration(
-                      labelText: 'Password',
-                      hintText: 'Enter your password',
-                      prefixIcon: const Icon(Icons.lock_outline),
-                      suffixIcon: IconButton(
-                        icon: Icon(
-                          _obscurePassword
-                              ? Icons.visibility_outlined
-                              : Icons.visibility_off_outlined,
+                    // Email Field
+                    TextFormField(
+                      controller: _emailController,
+                      keyboardType: TextInputType.emailAddress,
+                      decoration: InputDecoration(
+                        labelText: 'Email',
+                        hintText: 'Enter your email',
+                        prefixIcon: const Icon(Icons.email_outlined),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
                         ),
-                        onPressed: () {
-                          setState(() {
-                            _obscurePassword = !_obscurePassword;
-                          });
-                        },
                       ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Please enter your email';
+                        }
+                        if (!value.contains('@')) {
+                          return 'Please enter a valid email';
+                        }
+                        return null;
+                      },
+                      enabled: !_isLoading,
                     ),
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Please enter your password';
-                      }
-                      if (value.length < 6) {
-                        return 'Password must be at least 6 characters';
-                      }
-                      return null;
-                    },
-                    enabled: !_isLoading,
-                  ),
-                  const SizedBox(height: 24),
+                    const SizedBox(height: 16),
 
-                  // Login Button
-                  FilledButton(
-                    onPressed: _isLoading ? null : _handleLogin,
-                    style: FilledButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                    // Password Field
+                    TextFormField(
+                      controller: _passwordController,
+                      obscureText: _obscurePassword,
+                      decoration: InputDecoration(
+                        labelText: 'Password',
+                        hintText: 'Enter your password',
+                        prefixIcon: const Icon(Icons.lock_outline),
+                        suffixIcon: IconButton(
+                          icon: Icon(
+                            _obscurePassword
+                                ? Icons.visibility_outlined
+                                : Icons.visibility_off_outlined,
+                          ),
+                          onPressed: () {
+                            setState(() {
+                              _obscurePassword = !_obscurePassword;
+                            });
+                          },
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Please enter your password';
+                        }
+                        if (value.length < 6) {
+                          return 'Password must be at least 6 characters';
+                        }
+                        return null;
+                      },
+                      enabled: !_isLoading,
                     ),
-                    child: _isLoading
-                        ? const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          )
-                        : const Text('Login', style: TextStyle(fontSize: 16)),
-                  ),
-                  const SizedBox(height: 16),
+                    const SizedBox(height: 24),
 
-                  // Register Link
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        "Don't have an account? ",
-                        style: TextStyle(color: Colors.grey[600]),
+                    // Login Button
+                    FilledButton(
+                      onPressed: _isLoading ? null : _handleLogin,
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
-                      TextButton(
-                        onPressed: _isLoading ? null : _navigateToRegister,
-                        child: const Text('Register'),
-                      ),
-                    ],
-                  ),
-                ],
+                      child: _isLoading
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Text('Login', style: TextStyle(fontSize: 16)),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Register Link
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          "Don't have an account? ",
+                          style: TextStyle(color: Colors.grey[600]),
+                        ),
+                        TextButton(
+                          onPressed: _isLoading ? null : _navigateToRegister,
+                          child: const Text('Register'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
           ),

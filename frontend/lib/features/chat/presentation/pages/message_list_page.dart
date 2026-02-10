@@ -6,6 +6,7 @@ import 'package:collection/collection.dart';
 import 'package:emoji_picker_flutter/emoji_picker_flutter.dart' as emoji_picker;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/rendering.dart';
 import 'package:giphy_get/giphy_get.dart';
 import 'package:image_picker/image_picker.dart';
@@ -58,6 +59,7 @@ class _MessageListPageState extends State<MessageListPage> {
   late List<Message> _messages = List.empty();
   final _textController = TextEditingController();
   final _scrollController = ScrollController();
+  final FocusNode _inputFocusNode = FocusNode();
   late String _myId = '';
   late Timer _syncTimer;
   late MessageService _messageService;
@@ -309,6 +311,7 @@ class _MessageListPageState extends State<MessageListPage> {
   void dispose() {
     _textController.dispose();
     _scrollController.dispose();
+    _inputFocusNode.dispose();
     _syncTimer?.cancel();
     _messageService.dispose();
     _reactionService.dispose();
@@ -334,6 +337,12 @@ class _MessageListPageState extends State<MessageListPage> {
       await _syncMessages();
     } catch (e) {
       _logger.e('Error sending message: $e');
+    }
+    // Keep focus in the input so user can type and send again without re-tapping
+    if (mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _inputFocusNode.requestFocus();
+      });
     }
   }
 
@@ -1060,61 +1069,81 @@ class _MessageListPageState extends State<MessageListPage> {
           ),
         Padding(
           padding: const EdgeInsets.all(8.0),
-          child: Row(
-            children: [
-              // Emoji button
-              IconButton(
-                icon: Icon(
-                  _isEmojiPickerVisible
-                      ? Icons.keyboard
-                      : Icons.insert_emoticon_outlined,
+          child: GestureDetector(
+            onSecondaryTapUp: (_) {
+              setState(() => _isEmojiPickerVisible = true);
+            },
+            child: Row(
+              children: [
+                // Emoji button
+                IconButton(
+                  icon: Icon(
+                    _isEmojiPickerVisible
+                        ? Icons.keyboard
+                        : Icons.insert_emoticon_outlined,
+                  ),
+                  onPressed: () {
+                    setState(() {
+                      _isEmojiPickerVisible = !_isEmojiPickerVisible;
+                    });
+                  },
                 ),
-                onPressed: () {
-                  setState(() {
-                    _isEmojiPickerVisible = !_isEmojiPickerVisible;
-                  });
-                },
-              ),
-              // Text input
-              Expanded(
-                child: TextField(
-                  controller: _textController,
-                  decoration: InputDecoration(
-                    hintText: 'Message ${name}',
-                    filled: true,
-                    border: const OutlineInputBorder(
-                      borderRadius: BorderRadius.all(Radius.circular(30)),
-                      borderSide: BorderSide.none,
+                // Text input: Enter sends (and we refocus after send so you can type again)
+                Expanded(
+                  child: Focus(
+                    onKeyEvent: (FocusNode node, KeyEvent event) {
+                      if (event is KeyDownEvent &&
+                          event.logicalKey == LogicalKeyboardKey.enter &&
+                          !HardwareKeyboard.instance.isShiftPressed) {
+                        _sendMessage();
+                        return KeyEventResult.handled;
+                      }
+                      return KeyEventResult.ignored;
+                    },
+                    child: TextField(
+                      focusNode: _inputFocusNode,
+                      controller: _textController,
+                      maxLines: 5,
+                      textInputAction: TextInputAction.send,
+                      textCapitalization: TextCapitalization.sentences,
+                      decoration: InputDecoration(
+                      hintText: 'Message ${name}',
+                      filled: true,
+                      border: const OutlineInputBorder(
+                        borderRadius: BorderRadius.all(Radius.circular(30)),
+                        borderSide: BorderSide.none,
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                      // Media buttons inside the text field on the right
+                      suffixIcon: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // GIF button
+                          IconButton(
+                            icon: const Icon(Icons.gif_box_outlined),
+                            onPressed: _isSendingMedia ? null : _pickAndSendGif,
+                            tooltip: 'Send GIF',
+                          ),
+                          // Photo button
+                          IconButton(
+                            icon: const Icon(Icons.photo_outlined),
+                            onPressed: _isSendingMedia ? null : _pickAndSendImage,
+                            tooltip: 'Send Photo',
+                          ),
+                        ],
+                      ),
                     ),
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 8,
-                    ),
-                    // Media buttons inside the text field on the right
-                    suffixIcon: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        // GIF button
-                        IconButton(
-                          icon: const Icon(Icons.gif_box_outlined),
-                          onPressed: _isSendingMedia ? null : _pickAndSendGif,
-                          tooltip: 'Send GIF',
-                        ),
-                        // Photo button
-                        IconButton(
-                          icon: const Icon(Icons.photo_outlined),
-                          onPressed: _isSendingMedia ? null : _pickAndSendImage,
-                          tooltip: 'Send Photo',
-                        ),
-                      ],
+                    onSubmitted: (_) => _sendMessage(),
                     ),
                   ),
-                  onSubmitted: (_) => _sendMessage(),
                 ),
-              ),
-              // Send button
-              IconButton(icon: const Icon(Icons.send), onPressed: _sendMessage),
-            ],
+                // Send button
+                IconButton(icon: const Icon(Icons.send), onPressed: _sendMessage),
+              ],
+            ),
           ),
         ),
       ],
