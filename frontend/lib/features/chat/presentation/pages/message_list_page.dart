@@ -684,7 +684,10 @@ class _MessageListPageState extends State<MessageListPage> {
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () {
-            if (widget.onExit != null) {
+            // When in call+chat panel, back = return to call tab (don't close panel / end call)
+            if (widget.onReturnToCall != null) {
+              widget.onReturnToCall!();
+            } else if (widget.onExit != null) {
               widget.onExit!();
             } else {
               Navigator.pop(context);
@@ -1211,7 +1214,48 @@ class _MessageListPageState extends State<MessageListPage> {
     );
   }
 
-  void _startCall() {
+  Future<void> _startCall() async {
+    final callService = CallService();
+    final alreadyInCall = callService.currentState != CallState.idle;
+    final inDifferentCall = alreadyInCall &&
+        callService.currentRoomId != null &&
+        callService.currentRoomId != widget.conversation.id;
+
+    if (inDifferentCall) {
+      final targetName = widget.conversation.displayTitle ??
+          widget.conversation.participants
+              ?.firstWhere(
+                (p) => p.id != _myId,
+                orElse: () => User(id: '', username: ''),
+              )
+              .username ??
+          'this chat';
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Already in a call'),
+          content: Text(
+            'End the current call and start a call with $targetName?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('End & call'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted || confirmed != true) return;
+      await callService.endCall().catchError((e) {
+        _logger.e('Error ending call: $e');
+      });
+      if (!mounted) return;
+    }
+
     if (widget.onStartCallInPanel != null) {
       widget.onStartCallInPanel!(widget.conversation);
     } else {
