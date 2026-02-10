@@ -121,4 +121,14 @@ class LocalMessageStorage {
     final result = await db.rawQuery('SELECT COUNT(*) as count FROM message');
     return result.first['count'] as int? ?? 0;
   }
+
+  /// Get unread message count for a conversation (messages from others not yet read).
+  Future<int> getUnreadCount(String conversationId, String myUserId) async {
+    var db = await _getDb();
+    final result = await db.rawQuery(
+      'SELECT COUNT(*) as count FROM message WHERE conversationId = ? AND senderId != ? AND (readAt IS NULL OR readAt = 0)',
+      [conversationId, myUserId],
+    );
+    return result.first['count'] as int? ?? 0;
+  }
 }

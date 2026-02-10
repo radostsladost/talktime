@@ -80,10 +80,20 @@ class LocalConversationStorage {
           );
         } else {
           conversationMap['id'] = byId['id'];
+          // Preserve the newer of local vs API lastMessageAt so local updates (from messages) aren't overwritten by sync
+          final localTs = byId['lastMessageAt'] as int?;
+          final apiTs = conversation.lastMessageAt != null
+              ? DateTime.parse(conversation.lastMessageAt!).millisecondsSinceEpoch
+              : null;
+          if (localTs != null && apiTs != null) {
+            conversationMap['lastMessageAt'] = localTs > apiTs ? localTs : apiTs;
+          } else if (localTs != null) {
+            conversationMap['lastMessageAt'] = localTs;
+          }
+          // else keep apiTs already in conversationMap
           conversationId = await txn.update(
             'conversation',
             conversationMap,
-            conflictAlgorithm: ConflictAlgorithm.replace,
             where: 'id = ?',
             whereArgs: [byId['id']],
           );
@@ -157,12 +167,11 @@ class LocalConversationStorage {
   Future<List<Conversation>> getConversations() async {
     var db = await _getDb();
 
-    // Get conversations
+    // Get conversations (newest first; null lastMessageAt last)
     final List<Map<String, Object?>> conversations = await db.query(
       'conversation',
-      orderBy: 'lastMessageAt DESC',
+      orderBy: 'lastMessageAt IS NULL ASC, CAST(lastMessageAt AS INTEGER) DESC',
     );
-
     final List<Conversation> result = [];
     for (var convMap in conversations) {
       final conversation = _mapToConversation(convMap);
@@ -271,18 +280,36 @@ class LocalConversationStorage {
     );
   }
 
-  /// Update the last message timestamp for a conversation
+  /// Update the last message timestamp for a conversation.
+  /// When we receive messages, this must be called so list sorting works.
+  /// If the conversation row doesn't exist yet (e.g. message arrived before we fetched the list),
+  /// inserts a minimal row so lastMessageAt is persisted.
   Future<void> updateLastMessageAt(
     String externalId,
     String lastMessageAt,
   ) async {
     var db = await _getDb();
-    await db.update(
+    final ts = DateTime.parse(lastMessageAt).millisecondsSinceEpoch;
+    final updated = await db.update(
       'conversation',
-      {'lastMessageAt': DateTime.parse(lastMessageAt).millisecondsSinceEpoch},
+      {'lastMessageAt': ts},
       where: 'externalId = ?',
       whereArgs: [externalId],
     );
+    if (updated == 0) {
+      await db.insert(
+        'conversation',
+        {
+          'externalId': externalId,
+          'createdAt': ts,
+          'lastMessageAt': ts,
+          'status': 'active',
+          'name': null,
+          'type': 'direct',
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
   }
 
   /// Delete a conversation locally

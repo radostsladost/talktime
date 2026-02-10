@@ -14,7 +14,7 @@ import 'package:logger/logger.dart';
 import 'package:talktime/core/navigation_manager.dart';
 import 'package:talktime/core/websocket/websocket_manager.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
-import 'package:talktime/features/call/presentation/pages/conference_page.dart';
+import 'package:talktime/features/call/data/call_service.dart';
 import 'package:talktime/features/chat/data/conversation_service.dart';
 import 'package:talktime/features/chat/data/media_service.dart';
 import 'package:talktime/features/chat/data/message_service.dart';
@@ -30,8 +30,25 @@ const List<String> quickReactions = ['👍', '❤️', '😂', '😮', '😢', '
 
 class MessageListPage extends StatefulWidget {
   final Conversation conversation;
+  final Function? onExit;
 
-  const MessageListPage({super.key, required this.conversation});
+  /// When set (e.g. on desktop split view), starting a call runs this instead of full-screen conference.
+  final void Function(Conversation conversation)? onStartCallInPanel;
+
+  /// When set (e.g. in call+chat panel), "tap to return" switches to call tab instead of opening full screen.
+  final VoidCallback? onReturnToCall;
+
+  /// Called when we send or receive a message so the parent can refresh the chat list (order, last message) in real time.
+  final VoidCallback? onConversationActivity;
+
+  const MessageListPage({
+    super.key,
+    required this.conversation,
+    this.onExit,
+    this.onStartCallInPanel,
+    this.onReturnToCall,
+    this.onConversationActivity,
+  });
 
   @override
   State<MessageListPage> createState() => _MessageListPageState();
@@ -164,10 +181,21 @@ class _MessageListPageState extends State<MessageListPage> {
     return _messageReactions[messageId] ?? [];
   }
 
-  _onSignalMsgReceived(Message p1) {
-    setState(() {
-      _messages.insert(0, p1);
+  Future<void> _onSignalMsgReceived(Message p1) async {
+    // Persist to local DB so other tabs/devices and sync see it; unique externalId prevents duplicates
+    await _messageService.saveMessageFromRealtime(p1).catchError((e) {
+      _logger.e('Error saving realtime message: $e');
     });
+    if (!mounted) return;
+    if (p1.conversationId != widget.conversation.id) return;
+
+    setState(() {
+      if (!_messages.any((m) => m.id == p1.id)) {
+        _messages.insert(0, p1);
+      }
+    });
+    // Refresh conversation list only after DB is updated so it shows new lastMessageAt immediately
+    widget.onConversationActivity?.call();
     _syncMessages();
   }
 
@@ -302,6 +330,7 @@ class _MessageListPageState extends State<MessageListPage> {
 
     try {
       await _messageService.sendMessage(widget.conversation.id, content);
+      widget.onConversationActivity?.call();
       await _syncMessages();
     } catch (e) {
       _logger.e('Error sending message: $e');
@@ -316,6 +345,7 @@ class _MessageListPageState extends State<MessageListPage> {
         type: 'image',
         mediaUrl: imageUrl,
       );
+      widget.onConversationActivity?.call();
       await _syncMessages();
     } catch (e) {
       _logger.e('Error sending image: $e');
@@ -330,6 +360,7 @@ class _MessageListPageState extends State<MessageListPage> {
         type: 'image',
         mediaUrl: gifUrl,
       );
+      widget.onConversationActivity?.call();
       await _syncMessages();
     } catch (e) {
       _logger.e('Error sending GIF: $e');
@@ -652,7 +683,13 @@ class _MessageListPageState extends State<MessageListPage> {
         ),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.pop(context),
+          onPressed: () {
+            if (widget.onExit != null) {
+              widget.onExit!();
+            } else {
+              Navigator.pop(context);
+            }
+          },
         ),
         actions: [
           IconButton(
@@ -1082,8 +1119,19 @@ class _MessageListPageState extends State<MessageListPage> {
   }
 
   Widget _buildConferenceIndicator() {
+    final callService = CallService();
+    final weAreInCall =
+        callService.currentState != CallState.idle &&
+        callService.currentRoomId == widget.conversation.id;
+
     return GestureDetector(
-      onTap: () => _startCall(),
+      onTap: () {
+        if (weAreInCall && widget.onReturnToCall != null) {
+          widget.onReturnToCall!();
+        } else {
+          _startCall();
+        }
+      },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
@@ -1096,51 +1144,53 @@ class _MessageListPageState extends State<MessageListPage> {
           children: [
             Icon(Icons.videocam, color: Colors.green.shade700, size: 20),
             const SizedBox(width: 8),
-            // Stacked avatars like Telegram
-            SizedBox(
-              width: _conferenceParticipants.length > 3
-                  ? 60
-                  : _conferenceParticipants.length * 20.0,
-              height: 24,
-              child: Stack(
-                children: [
-                  for (
-                    int i = 0;
-                    i < _conferenceParticipants.length && i < 3;
-                    i++
-                  )
-                    Positioned(
-                      left: i * 14.0,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: Colors.green.shade50,
-                            width: 2,
+            if (!weAreInCall)
+              SizedBox(
+                width: _conferenceParticipants.length > 3
+                    ? 60
+                    : _conferenceParticipants.length * 20.0,
+                height: 24,
+                child: Stack(
+                  children: [
+                    for (
+                      int i = 0;
+                      i < _conferenceParticipants.length && i < 3;
+                      i++
+                    )
+                      Positioned(
+                        left: i * 14.0,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: Colors.green.shade50,
+                              width: 2,
+                            ),
                           ),
-                        ),
-                        child: CircleAvatar(
-                          radius: 10,
-                          backgroundColor: Colors.green.shade300,
-                          child: Text(
-                            _conferenceParticipants[i].username[0]
-                                .toUpperCase(),
-                            style: const TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
+                          child: CircleAvatar(
+                            radius: 10,
+                            backgroundColor: Colors.green.shade300,
+                            child: Text(
+                              _conferenceParticipants[i].username[0]
+                                  .toUpperCase(),
+                              style: const TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
                             ),
                           ),
                         ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(width: 4),
+            if (!weAreInCall) const SizedBox(width: 4),
             Expanded(
               child: Text(
-                _conferenceParticipants.length == 1
+                weAreInCall
+                    ? "You're in a call with people here — tap to return"
+                    : _conferenceParticipants.length == 1
                     ? '${_conferenceParticipants.first.username} is in a call'
                     : '${_conferenceParticipants.length} people in a call',
                 style: TextStyle(
@@ -1151,7 +1201,7 @@ class _MessageListPageState extends State<MessageListPage> {
               ),
             ),
             Text(
-              'Tap to join',
+              weAreInCall ? 'Return' : 'Tap to join',
               style: TextStyle(color: Colors.green.shade600, fontSize: 12),
             ),
             Icon(Icons.chevron_right, color: Colors.green.shade600, size: 18),
@@ -1162,8 +1212,14 @@ class _MessageListPageState extends State<MessageListPage> {
   }
 
   void _startCall() {
-    // Navigate to call screen
-    // TODO: Pass real peer info based on conversation
-    NavigationManager().openConference(widget.conversation.id, []);
+    if (widget.onStartCallInPanel != null) {
+      widget.onStartCallInPanel!(widget.conversation);
+    } else {
+      NavigationManager().openConference(
+        widget.conversation.id,
+        [],
+        conversation: widget.conversation,
+      );
+    }
   }
 }

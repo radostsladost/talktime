@@ -2,8 +2,8 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'package:logger/logger.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:talktime/core/constants/api_constants.dart';
+import 'token_storage_stub.dart' if (dart.library.html) 'token_storage_web.dart' as token_storage;
 
 class ApiClient {
   final http.Client _client = http.Client();
@@ -17,40 +17,34 @@ class ApiClient {
   // Flag to prevent multiple simultaneous refresh attempts
   bool _isRefreshing = false;
 
-  /// Get stored access token
+  /// Get stored access token (from SharedPreferences; on web also from cookies if prefs empty)
   Future<String?> getToken() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_accessTokenKey);
+    return token_storage.getStoredString(_accessTokenKey);
   }
 
-  /// Save access token
+  /// Save access token (SharedPreferences + cookies on web)
   Future<void> saveToken(String token) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_accessTokenKey, token);
+    await token_storage.setStoredString(_accessTokenKey, token);
   }
 
   /// Clear access token
   Future<void> clearToken() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_accessTokenKey);
+    await token_storage.removeStoredString(_accessTokenKey);
   }
 
   /// Get stored refresh token
   Future<String?> getRefreshToken() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_refreshTokenKey);
+    return token_storage.getStoredString(_refreshTokenKey);
   }
 
   /// Save refresh token
   Future<void> saveRefreshToken(String token) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_refreshTokenKey, token);
+    await token_storage.setStoredString(_refreshTokenKey, token);
   }
 
   /// Clear refresh token
   Future<void> clearRefreshToken() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_refreshTokenKey);
+    await token_storage.removeStoredString(_refreshTokenKey);
   }
 
   /// Save token expiration times
@@ -58,15 +52,14 @@ class ApiClient {
     DateTime? accessTokenExpires,
     DateTime? refreshTokenExpires,
   }) async {
-    final prefs = await SharedPreferences.getInstance();
     if (accessTokenExpires != null) {
-      await prefs.setString(
+      await token_storage.setStoredString(
         _accessTokenExpiresKey,
         accessTokenExpires.toIso8601String(),
       );
     }
     if (refreshTokenExpires != null) {
-      await prefs.setString(
+      await token_storage.setStoredString(
         _refreshTokenExpiresKey,
         refreshTokenExpires.toIso8601String(),
       );
@@ -75,16 +68,14 @@ class ApiClient {
 
   /// Get access token expiration time
   Future<DateTime?> getAccessTokenExpiration() async {
-    final prefs = await SharedPreferences.getInstance();
-    final expiresStr = prefs.getString(_accessTokenExpiresKey);
+    final expiresStr = await token_storage.getStoredString(_accessTokenExpiresKey);
     if (expiresStr == null) return null;
     return DateTime.tryParse(expiresStr);
   }
 
   /// Get refresh token expiration time
   Future<DateTime?> getRefreshTokenExpiration() async {
-    final prefs = await SharedPreferences.getInstance();
-    final expiresStr = prefs.getString(_refreshTokenExpiresKey);
+    final expiresStr = await token_storage.getStoredString(_refreshTokenExpiresKey);
     if (expiresStr == null) return null;
     return DateTime.tryParse(expiresStr);
   }
@@ -120,11 +111,10 @@ class ApiClient {
 
   /// Clear all tokens and expiration times
   Future<void> clearAllTokens() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_accessTokenKey);
-    await prefs.remove(_refreshTokenKey);
-    await prefs.remove(_accessTokenExpiresKey);
-    await prefs.remove(_refreshTokenExpiresKey);
+    await token_storage.removeStoredString(_accessTokenKey);
+    await token_storage.removeStoredString(_refreshTokenKey);
+    await token_storage.removeStoredString(_accessTokenExpiresKey);
+    await token_storage.removeStoredString(_refreshTokenExpiresKey);
   }
 
   /// Attempt to refresh the access token using the refresh token

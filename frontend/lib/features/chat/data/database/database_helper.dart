@@ -49,7 +49,7 @@ class DatabaseHelper {
             ignoreMigrationErrors: ignoreMigrationErrors,
           );
         },
-        version: 8,
+        version: 9,
       ),
     );
 
@@ -70,6 +70,9 @@ class DatabaseHelper {
         'sentAt int, '
         'readAt int, '
         'mediaUrl TEXT)',
+      );
+      await db.execute(
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_message_external_id ON message(externalId) WHERE externalId IS NOT NULL AND externalId != \'\'',
       );
 
       await db.execute(
@@ -159,6 +162,19 @@ class DatabaseHelper {
       if (oldVersion < 8) {
         await db.execute(
           'ALTER TABLE message ADD COLUMN mediaUrl TEXT DEFAULT null;',
+        );
+      }
+
+      // Prevent duplicate messages: unique index on externalId (non-empty only)
+      if (oldVersion < 9) {
+        // Remove duplicates: keep one row per externalId (smallest id). Use derived table for SQLite.
+        await db.execute('''
+          DELETE FROM message WHERE externalId IS NOT NULL AND externalId != '' AND id NOT IN (
+            SELECT id FROM (SELECT MIN(id) AS id FROM message WHERE externalId IS NOT NULL AND externalId != '' GROUP BY externalId)
+          )
+        ''');
+        await db.execute(
+          'CREATE UNIQUE INDEX IF NOT EXISTS idx_message_external_id ON message(externalId) WHERE externalId IS NOT NULL AND externalId != \'\'',
         );
       }
     } catch (e, stackTrace) {

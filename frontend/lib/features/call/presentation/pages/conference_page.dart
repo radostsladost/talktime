@@ -11,15 +11,19 @@ import 'package:talktime/features/call/data/signaling_service.dart';
 import 'package:talktime/features/call/presentation/remote_participant_tile.dart';
 import 'package:talktime/features/call/presentation/widgets/audio_chooser_popup.dart';
 import 'package:talktime/features/call/presentation/widgets/screen_window_chooser_popup.dart';
+import 'package:talktime/features/chat/presentation/pages/message_list_page.dart';
+import 'package:talktime/shared/models/conversation.dart';
 
 class ConferencePage extends StatefulWidget {
   final String roomId;
   final List<UserInfo> initialParticipants;
+  final Conversation? conversation;
 
   const ConferencePage({
     super.key,
     required this.roomId,
     required this.initialParticipants,
+    this.conversation,
   });
 
   @override
@@ -545,13 +549,32 @@ class _ConferencePageState extends State<ConferencePage> {
             color: Colors.white,
             onPressed: _showAudioDeviceSelector,
           ),
+          if (widget.conversation != null)
+            IconButton(
+              icon: const Icon(Icons.chat),
+              color: Colors.white,
+              tooltip: 'View messages',
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => MessageListPage(
+                      conversation: widget.conversation!,
+                      onExit: () => Navigator.pop(context),
+                    ),
+                  ),
+                );
+              },
+            ),
           IconButton(
             icon: const Icon(Icons.call_end, color: Colors.red),
             onPressed: () {
               _callService.endCall().catchError((error) {
                 _logger.e('Error ending call: $error');
               });
-              Navigator.pop(context);
+              if (Navigator.of(context).canPop()) {
+                Navigator.pop(context);
+              }
             },
           ),
         ],

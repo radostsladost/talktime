@@ -28,10 +28,13 @@ import 'firebase_options.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await initFirebaseServices();
 
   await dotenv.load(fileName: ".env");
+  initFirebaseServices().catchError((error) {
+    Logger().e("Firebase exception: $error", error: error);
+  });
   IncomingCallManager().initialize(navigatorKey);
+
   runApp(const MyApp());
 }
 

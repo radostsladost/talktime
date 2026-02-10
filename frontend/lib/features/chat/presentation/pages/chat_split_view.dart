@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:logger/logger.dart';
 import 'package:talktime/core/navigation_manager.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
+import 'package:talktime/features/call/data/call_service.dart';
+import 'package:talktime/features/call/presentation/pages/conference_page.dart';
 import 'package:talktime/features/chat/data/conversation_service.dart';
 import 'package:talktime/features/chat/data/message_service.dart';
 import 'package:talktime/features/chat/presentation/pages/message_list_page.dart';
@@ -25,17 +27,41 @@ class ChatSplitView extends StatefulWidget {
 }
 
 class _ChatSplitViewState extends State<ChatSplitView>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, TickerProviderStateMixin {
   late Future<List<Conversation>> _conversationsFuture;
+  List<Conversation>? _cachedConversations;
   late String _myId = '';
   late Timer _timer;
   final Logger _logger = Logger(output: ConsoleOutput());
   final Map<String, Message> _lastMessageMap = {};
+  final Map<String, int> _unreadCountMap = {};
 
   // Currently selected conversation for split view
   Conversation? _selectedConversation;
   // Track which panel to show when no conversation is selected
   String? _rightPanelOverride; // 'saved', 'settings', null
+  // When call is shown in right panel (desktop)
+  String? _callRoomId;
+  Conversation? _callConversation;
+  StreamSubscription<CallState>? _callStateSubscription;
+  TabController? _callPanelTabController;
+
+  void _startCallInPanel(Conversation conversation) {
+    setState(() {
+      _callRoomId = conversation.id;
+      _callConversation = conversation;
+      _selectedConversation = conversation;
+      _rightPanelOverride = null;
+      _callPanelTabController ??= TabController(length: 2, vsync: this);
+    });
+  }
+
+  void _disposeCallPanel() {
+    _callPanelTabController?.dispose();
+    _callPanelTabController = null;
+    _callRoomId = null;
+    _callConversation = null;
+  }
 
   @override
   void initState() {
@@ -75,6 +101,13 @@ class _ChatSplitViewState extends State<ChatSplitView>
         .catchError((error) {
           _logger.e('Error fetching conversations $error');
         });
+
+    // When call ends, clear in-panel call state
+    _callStateSubscription = CallService().callStateStream.listen((state) {
+      if (state == CallState.idle && mounted) {
+        setState(() => _disposeCallPanel());
+      }
+    });
   }
 
   @override
@@ -100,14 +133,30 @@ class _ChatSplitViewState extends State<ChatSplitView>
       final lastMessage = await MessageService().getLastMessage(
         conversation.id,
       );
-      setState(() {
-        if (lastMessage != null) _lastMessageMap[conversation.id] = lastMessage;
-      });
+      final unreadCount = await MessageService().getUnreadCount(
+        conversation.id,
+      );
+      if (lastMessage != null) _lastMessageMap[conversation.id] = lastMessage;
+      _unreadCountMap[conversation.id] = unreadCount;
     }
+    setState(() {});
   }
 
-  bool get _isWideScreen =>
-      MediaQuery.of(context).size.width >= 768;
+  /// Refresh chat list from local storage so order/last message update in real time after send/receive.
+  void _refreshConversationList() {
+    if (!mounted) return;
+    setState(() {
+      _conversationsFuture = ConversationService().getConversations();
+    });
+    _conversationsFuture.then((_) async {
+      await _fetchLastMessages();
+      if (mounted) setState(() {});
+    }).catchError((e) {
+      _logger.e('Error refreshing conversation list: $e');
+    });
+  }
+
+  bool get _isWideScreen => MediaQuery.of(context).size.width >= 768;
 
   @override
   Widget build(BuildContext context) {
@@ -123,16 +172,11 @@ class _ChatSplitViewState extends State<ChatSplitView>
       body: Row(
         children: [
           // Left panel - Chat list
-          SizedBox(
-            width: 360,
-            child: _buildChatListPanel(),
-          ),
+          SizedBox(width: 360, child: _buildChatListPanel()),
           // Divider
           VerticalDivider(width: 1, thickness: 1),
           // Right panel - Messages or placeholder
-          Expanded(
-            child: _buildRightPanel(),
-          ),
+          Expanded(child: _buildRightPanel()),
         ],
       ),
     );
@@ -149,7 +193,15 @@ class _ChatSplitViewState extends State<ChatSplitView>
           ),
         ],
       ),
-      body: _buildConversationList(),
+      body: Column(
+        children: [
+          if (_callRoomId != null && _callConversation != null)
+            _buildInCallBanner(),
+          _buildSavedMessagesEntry(),
+          const Divider(height: 1),
+          Expanded(child: _buildConversationList()),
+        ],
+      ),
       floatingActionButton: _buildFABs(),
     );
   }
@@ -176,6 +228,9 @@ class _ChatSplitViewState extends State<ChatSplitView>
       ),
       body: Column(
         children: [
+          // In-call banner: we're in a call with this chat, tap to return
+          if (_callRoomId != null && _callConversation != null)
+            _buildInCallBanner(),
           // Saved Messages entry
           _buildSavedMessagesEntry(),
           const Divider(height: 1),
@@ -184,6 +239,57 @@ class _ChatSplitViewState extends State<ChatSplitView>
         ],
       ),
       floatingActionButton: _buildFABs(),
+    );
+  }
+
+  Widget _buildInCallBanner() {
+    final name =
+        _callConversation?.displayTitle ??
+        _callConversation?.participants
+            ?.firstWhere(
+              (p) => p.id != _myId,
+              orElse: () => User(id: '', username: ''),
+            )
+            .username ??
+        'this chat';
+    return Material(
+      color: Colors.green.shade50,
+      child: InkWell(
+        onTap: () {
+          if (_isWideScreen) {
+            setState(() {
+              _selectedConversation = _callConversation;
+              _rightPanelOverride = null;
+            });
+          } else if (_callRoomId != null) {
+            NavigationManager().openConference(
+              _callRoomId!,
+              [],
+              conversation: _callConversation,
+            );
+          }
+        },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            children: [
+              Icon(Icons.videocam, color: Colors.green.shade700, size: 22),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'In a call with $name — tap to return',
+                  style: TextStyle(
+                    color: Colors.green.shade800,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+              Icon(Icons.chevron_right, color: Colors.green.shade700),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -196,27 +302,25 @@ class _ChatSplitViewState extends State<ChatSplitView>
           ? Theme.of(context).colorScheme.primaryContainer.withOpacity(0.3)
           : null,
       child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 16,
-          vertical: 8,
-        ),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         leading: CircleAvatar(
-          backgroundColor:
-              Theme.of(context).colorScheme.primary.withOpacity(0.1),
+          backgroundColor: Theme.of(
+            context,
+          ).colorScheme.primary.withOpacity(0.1),
           foregroundColor: Theme.of(context).colorScheme.primary,
           child: const Icon(Icons.bookmark),
         ),
         title: Text(
           'Saved Messages',
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
+          style: Theme.of(
+            context,
+          ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
         ),
         subtitle: Text(
           'Your bookmarks and notes',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
         ),
         onTap: () {
           if (_isWideScreen) {
@@ -236,15 +340,27 @@ class _ChatSplitViewState extends State<ChatSplitView>
     return FutureBuilder<List<Conversation>>(
       future: _conversationsFuture,
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
+        if (snapshot.hasData) {
+          final list = snapshot.data!;
+          if (_cachedConversations != list) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) setState(() => _cachedConversations = list);
+            });
+          }
         }
-        if (snapshot.hasError) {
-          return Center(child: Text('Error: ${snapshot.error}'));
-        }
-        final conversations = snapshot.data!;
-        if (conversations.isEmpty) {
+        // Use cached list while loading so we don't replace the list with a loader
+        final conversations = snapshot.data ?? _cachedConversations;
+        if (conversations == null || conversations.isEmpty) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            return Center(child: Text('Error: ${snapshot.error}'));
+          }
           return const Center(child: Text('Start a new conversation'));
+        }
+        if (snapshot.hasError && _cachedConversations == null) {
+          return Center(child: Text('Error: ${snapshot.error}'));
         }
 
         return ListView.builder(
@@ -272,14 +388,14 @@ class _ChatSplitViewState extends State<ChatSplitView>
                 );
 
             final isSelected = _selectedConversation?.id == convo.id;
+            final unreadCount = _unreadCountMap[convo.id] ?? 0;
 
             return Card(
               margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
               color: isSelected
-                  ? Theme.of(context)
-                      .colorScheme
-                      .primaryContainer
-                      .withOpacity(0.3)
+                  ? Theme.of(
+                      context,
+                    ).colorScheme.primaryContainer.withOpacity(0.3)
                   : null,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
@@ -295,47 +411,79 @@ class _ChatSplitViewState extends State<ChatSplitView>
                   horizontal: 16,
                   vertical: 14,
                 ),
-                leading: CircleAvatar(
-                  backgroundColor: Theme.of(
-                    context,
-                  ).colorScheme.primary.withOpacity(0.1),
-                  foregroundColor: Theme.of(context).colorScheme.primary,
-                  child: Text(
-                    name.isEmpty ? "?" : name[0].toUpperCase(),
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 18,
+                leading: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    CircleAvatar(
+                      backgroundColor: Theme.of(
+                        context,
+                      ).colorScheme.primary.withOpacity(0.1),
+                      foregroundColor: Theme.of(context).colorScheme.primary,
+                      child: Text(
+                        name.isEmpty ? "?" : name[0].toUpperCase(),
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 18,
+                            ),
+                      ),
+                    ),
+                    if (unreadCount > 0)
+                      Positioned(
+                        right: -4,
+                        top: -4,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).colorScheme.error,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: Theme.of(context).colorScheme.surface,
+                              width: 1.5,
+                            ),
+                          ),
+                          constraints: const BoxConstraints(
+                            minWidth: 20,
+                            minHeight: 20,
+                          ),
+                          alignment: Alignment.center,
+                          child: Text(
+                            unreadCount > 99 ? '99+' : '$unreadCount',
+                            style: Theme.of(context).textTheme.labelSmall
+                                ?.copyWith(
+                                  color: Theme.of(context).colorScheme.onError,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 11,
+                                ),
+                          ),
                         ),
-                  ),
+                      ),
+                  ],
                 ),
                 title: Text(
                   name,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
                 subtitle: Text(
                   lastMessage.content,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
                 ),
-                trailing: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      _formatTimeAgo(lastMessage.sentAt),
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: Theme.of(context)
-                                .colorScheme
-                                .onSurface
-                                .withOpacity(0.6),
-                          ),
-                    ),
-                  ],
+                trailing: Text(
+                  _formatTimeAgo(lastMessage.sentAt),
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.onSurface.withOpacity(0.6),
+                  ),
                 ),
                 onTap: () => _openChat(convo),
               ),
@@ -353,10 +501,24 @@ class _ChatSplitViewState extends State<ChatSplitView>
     if (_rightPanelOverride == 'settings' && _selectedConversation == null) {
       return const SettingsPage();
     }
+    // Desktop: call + chat in right panel when this conversation is in a call
+    if (_isWideScreen &&
+        _callRoomId != null &&
+        _selectedConversation?.id == _callRoomId &&
+        _callConversation != null) {
+      return _buildCallAndChatPanel();
+    }
     if (_selectedConversation != null) {
       return MessageListPage(
         key: ValueKey(_selectedConversation!.id),
         conversation: _selectedConversation!,
+        onExit: () {
+          setState(() {
+            _selectedConversation = null;
+          });
+        },
+        onStartCallInPanel: _isWideScreen ? (c) => _startCallInPanel(c) : null,
+        onConversationActivity: _refreshConversationList,
       );
     }
 
@@ -374,12 +536,55 @@ class _ChatSplitViewState extends State<ChatSplitView>
           Text(
             'Select a chat to start messaging',
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color:
-                      Theme.of(context).colorScheme.onSurface.withOpacity(0.4),
-                ),
+              color: Theme.of(context).colorScheme.onSurface.withOpacity(0.4),
+            ),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildCallAndChatPanel() {
+    if (_callConversation == null || _callPanelTabController == null) {
+      return const SizedBox.shrink();
+    }
+    return Column(
+      children: [
+        TabBar(
+          controller: _callPanelTabController,
+          labelColor: Theme.of(context).colorScheme.primary,
+          tabs: const [
+            Tab(icon: Icon(Icons.videocam), text: 'Call'),
+            Tab(icon: Icon(Icons.chat), text: 'Chat'),
+          ],
+        ),
+        const Divider(height: 1),
+        Expanded(
+          child: TabBarView(
+            controller: _callPanelTabController,
+            children: [
+              ConferencePage(
+                key: ValueKey('conf_${_callConversation!.id}'),
+                roomId: _callRoomId!,
+                initialParticipants: [],
+                conversation: _callConversation,
+              ),
+              MessageListPage(
+                key: ValueKey(_callConversation!.id),
+                conversation: _callConversation!,
+                onReturnToCall: () => _callPanelTabController?.animateTo(0),
+                onConversationActivity: _refreshConversationList,
+                onExit: () {
+                  setState(() {
+                    _selectedConversation = null;
+                    _disposeCallPanel();
+                  });
+                },
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
@@ -435,6 +640,12 @@ class _ChatSplitViewState extends State<ChatSplitView>
         _selectedConversation = conversation;
         _rightPanelOverride = null;
       });
+      // Refresh unread count after a short delay so badge updates once messages are marked read
+      Future.delayed(const Duration(milliseconds: 1500), () async {
+        if (!mounted || _selectedConversation?.id != conversation.id) return;
+        final count = await MessageService().getUnreadCount(conversation.id);
+        if (mounted) setState(() => _unreadCountMap[conversation.id] = count);
+      });
     } else {
       NavigationManager().openMessagesList(conversation);
     }
@@ -454,6 +665,8 @@ class _ChatSplitViewState extends State<ChatSplitView>
 
   @override
   void dispose() {
+    _callPanelTabController?.dispose();
+    _callStateSubscription?.cancel();
     _timer.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();

@@ -65,6 +65,8 @@ class CallService {
   MediaStream? get cachedVideoStream => _cachedVideoStream;
   Map<String, MediaStream> get remoteStreams => Map.from(_remoteStreams);
   CallState get currentState => _state;
+  /// Room/conversation id of the current call, if any.
+  String? get currentRoomId => _currentRoomId;
   Map<String, UserInfo> get participantInfo => _participantInfo;
 
   String? _currentRoomId;
@@ -430,16 +432,19 @@ class CallService {
   }
 
   Future<MediaStream?> _getCameraStream() async {
-    // Check permissions first
-    final permissions = <Permission>[Permission.camera];
-    final statuses = await permissions.request();
-
-    if (statuses[Permission.camera] != PermissionStatus.granted) {
-      _logger.i('Camera permission not granted ${statuses[Permission.camera]}');
-      ScaffoldMessenger.of(navigatorKey.currentContext!).showSnackBar(
-        const SnackBar(content: Text('Camera permission not granted')),
-      );
-      return null;
+    if (_usePermissionHandler) {
+      final permissions = <Permission>[Permission.camera];
+      final statuses = await permissions.request();
+      if (statuses[Permission.camera] != PermissionStatus.granted) {
+        _logger.i(
+            'Camera permission not granted ${statuses[Permission.camera]}');
+        if (navigatorKey.currentContext != null) {
+          ScaffoldMessenger.of(navigatorKey.currentContext!).showSnackBar(
+            const SnackBar(content: Text('Camera permission not granted')),
+          );
+        }
+        return null;
+      }
     }
 
     final constraints = Map<String, dynamic>.from({
@@ -603,22 +608,26 @@ class CallService {
   }
 
   String _facingMode = 'user';
+
+  /// permission_handler is only implemented on Android/iOS; skip on Linux, Windows, macOS, web.
+  bool get _usePermissionHandler =>
+      !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+
   Future<void> _getUserMedia() async {
     int retries = 0;
 
     while (retries < 3) {
       try {
-        // Check permissions first
-        final permissions = <Permission>[
-          Permission.camera,
-          Permission.microphone,
-        ];
-        final statuses = await permissions.request();
-
-        // final videoGranted =
-        //     statuses[Permission.camera] == PermissionStatus.granted;
-        final audioGranted =
-            statuses[Permission.microphone] == PermissionStatus.granted;
+        bool audioGranted = true;
+        if (_usePermissionHandler) {
+          final permissions = <Permission>[
+            Permission.camera,
+            Permission.microphone,
+          ];
+          final statuses = await permissions.request();
+          audioGranted =
+              statuses[Permission.microphone] == PermissionStatus.granted;
+        }
 
         if (!audioGranted) {
           break;

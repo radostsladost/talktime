@@ -59,6 +59,59 @@ class MessageService {
     }
   }
 
+  /// Get unread message count for a conversation (messages from others not yet read).
+  Future<int> getUnreadCount(String conversationId) async {
+    try {
+      final myUserId = (await AuthService().getCurrentUser()).id;
+      return await _localStorage.getUnreadCount(conversationId, myUserId);
+    } catch (e) {
+      _logger.e('Error fetching unread count: $e');
+      return 0;
+    }
+  }
+
+  /// Saves messages to local storage and updates lastMessageAt for each affected conversation.
+  /// Must be used whenever we receive or save messages so chat list sorting stays correct.
+  Future<void> _saveMessagesAndUpdateLastMessageAt(
+    List<DbModels.Message> messages,
+  ) async {
+    if (messages.isEmpty) return;
+    await _localStorage.saveMessages(messages);
+    final byConvo = <String, DbModels.Message>{};
+    for (var m in messages) {
+      final existing = byConvo[m.conversationId];
+      if (existing == null || m.sentAt > existing.sentAt) {
+        byConvo[m.conversationId] = m;
+      }
+    }
+    for (var entry in byConvo.entries) {
+      await _conversationStorage.updateLastMessageAt(
+        entry.key,
+        DateTime.fromMillisecondsSinceEpoch(entry.value.sentAt).toIso8601String(),
+      );
+    }
+  }
+
+  /// Persist a single message received in real time (e.g. via WebSocket).
+  /// Prevents duplicates via unique externalId in local DB.
+  /// Always updates conversation lastMessageAt when we receive messages.
+  Future<void> saveMessageFromRealtime(Message message) async {
+    if (message.id.isEmpty) return;
+    try {
+      final dbMessage = DbModels.Message()
+        ..externalId = message.id
+        ..conversationId = message.conversationId
+        ..senderId = message.sender.id
+        ..content = message.content
+        ..type = getMessageType(message.type)
+        ..sentAt = DateTime.parse(message.sentAt).millisecondsSinceEpoch
+        ..mediaUrl = message.mediaUrl;
+      await _saveMessagesAndUpdateLastMessageAt([dbMessage]);
+    } catch (e) {
+      _logger.e('Error saving realtime message: $e');
+    }
+  }
+
   /// Syncs new messages for a specific conversation from backend to local storage
   /// Call this when you want to sync messages for a specific conversation
   Future<void> syncConversationMessages(String conversationId) async {
@@ -87,21 +140,7 @@ class MessageService {
           )
           .toList();
 
-      // 2. Save to Local Storage
-      await _localStorage.saveMessages(messages);
-
-      // 3. Update conversation lastMessageAt if messages exist
-      if (messages.isNotEmpty) {
-        final lastMessage = messages.reduce(
-          (a, b) => a.sentAt > b.sentAt ? a : b,
-        );
-        await _conversationStorage.updateLastMessageAt(
-          conversationId,
-          DateTime.fromMillisecondsSinceEpoch(
-            lastMessage.sentAt,
-          ).toIso8601String(),
-        );
-      }
+      await _saveMessagesAndUpdateLastMessageAt(messages);
 
       _logger.i(
         'Synced and saved ${messages.length} messages for conversation $conversationId',
@@ -145,21 +184,7 @@ class MessageService {
           )
           .toList();
 
-      // 2. Save to Local Storage immediately
-      await _localStorage.saveMessages(messages);
-
-      // 3. Update conversation lastMessageAt if messages exist
-      if (messages.isNotEmpty) {
-        final lastMessage = messages.reduce(
-          (a, b) => a.sentAt > b.sentAt ? a : b,
-        );
-        await _conversationStorage.updateLastMessageAt(
-          conversationId,
-          DateTime.fromMillisecondsSinceEpoch(
-            lastMessage.sentAt,
-          ).toIso8601String(),
-        );
-      }
+      await _saveMessagesAndUpdateLastMessageAt(messages);
 
       _logger.i(
         'Synced and saved ${messages.length} pending messages for conversation: $conversationId',
@@ -227,13 +252,7 @@ class MessageService {
         ..sentAt = DateTime.parse(message.sentAt).millisecondsSinceEpoch
         ..mediaUrl = message.mediaUrl;
 
-      await _localStorage.saveMessages([dbMessage]);
-
-      // Update conversation lastMessageAt
-      await _conversationStorage.updateLastMessageAt(
-        conversationId,
-        message.sentAt,
-      );
+      await _saveMessagesAndUpdateLastMessageAt([dbMessage]);
 
       // Notify WebSocket that we've sent a message (this will trigger any needed updates)
       // We can also send acknowledgments if needed
@@ -391,25 +410,8 @@ class MessageService {
         ..readAt = m.readAtTimestamp,
       ).toList();
       
-      await _localStorage.saveMessages(messages);
-      
-      // Update conversation lastMessageAt for each affected conversation
-      final conversationIds = syncMessages.map((m) => m.conversationId).toSet();
-      for (var conversationId in conversationIds) {
-        final conversationMessages = syncMessages
-            .where((m) => m.conversationId == conversationId)
-            .toList();
-        if (conversationMessages.isNotEmpty) {
-          final lastMessage = conversationMessages.reduce(
-            (a, b) => a.sentAtTimestamp > b.sentAtTimestamp ? a : b,
-          );
-          await _conversationStorage.updateLastMessageAt(
-            conversationId,
-            DateTime.fromMillisecondsSinceEpoch(lastMessage.sentAtTimestamp).toIso8601String(),
-          );
-        }
-      }
-      
+      await _saveMessagesAndUpdateLastMessageAt(messages);
+
       _logger.i('Successfully imported ${syncMessages.length} messages from sync');
     } catch (e) {
       _logger.e('Error importing messages from sync: $e');

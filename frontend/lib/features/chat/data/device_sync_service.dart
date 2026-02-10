@@ -37,6 +37,13 @@ class DeviceSyncService {
     
     _isInitialized = true;
     _logger.i('DeviceSyncService initialized');
+
+    // Request sync after connection has had time to establish (doesn't rely on OtherDevicesAvailable)
+    Future.delayed(const Duration(seconds: 3), () {
+      if (!_isInitialized) return;
+      _logger.i('Requesting initial sync from other devices');
+      requestSyncFromOtherDevices();
+    });
   }
 
   /// Called when the server notifies us that other devices are available

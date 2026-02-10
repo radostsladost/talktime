@@ -60,13 +60,18 @@ class NavigationManager {
     );
   }
 
-  void openConference(String roomId, List<UserInfo> initialParticipants) {
+  void openConference(
+    String roomId,
+    List<UserInfo> initialParticipants, {
+    Conversation? conversation,
+  }) {
     Navigator.push(
       navigatorKey.currentContext!,
       MaterialPageRoute(
         builder: (context) => ConferencePage(
           roomId: roomId,
           initialParticipants: initialParticipants,
+          conversation: conversation,
         ),
       ),
     );
