@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:talktime/features/profile/presentation/pages/edit_profile_page.dart';
 import 'package:talktime/features/settings/data/settings_service.dart';
 
 class SettingsPage extends StatefulWidget {
@@ -28,11 +29,11 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _loadSettings() async {
     final themeMode = await _settingsService.getThemeMode();
     final colorSeed = await _settingsService.getColorSeed();
-    final notificationsEnabled =
-        await _settingsService.getNotificationsEnabled();
+    final notificationsEnabled = await _settingsService
+        .getNotificationsEnabled();
     final notificationSound = await _settingsService.getNotificationSound();
-    final notificationVibration =
-        await _settingsService.getNotificationVibration();
+    final notificationVibration = await _settingsService
+        .getNotificationVibration();
     final messagePreview = await _settingsService.getMessagePreview();
 
     if (!mounted) return;
@@ -55,6 +56,24 @@ class _SettingsPageState extends State<SettingsPage> {
           ? const Center(child: CircularProgressIndicator())
           : ListView(
               children: [
+                // --- Profile Section ---
+                _buildSectionHeader('Profile'),
+                ListTile(
+                  leading: const Icon(Icons.person_outline),
+                  title: const Text('Edit profile'),
+                  subtitle: const Text('Username, avatar, bio'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (context) => const EditProfilePage(),
+                      ),
+                    );
+                  },
+                ),
+                const Divider(height: 1),
+                const SizedBox(height: 8),
+
                 // --- Appearance Section ---
                 _buildSectionHeader('Appearance'),
                 _buildThemeModeTile(),
@@ -103,8 +122,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 const Divider(height: 1),
                 SwitchListTile(
                   title: const Text('Message Preview'),
-                  subtitle:
-                      const Text('Show message content in notifications'),
+                  subtitle: const Text('Show message content in notifications'),
                   secondary: const Icon(Icons.chat_bubble_outline),
                   value: _messagePreview,
                   onChanged: _notificationsEnabled
@@ -126,9 +144,9 @@ class _SettingsPageState extends State<SettingsPage> {
       child: Text(
         title,
         style: Theme.of(context).textTheme.titleSmall?.copyWith(
-              color: Theme.of(context).colorScheme.primary,
-              fontWeight: FontWeight.bold,
-            ),
+          color: Theme.of(context).colorScheme.primary,
+          fontWeight: FontWeight.bold,
+        ),
       ),
     );
   }
@@ -139,8 +157,8 @@ class _SettingsPageState extends State<SettingsPage> {
         _themeMode == ThemeMode.dark
             ? Icons.dark_mode
             : _themeMode == ThemeMode.light
-                ? Icons.light_mode
-                : Icons.brightness_auto,
+            ? Icons.light_mode
+            : Icons.brightness_auto,
       ),
       title: const Text('Theme'),
       subtitle: Text(_themeModeLabel(_themeMode)),
@@ -211,10 +229,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Widget _buildColorSchemeTile() {
     return ListTile(
-      leading: CircleAvatar(
-        backgroundColor: _colorSeed,
-        radius: 16,
-      ),
+      leading: CircleAvatar(backgroundColor: _colorSeed, radius: 16),
       title: const Text('Color Scheme'),
       subtitle: Text(
         SettingsService.colorOptions
@@ -267,9 +282,9 @@ class _SettingsPageState extends State<SettingsPage> {
                             shape: BoxShape.circle,
                             border: isSelected
                                 ? Border.all(
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .onSurface,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.onSurface,
                                     width: 3,
                                   )
                                 : null,
@@ -279,13 +294,16 @@ class _SettingsPageState extends State<SettingsPage> {
                                       color: option.color.withOpacity(0.4),
                                       blurRadius: 8,
                                       spreadRadius: 2,
-                                    )
+                                    ),
                                   ]
                                 : null,
                           ),
                           child: isSelected
-                              ? const Icon(Icons.check,
-                                  color: Colors.white, size: 24)
+                              ? const Icon(
+                                  Icons.check,
+                                  color: Colors.white,
+                                  size: 24,
+                                )
                               : null,
                         ),
                         const SizedBox(height: 4),

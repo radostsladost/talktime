@@ -209,16 +209,16 @@ class _EditProfilePageState extends State<EditProfilePage> {
                 const SizedBox(height: 8),
 
                 // App Settings
-                ListTile(
-                  leading: Icon(
-                    Icons.settings_outlined,
-                    color: Theme.of(context).colorScheme.primary,
-                  ),
-                  title: const Text('App Settings'),
-                  subtitle: const Text('Theme, notifications, and more'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => NavigationManager().openSettings(),
-                ),
+                // ListTile(
+                //   leading: Icon(
+                //     Icons.settings_outlined,
+                //     color: Theme.of(context).colorScheme.primary,
+                //   ),
+                //   title: const Text('App Settings'),
+                //   subtitle: const Text('Theme, notifications, and more'),
+                //   trailing: const Icon(Icons.chevron_right),
+                //   onTap: () => NavigationManager().openSettings(),
+                // ),
 
                 // Clear Chats Data Button
                 ListTile(

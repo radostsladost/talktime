@@ -6,6 +6,7 @@ import 'package:collection/collection.dart';
 import 'package:emoji_picker_flutter/emoji_picker_flutter.dart' as emoji_picker;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/painting.dart' show WebHtmlElementStrategy;
 import 'package:flutter/services.dart';
 import 'package:flutter/rendering.dart';
 import 'package:giphy_get/giphy_get.dart';
@@ -875,27 +876,54 @@ class _MessageListPageState extends State<MessageListPage> {
 
   Widget _buildImageContent(Message message) {
     final imageUrl = message.mediaUrl ?? message.content;
+    final isGif = message.type == MessageType.gif ||
+        imageUrl.toLowerCase().contains('.gif') ||
+        imageUrl.contains('giphy.com');
+    final useHtmlImageForGif = kIsWeb && isGif;
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(16),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 250, maxHeight: 300),
-        child: CachedNetworkImage(
-          imageUrl: imageUrl,
-          fit: BoxFit.cover,
-          placeholder: (context, url) => Container(
-            width: 150,
-            height: 150,
-            color: Colors.grey[200],
-            child: const Center(child: CircularProgressIndicator()),
-          ),
-          errorWidget: (context, url, error) => Container(
-            width: 150,
-            height: 100,
-            color: Colors.grey[200],
-            child: const Icon(Icons.broken_image, size: 40),
-          ),
-        ),
+        child: useHtmlImageForGif
+            ? Image.network(
+                imageUrl,
+                fit: BoxFit.cover,
+                width: 250,
+                height: 300,
+                loadingBuilder: (context, child, loadingProgress) {
+                  if (loadingProgress == null) return child;
+                  return Container(
+                    width: 150,
+                    height: 150,
+                    color: Colors.grey[200],
+                    child: const Center(child: CircularProgressIndicator()),
+                  );
+                },
+                errorBuilder: (context, error, stackTrace) => Container(
+                  width: 150,
+                  height: 100,
+                  color: Colors.grey[200],
+                  child: const Icon(Icons.broken_image, size: 40),
+                ),
+                webHtmlElementStrategy: WebHtmlElementStrategy.prefer,
+              )
+            : CachedNetworkImage(
+                imageUrl: imageUrl,
+                fit: BoxFit.cover,
+                placeholder: (context, url) => Container(
+                  width: 150,
+                  height: 150,
+                  color: Colors.grey[200],
+                  child: const Center(child: CircularProgressIndicator()),
+                ),
+                errorWidget: (context, url, error) => Container(
+                  width: 150,
+                  height: 100,
+                  color: Colors.grey[200],
+                  child: const Icon(Icons.broken_image, size: 40),
+                ),
+              ),
       ),
     );
   }
@@ -1088,21 +1116,32 @@ class _MessageListPageState extends State<MessageListPage> {
                     });
                   },
                 ),
-                // Text input: Enter sends (and we refocus after send so you can type again)
+                // Text input: Enter sends, Shift+Enter newline; dynamic height (min 1 line, max 5)
                 Expanded(
                   child: Focus(
                     onKeyEvent: (FocusNode node, KeyEvent event) {
-                      if (event is KeyDownEvent &&
-                          event.logicalKey == LogicalKeyboardKey.enter &&
-                          !HardwareKeyboard.instance.isShiftPressed) {
-                        _sendMessage();
+                      if (event is! KeyDownEvent ||
+                          event.logicalKey != LogicalKeyboardKey.enter) {
+                        return KeyEventResult.ignored;
+                      }
+                      if (HardwareKeyboard.instance.isShiftPressed) {
+                        // Shift+Enter: insert newline at cursor (Focus.ignored goes to parent, not child, so we do it manually)
+                        final text = _textController.text;
+                        final sel = _textController.selection;
+                        final offset = sel.baseOffset.clamp(0, text.length);
+                        _textController.value = TextEditingValue(
+                          text: text.replaceRange(offset, offset, '\n'),
+                          selection: TextSelection.collapsed(offset: offset + 1),
+                        );
                         return KeyEventResult.handled;
                       }
-                      return KeyEventResult.ignored;
+                      _sendMessage();
+                      return KeyEventResult.handled;
                     },
                     child: TextField(
                       focusNode: _inputFocusNode,
                       controller: _textController,
+                      minLines: 1,
                       maxLines: 5,
                       textInputAction: TextInputAction.send,
                       textCapitalization: TextCapitalization.sentences,

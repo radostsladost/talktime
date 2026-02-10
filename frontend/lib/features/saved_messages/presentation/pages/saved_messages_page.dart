@@ -1,5 +1,8 @@
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/painting.dart' show WebHtmlElementStrategy;
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:talktime/features/saved_messages/data/saved_messages_service.dart';
 import 'package:talktime/shared/models/message.dart';
@@ -16,11 +19,19 @@ class _SavedMessagesPageState extends State<SavedMessagesPage> {
   List<SavedItem> _items = [];
   bool _isLoading = true;
   final _textController = TextEditingController();
+  final FocusNode _inputFocusNode = FocusNode();
 
   @override
   void initState() {
     super.initState();
     _loadItems();
+  }
+
+  @override
+  void dispose() {
+    _textController.dispose();
+    _inputFocusNode.dispose();
+    super.dispose();
   }
 
   Future<void> _loadItems() async {
@@ -39,6 +50,11 @@ class _SavedMessagesPageState extends State<SavedMessagesPage> {
     _textController.clear();
     await _service.saveCustomText(text);
     await _loadItems();
+    if (mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _inputFocusNode.requestFocus();
+      });
+    }
   }
 
   Future<void> _deleteItem(SavedItem item) async {
@@ -75,12 +91,6 @@ class _SavedMessagesPageState extends State<SavedMessagesPage> {
       await _service.clearAll();
       await _loadItems();
     }
-  }
-
-  @override
-  void dispose() {
-    _textController.dispose();
-    super.dispose();
   }
 
   @override
@@ -162,6 +172,50 @@ class _SavedMessagesPageState extends State<SavedMessagesPage> {
     );
   }
 
+  Widget _buildImageWidget(String imageUrl, MessageType type) {
+    final isGif = type == MessageType.gif ||
+        imageUrl.toLowerCase().contains('.gif') ||
+        imageUrl.contains('giphy.com');
+    final useHtmlImageForGif = kIsWeb && isGif;
+
+    if (useHtmlImageForGif) {
+      return Image.network(
+        imageUrl,
+        fit: BoxFit.cover,
+        width: 250,
+        height: 200,
+        loadingBuilder: (context, child, loadingProgress) {
+          if (loadingProgress == null) return child;
+          return Container(
+            height: 100,
+            color: Colors.grey[200],
+            child: const Center(child: CircularProgressIndicator()),
+          );
+        },
+        errorBuilder: (context, error, stackTrace) => Container(
+          height: 80,
+          color: Colors.grey[200],
+          child: const Icon(Icons.broken_image, size: 40),
+        ),
+        webHtmlElementStrategy: WebHtmlElementStrategy.prefer,
+      );
+    }
+    return CachedNetworkImage(
+      imageUrl: imageUrl,
+      fit: BoxFit.cover,
+      placeholder: (context, url) => Container(
+        height: 100,
+        color: Colors.grey[200],
+        child: const Center(child: CircularProgressIndicator()),
+      ),
+      errorWidget: (context, url, error) => Container(
+        height: 80,
+        color: Colors.grey[200],
+        child: const Icon(Icons.broken_image, size: 40),
+      ),
+    );
+  }
+
   Widget _buildSavedItem(SavedItem item) {
     final isImage =
         item.type == MessageType.image || item.type == MessageType.gif;
@@ -219,22 +273,7 @@ class _SavedMessagesPageState extends State<SavedMessagesPage> {
                     child: ConstrainedBox(
                       constraints:
                           const BoxConstraints(maxWidth: 250, maxHeight: 200),
-                      child: CachedNetworkImage(
-                        imageUrl: item.mediaUrl!,
-                        fit: BoxFit.cover,
-                        placeholder: (context, url) => Container(
-                          height: 100,
-                          color: Colors.grey[200],
-                          child: const Center(
-                              child: CircularProgressIndicator()),
-                        ),
-                        errorWidget: (context, url, error) => Container(
-                          height: 80,
-                          color: Colors.grey[200],
-                          child:
-                              const Icon(Icons.broken_image, size: 40),
-                        ),
-                      ),
+                      child: _buildImageWidget(item.mediaUrl!, item.type),
                     ),
                   )
                 else
@@ -309,21 +348,46 @@ class _SavedMessagesPageState extends State<SavedMessagesPage> {
       child: Row(
         children: [
           Expanded(
-            child: TextField(
-              controller: _textController,
-              decoration: InputDecoration(
-                hintText: 'Add a note...',
-                filled: true,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(30),
-                  borderSide: BorderSide.none,
+            child: Focus(
+              onKeyEvent: (FocusNode node, KeyEvent event) {
+                if (event is! KeyDownEvent ||
+                    event.logicalKey != LogicalKeyboardKey.enter) {
+                  return KeyEventResult.ignored;
+                }
+                if (HardwareKeyboard.instance.isShiftPressed) {
+                  final text = _textController.text;
+                  final sel = _textController.selection;
+                  final offset = sel.baseOffset.clamp(0, text.length);
+                  _textController.value = TextEditingValue(
+                    text: text.replaceRange(offset, offset, '\n'),
+                    selection: TextSelection.collapsed(offset: offset + 1),
+                  );
+                  return KeyEventResult.handled;
+                }
+                _addCustomText();
+                return KeyEventResult.handled;
+              },
+              child: TextField(
+                focusNode: _inputFocusNode,
+                controller: _textController,
+                minLines: 1,
+                maxLines: 5,
+                textInputAction: TextInputAction.send,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: InputDecoration(
+                  hintText: 'Add a note...',
+                  filled: true,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(30),
+                    borderSide: BorderSide.none,
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
                 ),
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 8,
-                ),
+                onSubmitted: (_) => _addCustomText(),
               ),
-              onSubmitted: (_) => _addCustomText(),
             ),
           ),
           const SizedBox(width: 8),

@@ -90,7 +90,7 @@ class _LoginPageState extends State<LoginPage> {
             child: Form(
               key: _formKey,
               child: SizedBox(
-                width: 100,
+                width: 300,
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
