@@ -50,6 +50,8 @@ class _ConferencePageState extends State<ConferencePage> {
   StreamSubscription? _micSubscription;
   StreamSubscription? _camSubscription;
   StreamSubscription? _screenShareSubscription;
+  StreamSubscription? _speakerStateSubscription;
+  StreamSubscription? _speakerDeviceIdSubscription;
 
   @override
   void initState() {
@@ -104,6 +106,8 @@ class _ConferencePageState extends State<ConferencePage> {
     _micSubscription?.cancel();
     _camSubscription?.cancel();
     _screenShareSubscription?.cancel();
+    _speakerStateSubscription?.cancel();
+    _speakerDeviceIdSubscription?.cancel();
 
     // Listen for state changes to trigger UI rebuilds when necessary
     _stateSubscription = _callService.callStateStream.listen((state) {
@@ -146,6 +150,13 @@ class _ConferencePageState extends State<ConferencePage> {
       setState(() {});
       _screenShare = isSharing;
       _attachExistingStreams();
+    });
+    _speakerStateSubscription = _callService.speakerStateStream.listen((_) {
+      setState(() {});
+    });
+    _speakerDeviceIdSubscription =
+        _callService.speakerDeviceIdStream.listen((_) {
+      setState(() {});
     });
   }
 
@@ -236,6 +247,8 @@ class _ConferencePageState extends State<ConferencePage> {
     _micSubscription?.cancel();
     _camSubscription?.cancel();
     _screenShareSubscription?.cancel();
+    _speakerStateSubscription?.cancel();
+    _speakerDeviceIdSubscription?.cancel();
 
     // Dispose the RENDERERS (UI), but DO NOT stop the call.
     // The call lives in the service.
@@ -336,6 +349,7 @@ class _ConferencePageState extends State<ConferencePage> {
           username: user?.username ?? '???',
           onParticipantTap: (id, hasVideo) => _presentationMode(id, hasVideo),
           fitInRect: _isPresentationMode,
+          speakerDeviceId: _callService.speakerDeviceId,
         ),
       );
     }
@@ -362,6 +376,7 @@ class _ConferencePageState extends State<ConferencePage> {
             username: userInfoMap[focusedId]?.username ?? '???',
             onParticipantTap: (id, hasVideo) => _presentationMode(id, hasVideo),
             fitInRect: true,
+            speakerDeviceId: _callService.speakerDeviceId,
           ),
         ),
       );
@@ -386,6 +401,7 @@ class _ConferencePageState extends State<ConferencePage> {
                     username: userInfoMap[id]?.username ?? '???',
                     onParticipantTap: (id, hasVideo) =>
                         _presentationMode(id, hasVideo),
+                    speakerDeviceId: _callService.speakerDeviceId,
                   ),
                 ),
               );
@@ -431,6 +447,7 @@ class _ConferencePageState extends State<ConferencePage> {
                     username: user?.username ?? '???',
                     onParticipantTap: (id, hasVideo) =>
                         _presentationMode(id, hasVideo),
+                    speakerDeviceId: _callService.speakerDeviceId,
                   ),
                 ),
               );
@@ -468,6 +485,9 @@ class _ConferencePageState extends State<ConferencePage> {
     }
   }
 
+  bool get _isDesktop =>
+      !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
+
   void _showAudioDeviceSelector() async {
     final selectedDevice = await AudioDevicePopupChooser.show(context: context);
     if (selectedDevice != null) {
@@ -477,7 +497,7 @@ class _ConferencePageState extends State<ConferencePage> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                'Switched to ${selectedDevice.label.isNotEmpty ? selectedDevice.label : "selected microphone"}',
+                'Mic: ${selectedDevice.label.isNotEmpty ? selectedDevice.label : "selected"}',
               ),
             ),
           );
@@ -487,13 +507,73 @@ class _ConferencePageState extends State<ConferencePage> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Failed to switch audio device'),
+              content: Text('Failed to switch microphone'),
               backgroundColor: Colors.red,
             ),
           );
         }
       }
     }
+  }
+
+  void _showSpeakerDeviceSelector() async {
+    final selectedDevice =
+        await AudioDevicePopupChooser.showSpeaker(context: context);
+    if (selectedDevice != null) {
+      try {
+        _callService.setSpeakerDevice(selectedDevice.deviceId);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Speaker: ${selectedDevice.label.isNotEmpty ? selectedDevice.label : "selected"}',
+              ),
+            ),
+          );
+        }
+      } catch (e) {
+        _logger.e('Error setting speaker device: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Failed to set speaker'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    }
+  }
+
+  void _showCombinedAudioSelector() async {
+    // Mobile / web(mobile): one dialog with mic + speaker sections
+    final mic = await AudioDevicePopupChooser.show(context: context);
+    if (mic != null) {
+      try {
+        await _callService.changeAudioDevice(mic.deviceId);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Audio: ${mic.label.isNotEmpty ? mic.label : "selected"}')),
+          );
+        }
+      } catch (e) {
+        _logger.e('Error switching audio: $e');
+      }
+    }
+  }
+
+  void _showAudioSettingsPanel() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _AudioSettingsSheet(
+        callService: _callService,
+        isDesktop: _isDesktop,
+        onSelectMic: _showAudioDeviceSelector,
+        onSelectSpeaker: _showSpeakerDeviceSelector,
+        onSelectCombinedAudio: _showCombinedAudioSelector,
+      ),
+    );
   }
 
   Widget _buildControls() {
@@ -545,9 +625,10 @@ class _ConferencePageState extends State<ConferencePage> {
             },
           ),
           IconButton(
-            icon: const Icon(Icons.volume_up),
+            icon: const Icon(Icons.settings),
             color: Colors.white,
-            onPressed: _showAudioDeviceSelector,
+            tooltip: 'Audio settings',
+            onPressed: _showAudioSettingsPanel,
           ),
           if (widget.conversation != null)
             IconButton(
@@ -578,6 +659,132 @@ class _ConferencePageState extends State<ConferencePage> {
             },
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _AudioSettingsSheet extends StatelessWidget {
+  const _AudioSettingsSheet({
+    required this.callService,
+    required this.isDesktop,
+    required this.onSelectMic,
+    required this.onSelectSpeaker,
+    required this.onSelectCombinedAudio,
+  });
+
+  final CallService callService;
+  final bool isDesktop;
+  final VoidCallback onSelectMic;
+  final VoidCallback onSelectSpeaker;
+  final VoidCallback onSelectCombinedAudio;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+      child: SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 20),
+                decoration: BoxDecoration(
+                  color: colorScheme.onSurfaceVariant.withOpacity(0.4),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            Text(
+              'Audio',
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 16),
+            StreamBuilder<bool>(
+              stream: callService.micStateStream,
+              initialData: true,
+              builder: (context, snapshot) {
+                final micOn = snapshot.data ?? true;
+                return ListTile(
+                  leading: Icon(micOn ? Icons.mic : Icons.mic_off,
+                      color: micOn ? null : Colors.red),
+                  title: const Text('Microphone'),
+                  subtitle: Text(micOn ? 'On' : 'Muted'),
+                  trailing: Switch(
+                    value: micOn,
+                    onChanged: (_) => callService.toggleMic(),
+                  ),
+                );
+              },
+            ),
+            StreamBuilder<bool>(
+              stream: callService.speakerStateStream,
+              initialData: true,
+              builder: (context, snapshot) {
+                final speakerOn = snapshot.data ?? true;
+                return ListTile(
+                  leading: Icon(
+                    speakerOn ? Icons.volume_up : Icons.volume_off,
+                    color: speakerOn ? null : Colors.red,
+                  ),
+                  title: const Text('Speaker'),
+                  subtitle: Text(speakerOn ? 'On' : 'Muted'),
+                  trailing: Switch(
+                    value: speakerOn,
+                    onChanged: (_) => callService.toggleSpeakerMute(),
+                  ),
+                );
+              },
+            ),
+            const Divider(height: 24),
+            if (isDesktop) ...[
+              ListTile(
+                leading: const Icon(Icons.mic),
+                title: const Text('Microphone device'),
+                subtitle: const Text('Choose input device'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () {
+                  Navigator.pop(context);
+                  onSelectMic();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.volume_up),
+                title: const Text('Speaker device'),
+                subtitle: const Text('Choose output device'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () {
+                  Navigator.pop(context);
+                  onSelectSpeaker();
+                },
+              ),
+            ] else ...[
+              ListTile(
+                leading: const Icon(Icons.volume_up),
+                title: const Text('Audio device'),
+                subtitle: const Text('Choose microphone or speaker'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () {
+                  Navigator.pop(context);
+                  onSelectCombinedAudio();
+                },
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }

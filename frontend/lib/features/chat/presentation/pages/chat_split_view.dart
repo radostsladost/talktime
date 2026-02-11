@@ -12,6 +12,8 @@ import 'package:talktime/features/chat/presentation/pages/message_list_page.dart
 import 'package:talktime/features/chat/presentation/pages/create_conversation.dart';
 import 'package:talktime/features/chat/presentation/pages/create_group_chat.dart';
 import 'package:talktime/features/saved_messages/presentation/pages/saved_messages_page.dart';
+import 'package:talktime/features/call/data/incoming_call_manager.dart';
+import 'package:talktime/features/chat/data/conversation_service.dart';
 import 'package:talktime/features/settings/presentation/pages/settings_page.dart';
 import 'package:talktime/shared/models/conversation.dart';
 import 'package:talktime/shared/models/message.dart';
@@ -45,6 +47,8 @@ class _ChatSplitViewState extends State<ChatSplitView>
   Conversation? _callConversation;
   StreamSubscription<CallState>? _callStateSubscription;
   TabController? _callPanelTabController;
+  // When user accepts an incoming call on wide screen, open chat+call panel instead of full-screen
+  String? _pendingAcceptedCallRoomId;
 
   void _startCallInPanel(Conversation conversation) {
     setState(() {
@@ -108,6 +112,17 @@ class _ChatSplitViewState extends State<ChatSplitView>
         setState(() => _disposeCallPanel());
       }
     });
+
+    // On wide screen, accept opens chat+call panel instead of full-screen conference
+    IncomingCallManager().setOnCallAccepted((callId, roomId) {
+      if (!mounted) return false;
+      if (MediaQuery.of(context).size.width < 768) return false;
+      if (roomId == null) return false;
+      setState(() {
+        _pendingAcceptedCallRoomId = roomId;
+      });
+      return true;
+    });
   }
 
   @override
@@ -160,6 +175,23 @@ class _ChatSplitViewState extends State<ChatSplitView>
 
   @override
   Widget build(BuildContext context) {
+    // After accepting an incoming call on wide screen, open conversation and call in panel (one-shot)
+    if (_pendingAcceptedCallRoomId != null) {
+      final roomId = _pendingAcceptedCallRoomId!;
+      _pendingAcceptedCallRoomId = null; // clear so we only schedule once
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ConversationService().getConversationById(roomId).then((conv) {
+          if (!mounted) return;
+          setState(() => _startCallInPanel(conv));
+        }).catchError((e) {
+          _logger.e('Failed to load conversation for accepted call: $e');
+          if (!mounted) return;
+          setState(() {});
+        });
+      });
+    }
+
     if (_isWideScreen) {
       return _buildSplitView();
     } else {

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:talktime/core/platform_utils.dart';
 import 'package:talktime/features/profile/presentation/pages/edit_profile_page.dart';
 import 'package:talktime/features/settings/data/settings_service.dart';
+import 'package:talktime/features/settings/presentation/pages/hotkeys_settings_page.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -72,6 +74,22 @@ class _SettingsPageState extends State<SettingsPage> {
                   },
                 ),
                 const Divider(height: 1),
+                if (isDesktop) ...[
+                  ListTile(
+                    leading: const Icon(Icons.keyboard),
+                    title: const Text('Shortcuts'),
+                    subtitle: const Text('Global hotkeys for calls'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (context) => const HotkeysSettingsPage(),
+                        ),
+                      );
+                    },
+                  ),
+                  const Divider(height: 1),
+                ],
                 const SizedBox(height: 8),
 
                 // --- Appearance Section ---

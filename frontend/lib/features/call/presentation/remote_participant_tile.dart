@@ -11,6 +11,8 @@ class RemoteParticipantTile extends StatefulWidget {
   final MediaStream stream;
   final Function(String, bool)? onParticipantTap;
   final bool? fitInRect;
+  /// When set, routes this participant's audio to the given output device (e.g. speaker).
+  final String? speakerDeviceId;
 
   const RemoteParticipantTile({
     super.key,
@@ -19,6 +21,7 @@ class RemoteParticipantTile extends StatefulWidget {
     required this.stream,
     this.onParticipantTap,
     this.fitInRect,
+    this.speakerDeviceId,
   });
 
   @override
@@ -44,6 +47,11 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
   Future<void> _initRenderer() async {
     await _renderer.initialize();
     _renderer.srcObject = widget.stream;
+    if (widget.speakerDeviceId != null) {
+      try {
+        await _renderer.audioOutput(widget.speakerDeviceId!);
+      } catch (_) {}
+    }
     if (mounted) {
       setState(() {
         _isRendererReady = true;
@@ -130,6 +138,10 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
   @override
   void didUpdateWidget(covariant RemoteParticipantTile oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.speakerDeviceId != widget.speakerDeviceId &&
+        widget.speakerDeviceId != null) {
+      _renderer.audioOutput(widget.speakerDeviceId!).catchError((_) {});
+    }
     // If the stream reference changes (rare, but possible), update the renderer
     if (oldWidget.stream.id != widget.stream.id) {
       // Dispose old stream listeners

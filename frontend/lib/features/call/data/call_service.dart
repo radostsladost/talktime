@@ -48,9 +48,13 @@ class CallService {
   final _micStateController = StreamController<bool>.broadcast();
   final _camStateController = StreamController<bool>.broadcast();
   final _isScreenSharingController = StreamController<bool>.broadcast();
+  final _speakerStateController = StreamController<bool>.broadcast();
+  final _speakerDeviceIdController = StreamController<String?>.broadcast();
 
   // Public Getters
   Stream<bool> get isScreenSharing => _isScreenSharingController.stream;
+  Stream<bool> get speakerStateStream => _speakerStateController.stream;
+  Stream<String?> get speakerDeviceIdStream => _speakerDeviceIdController.stream;
   bool get isScreenSharingValue => _isScreenSharing;
   Stream<CallState> get callStateStream => _stateController.stream;
   Stream<MediaStream?> get localStreamStream => _localStreamController.stream;
@@ -68,11 +72,16 @@ class CallService {
   /// Room/conversation id of the current call, if any.
   String? get currentRoomId => _currentRoomId;
   Map<String, UserInfo> get participantInfo => _participantInfo;
+  bool get isSpeakerMuted => _isSpeakerMuted;
+  bool get isMuted => _isMuted;
+  String? get speakerDeviceId => _speakerDeviceId;
 
   String? _currentRoomId;
   bool _isMuted = false;
   bool _isCameraOff = true;
   bool _isScreenSharing = false;
+  bool _isSpeakerMuted = false;
+  String? _speakerDeviceId;
   Timer? _timer;
   User? _currentUser;
 
@@ -557,6 +566,31 @@ class CallService {
     }
   }
 
+  /// Toggle speaker (remote audio playback) mute. When muted, remote audio
+  /// tracks are disabled so no sound is heard.
+  void toggleSpeakerMute() {
+    _isSpeakerMuted = !_isSpeakerMuted;
+    _applySpeakerMuteToRemoteStreams();
+    _speakerStateController.add(!_isSpeakerMuted);
+    _logger.i('Speaker ${_isSpeakerMuted ? "muted" : "unmuted"}');
+  }
+
+  void _applySpeakerMuteToRemoteStreams() {
+    for (final stream in _remoteStreams.values) {
+      for (final track in stream.getAudioTracks()) {
+        track.enabled = !_isSpeakerMuted;
+      }
+    }
+  }
+
+  /// Set the audio output device (speaker) for remote playback.
+  /// The UI should call [RTCVideoRenderer.audioOutput(deviceId)] when this changes.
+  void setSpeakerDevice(String? deviceId) {
+    _speakerDeviceId = deviceId;
+    _speakerDeviceIdController.add(deviceId);
+    _logger.i('Speaker device set to: $deviceId');
+  }
+
   /// Switch the audio input device (microphone) to the given [deviceId].
   /// Replaces the audio track in the local stream and all peer connections.
   Future<void> changeAudioDevice(String deviceId) async {
@@ -711,7 +745,12 @@ class CallService {
       if (event.streams.isNotEmpty) {
         _logger.i('Received remote stream ${event.streams.firstOrNull?.id}');
         // Store only the first/primary stream for this participant
-        _remoteStreams[participantId] = event.streams.first;
+        final stream = event.streams.first;
+        _remoteStreams[participantId] = stream;
+        // Apply current speaker mute state to new stream
+        for (final track in stream.getAudioTracks()) {
+          track.enabled = !_isSpeakerMuted;
+        }
         // Notify UI
         _remoteStreamsController.add(Map.from(_remoteStreams));
       } else {

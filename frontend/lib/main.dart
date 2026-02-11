@@ -23,6 +23,7 @@ import 'package:logger/logger.dart';
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:talktime/features/call/presentation/pages/conference_page.dart';
+import 'package:talktime/core/desktop/desktop_services.dart';
 import 'package:talktime/features/call/data/call_service.dart';
 import 'firebase_options.dart';
 
@@ -34,6 +35,9 @@ Future<void> main() async {
     Logger().e("Firebase exception: $error", error: error);
   });
   IncomingCallManager().initialize(navigatorKey);
+
+  // Desktop: global hotkeys + system tray (no-op on web/mobile)
+  await initDesktopServices();
 
   runApp(const MyApp());
 }
@@ -118,16 +122,21 @@ Future<void> initFirebaseServices() async {
           }
           break;
         case Event.actionCallDecline:
-          // User declined the incoming call
+          // User declined the incoming call (e.g. from native lock-screen UI)
           var declineData = CallKitParams.fromJson(
             jsonDecode(jsonEncode(event.body as Map<dynamic, dynamic>)),
           );
           Logger().i('Call declined: ${declineData.id}');
-          // The CallKit UI will automatically be dismissed
 
           try {
             IncomingCallManager().dismissIncomingCall(declineData.id!);
           } catch (_) {}
+          // End the native call so the system UI is dismissed
+          if (declineData.id != null) {
+            FlutterCallkitIncoming.endCall(declineData.id!).catchError((e) {
+              Logger().e('Error ending CallKit call on decline: $e');
+            });
+          }
           break;
         case Event.actionCallEnded:
           // Call ended

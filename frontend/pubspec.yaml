@@ -44,6 +44,9 @@ dependencies:
   flutter_callkit_incoming: ^3.0.0
   pip: ^0.0.3
   web: ^1.1.1  # Cookie backup for auth tokens on web
+  # Desktop-only (no-op on other platforms when not initialized)
+  hotkey_manager: ^0.2.3
+  # tray_manager removed: Linux build fails (deprecated app_indicator). Re-add when plugin migrates to libnativeapi.
 
 dev_dependencies:
   flutter_test:

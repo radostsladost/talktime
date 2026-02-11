@@ -1,5 +1,9 @@
 import 'dart:async';
+import 'dart:io';
+
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:logger/logger.dart';
 import 'package:talktime/features/call/data/signaling_service.dart';
 import 'package:talktime/features/call/presentation/pages/incoming_call_page.dart';
@@ -46,8 +50,9 @@ class IncomingCallManager {
   String? _currentCallId;
   Timer? _autoDeclineTimer;
 
-  // Callbacks for external handling
-  Function(String callId, String? roomId)? _onCallAccepted;
+  // Callbacks for external handling.
+  // If onCallAccepted returns true, the manager will NOT push ConferencePage (caller handles navigation).
+  bool Function(String callId, String? roomId)? _onCallAccepted;
   Function(String callId)? _onCallDeclined;
 
   /// Initialize the manager with a navigator key
@@ -57,8 +62,9 @@ class IncomingCallManager {
     _logger.i('IncomingCallManager initialized');
   }
 
-  /// Set callback for when a call is accepted
-  void setOnCallAccepted(Function(String callId, String? roomId) callback) {
+  /// Set callback for when a call is accepted.
+  /// Return true to handle navigation yourself (e.g. open chat+call panel on wide screen); false to use default full-screen conference.
+  void setOnCallAccepted(bool Function(String callId, String? roomId) callback) {
     _onCallAccepted = callback;
   }
 
@@ -140,17 +146,25 @@ class IncomingCallManager {
   }
 
   /// Handle accepting the call
-  void _handleAccept(String callId, String? roomId) {
+  void _handleAccept(String callId, String? roomId) async {
     _logger.i('Call accepted: $callId');
     _cleanup();
+
+    // Tell backend we accepted
+    try {
+      await SignalingService().acceptCall(callId);
+    } catch (e) {
+      _logger.e('Failed to accept call via signaling: $e');
+    }
 
     // Pop the incoming call screen
     if (_navigatorKey?.currentState?.canPop() ?? false) {
       _navigatorKey!.currentState!.pop();
     }
 
-    // Navigate to conference page
-    if (roomId != null && _navigatorKey?.currentState != null) {
+    // Let app handle navigation (e.g. open chat+call panel on wide screen); if not handled, push full-screen conference.
+    final handled = _onCallAccepted?.call(callId, roomId) ?? false;
+    if (!handled && roomId != null && _navigatorKey?.currentState != null) {
       _navigatorKey!.currentState!.push(
         MaterialPageRoute(
           builder: (context) =>
@@ -158,15 +172,28 @@ class IncomingCallManager {
         ),
       );
     }
-
-    // Notify external listeners
-    _onCallAccepted?.call(callId, roomId);
   }
 
   /// Handle declining the call
-  void _handleDecline(String callId) {
+  void _handleDecline(String callId) async {
     _logger.i('Call declined: $callId');
     _cleanup();
+
+    // Reject via signaling so the caller is notified
+    try {
+      await SignalingService().rejectCall(callId, 'declined');
+    } catch (e) {
+      _logger.e('Failed to reject call via signaling: $e');
+    }
+
+    // End native call UI on phone so the system dismisses the call
+    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+      try {
+        await FlutterCallkitIncoming.endCall(callId);
+      } catch (e) {
+        _logger.e('Failed to end CallKit call: $e');
+      }
+    }
 
     // Pop the incoming call screen
     if (_navigatorKey?.currentState?.canPop() ?? false) {
