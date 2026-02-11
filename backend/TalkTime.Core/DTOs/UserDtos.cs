@@ -72,5 +72,8 @@ public record RevokeTokenRequest(
 public record RegisterFirebaseTokenRequest(
     string Token,
     string? DeviceId,
-    string? DeviceInfo
+    string? DeviceInfo,
+    bool? MessagePreview = true
 );
+
+public record DeleteFirebaseTokenRequest(string Token);

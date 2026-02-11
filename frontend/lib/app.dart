@@ -1,5 +1,6 @@
 // lib/main.dart
 import 'dart:async';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:talktime/core/global_key.dart';
 import 'package:talktime/core/websocket/websocket_manager.dart';
@@ -106,6 +107,7 @@ class SplashScreen extends StatefulWidget {
 
 class _SplashScreenState extends State<SplashScreen> {
   final _authService = AuthService();
+  final _settingsService = SettingsService();
 
   @override
   void initState() {
@@ -125,9 +127,19 @@ class _SplashScreenState extends State<SplashScreen> {
       if (!mounted) return;
 
       if (isAuthenticated) {
-        // Register Firebase token for push notifications
+        // Register Firebase token only if notifications are enabled (respects user choice).
+        // On web (e.g. iOS Safari), do NOT request permission on startup: Safari blocks
+        // notification permission unless it's triggered by a direct user gesture. Users can
+        // enable notifications via Settings → Enable Notifications (that tap counts as gesture).
         try {
-          await _authService.registerFirebaseToken();
+          if (!kIsWeb) {
+            final notificationsEnabled = await _settingsService.getNotificationsEnabled();
+            if (notificationsEnabled) {
+              final messagePreview = await _settingsService.getMessagePreview();
+              await _authService.registerFirebaseToken(messagePreview: messagePreview);
+            }
+          }
+          // On web, registerFirebaseToken() is called when user taps "Enable Notifications" in Settings.
 
           await WebSocketManager().initialize();
           

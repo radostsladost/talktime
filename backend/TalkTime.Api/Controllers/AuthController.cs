@@ -431,7 +431,7 @@ public class AuthController : ControllerBase
                 return BadRequest(new { message = "Firebase token is required" });
             }
 
-            await SaveFirebaseTokenAsync(userId, request.Token, request.DeviceId, request.DeviceInfo);
+            await SaveFirebaseTokenAsync(userId, request.Token, request.DeviceId, request.DeviceInfo, request.MessagePreview ?? true);
 
             _logger.LogInformation("Firebase token registered for user {UserId}", userId);
 
@@ -445,9 +445,46 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
+    /// Remove Firebase token for this device (disables push notifications for the current device).
+    /// </summary>
+    [HttpDelete("firebase-token")]
+    [Authorize]
+    public async Task<ActionResult> DeleteFirebaseToken([FromBody] DeleteFirebaseTokenRequest request)
+    {
+        try
+        {
+            var userId = User.FindFirst("userId")?.Value;
+
+            if (string.IsNullOrEmpty(userId))
+            {
+                return BadRequest(new { message = "User not found in token" });
+            }
+
+            if (string.IsNullOrWhiteSpace(request.Token))
+            {
+                return BadRequest(new { message = "Firebase token is required" });
+            }
+
+            var deleted = await _firebaseTokenRepository.DeleteByUserIdAndTokenAsync(userId, request.Token);
+            if (!deleted)
+            {
+                return NotFound(new { message = "Token not found or already removed" });
+            }
+
+            _logger.LogInformation("Firebase token removed for user {UserId}", userId);
+            return Ok(new { message = "Notifications disabled for this device" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error removing Firebase token");
+            return StatusCode(500, new { message = "An error occurred" });
+        }
+    }
+
+    /// <summary>
     /// Save Firebase token for a user
     /// </summary>
-    private async Task SaveFirebaseTokenAsync(string userId, string token, string? deviceId, string? deviceInfo)
+    private async Task SaveFirebaseTokenAsync(string userId, string token, string? deviceId, string? deviceInfo, bool messagePreview = true)
     {
         try
         {
@@ -467,6 +504,7 @@ public class AuthController : ControllerBase
                 Token = token,
                 DeviceId = deviceId,
                 DeviceInfo = deviceInfo,
+                MessagePreview = messagePreview,
                 CreatedAt = DateTime.UtcNow,
                 LastUsedAt = DateTime.UtcNow
             };

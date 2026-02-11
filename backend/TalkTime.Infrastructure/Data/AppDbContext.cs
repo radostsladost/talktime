@@ -311,6 +311,10 @@ public class AppDbContext : DbContext
             entity.Property(e => e.LastUsedAt)
                 .HasColumnName("last_used_at");
 
+            entity.Property(e => e.MessagePreview)
+                .HasColumnName("message_preview")
+                .HasDefaultValue(true);
+
             // Relationships
             entity.HasOne(e => e.User)
                 .WithMany()

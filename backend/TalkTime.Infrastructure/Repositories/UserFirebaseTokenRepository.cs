@@ -29,6 +29,7 @@ public class UserFirebaseTokenRepository : IUserFirebaseTokenRepository
             // Update existing token
             existing.Token = token.Token;
             existing.DeviceInfo = token.DeviceInfo;
+            existing.MessagePreview = token.MessagePreview;
             existing.LastUsedAt = DateTime.UtcNow;
             await context.SaveChangesAsync();
             return existing;
@@ -64,6 +65,18 @@ public class UserFirebaseTokenRepository : IUserFirebaseTokenRepository
             context.UserFirebaseTokens.Remove(token);
             await context.SaveChangesAsync();
         }
+    }
+
+    public async Task<bool> DeleteByUserIdAndTokenAsync(string userId, string token)
+    {
+        await using var context = await _contextFactory.CreateDbContextAsync();
+        var entity = await context.UserFirebaseTokens
+            .FirstOrDefaultAsync(t => t.UserId == userId && t.Token == token);
+        if (entity == null)
+            return false;
+        context.UserFirebaseTokens.Remove(entity);
+        await context.SaveChangesAsync();
+        return true;
     }
 
     public async Task DeleteAllByUserIdAsync(string userId)

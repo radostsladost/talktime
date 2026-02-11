@@ -1,4 +1,3 @@
-using System.Reflection;
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
@@ -151,12 +150,7 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-// Serve static files for uploaded media
-var uploadsPath = Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), "wwwroot", "uploads");
-if (!Directory.Exists(uploadsPath))
-{
-    Directory.CreateDirectory(uploadsPath);
-}
+// Serve static files from wwwroot (uploads/images/... served at /uploads/images/...)
 app.UseStaticFiles();
 
 // Use CORS before authentication

@@ -112,22 +112,61 @@ class MessageService {
     }
   }
 
-  /// Syncs new messages for a specific conversation from backend to local storage
-  /// Call this when you want to sync messages for a specific conversation
+  static const int _messagesPageSize = 50;
+
+  /// Fetches one page of messages from the API for a conversation.
+  Future<List<Message>> _fetchMessagesPage(String conversationId, {int skip = 0, int take = _messagesPageSize}) async {
+    final response = await _apiClient.get(
+      '${ApiConstants.messages}?conversationId=$conversationId&skip=$skip&take=$take',
+    );
+    final List messagesJson = response['data'] as List;
+    return messagesJson
+        .map((json) => Message.fromJson(json as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// Syncs all messages for a conversation from backend to local storage using pagination.
+  /// Call when opening a chat and on a timer to keep local DB in sync.
+  Future<void> syncConversationMessagesWithPagination(String conversationId) async {
+    try {
+      await AuthService().refreshTokenIfNeeded();
+      int skip = 0;
+      int totalSaved = 0;
+      while (true) {
+        final page = await _fetchMessagesPage(conversationId, skip: skip, take: _messagesPageSize);
+        if (page.isEmpty) break;
+
+        final dbMessages = page
+            .map(
+              (message) => DbModels.Message()
+                ..externalId = message.id
+                ..conversationId = message.conversationId
+                ..senderId = message.sender!.id
+                ..content = message.content
+                ..type = getMessageType(message.type)
+                ..sentAt = DateTime.parse(message.sentAt).millisecondsSinceEpoch
+                ..mediaUrl = message.mediaUrl,
+            )
+            .toList();
+        await _saveMessagesAndUpdateLastMessageAt(dbMessages);
+        totalSaved += dbMessages.length;
+        if (page.length < _messagesPageSize) break;
+        skip += _messagesPageSize;
+      }
+      if (totalSaved > 0) {
+        _logger.i('Synced $totalSaved messages for conversation $conversationId (paginated)');
+      }
+    } catch (e) {
+      _logger.e('Error syncing messages for conversation $conversationId: $e');
+    }
+  }
+
+  /// Syncs one page of messages for a conversation (legacy / simple sync).
   Future<void> syncConversationMessages(String conversationId) async {
     try {
-      _logger.i('Syncing messages for conversation: $conversationId');
-
-      // 1. Fetch from API
-      final response = await _apiClient.get(
-        '${ApiConstants.messages}?conversationId=$conversationId',
-      );
-      final List messagesJson = response['data'] as List;
-
-      if (messagesJson.isEmpty) return;
-
-      final messages = messagesJson
-          .map((json) => Message.fromJson(json as Map<String, dynamic>))
+      final page = await _fetchMessagesPage(conversationId, skip: 0, take: _messagesPageSize);
+      if (page.isEmpty) return;
+      final dbMessages = page
           .map(
             (message) => DbModels.Message()
               ..externalId = message.id
@@ -139,15 +178,9 @@ class MessageService {
               ..mediaUrl = message.mediaUrl,
           )
           .toList();
-
-      await _saveMessagesAndUpdateLastMessageAt(messages);
-
-      _logger.i(
-        'Synced and saved ${messages.length} messages for conversation $conversationId',
-      );
+      await _saveMessagesAndUpdateLastMessageAt(dbMessages);
     } catch (e) {
       _logger.e('Error syncing messages for conversation $conversationId: $e');
-      // Do not rethrow; we don't want to crash the syncing cycle usually.
     }
   }
 

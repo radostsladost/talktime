@@ -5,10 +5,9 @@ import 'package:flutter/services.dart';
 import 'package:hotkey_manager/hotkey_manager.dart';
 import 'package:logger/logger.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:system_tray/system_tray.dart';
 import 'package:talktime/features/call/data/call_service.dart';
-
-// Tray removed: tray_manager fails to build on Linux (deprecated app_indicator API).
-// Re-add when the plugin completes migration to libnativeapi.
+import 'package:window_manager/window_manager.dart';
 
 final _logger = Logger();
 
@@ -55,15 +54,72 @@ Future<void> initDesktopServices() async {
       'Global shortcuts are not available on Wayland (keybinder is X11-only). '
       'Run with GDK_BACKEND=x11 or use an X11 session to use shortcuts.',
     );
-    return;
+    // Still try to init tray on Linux if not Wayland
+  } else {
+    try {
+      await hotKeyManager.unregisterAll();
+      await _registerHotKeys();
+    } catch (e, st) {
+      _logger.e('Desktop services init failed: $e', error: e, stackTrace: st);
+    }
   }
 
-  try {
-    await hotKeyManager.unregisterAll();
-    await _registerHotKeys();
-  } catch (e, st) {
-    _logger.e('Desktop services init failed: $e', error: e, stackTrace: st);
+  // System tray: Windows and macOS (Linux needs appindicator, may fail to build)
+  if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+    try {
+      await _initSystemTray();
+    } catch (e, st) {
+      _logger.e('System tray init failed: $e', error: e, stackTrace: st);
+    }
   }
+}
+
+Future<void> _initSystemTray() async {
+  final iconPath = Platform.isWindows
+      ? 'assets/app_icon.ico'
+      : 'assets/app_icon.png';
+  final SystemTray systemTray = SystemTray();
+
+  await systemTray.initSystemTray(
+    title: 'TalkTime',
+    iconPath: iconPath,
+    toolTip: 'TalkTime',
+  );
+
+  final Menu menu = Menu();
+  await menu.buildFrom([
+    MenuItemLabel(
+      label: 'Show TalkTime',
+      onClicked: (_) async {
+        try {
+          await windowManager.show();
+          await windowManager.focus();
+        } catch (e) {
+          _logger.w('Failed to show window: $e');
+        }
+      },
+    ),
+    MenuItemLabel(label: 'Quit', onClicked: (_) => exit(0)),
+  ]);
+  await systemTray.setContextMenu(menu);
+
+  systemTray.registerSystemTrayEventHandler((eventName) {
+    if (eventName == kSystemTrayEventClick) {
+      if (Platform.isWindows) {
+        windowManager.show().then((_) => windowManager.focus());
+      } else {
+        systemTray.popUpContextMenu();
+      }
+    } else if (eventName == kSystemTrayEventRightClick) {
+      if (Platform.isWindows) {
+        systemTray.popUpContextMenu();
+      } else {
+        windowManager.show().then((_) => windowManager.focus());
+      }
+    }
+  });
+
+  _logger.i('System tray initialized');
 }
 
 /// Call after user changes hotkeys in settings so new bindings take effect.

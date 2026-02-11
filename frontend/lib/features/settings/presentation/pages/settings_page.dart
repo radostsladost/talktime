@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:talktime/core/platform_utils.dart';
+import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/features/profile/presentation/pages/edit_profile_page.dart';
 import 'package:talktime/features/settings/data/settings_service.dart';
 import 'package:talktime/features/settings/presentation/pages/hotkeys_settings_page.dart';
@@ -17,8 +19,6 @@ class _SettingsPageState extends State<SettingsPage> {
   ThemeMode _themeMode = ThemeMode.system;
   Color _colorSeed = Colors.blue;
   bool _notificationsEnabled = true;
-  bool _notificationSound = true;
-  bool _notificationVibration = true;
   bool _messagePreview = true;
   bool _isLoading = true;
 
@@ -33,9 +33,6 @@ class _SettingsPageState extends State<SettingsPage> {
     final colorSeed = await _settingsService.getColorSeed();
     final notificationsEnabled = await _settingsService
         .getNotificationsEnabled();
-    final notificationSound = await _settingsService.getNotificationSound();
-    final notificationVibration = await _settingsService
-        .getNotificationVibration();
     final messagePreview = await _settingsService.getMessagePreview();
 
     if (!mounted) return;
@@ -43,8 +40,6 @@ class _SettingsPageState extends State<SettingsPage> {
       _themeMode = themeMode;
       _colorSeed = colorSeed;
       _notificationsEnabled = notificationsEnabled;
-      _notificationSound = notificationSound;
-      _notificationVibration = notificationVibration;
       _messagePreview = messagePreview;
       _isLoading = false;
     });
@@ -106,36 +101,34 @@ class _SettingsPageState extends State<SettingsPage> {
                   subtitle: const Text('Receive push notifications'),
                   secondary: const Icon(Icons.notifications_outlined),
                   value: _notificationsEnabled,
-                  onChanged: (value) {
+                  onChanged: (value) async {
                     setState(() => _notificationsEnabled = value);
-                    _settingsService.setNotificationsEnabled(value);
+                    await _settingsService.setNotificationsEnabled(value);
+                    if (value) {
+                      // Re-register token and respect current message preview
+                      await AuthService().registerFirebaseToken(
+                        messagePreview: _messagePreview,
+                      );
+                    } else {
+                      await AuthService().deleteFirebaseToken();
+                    }
                   },
                 ),
                 const Divider(height: 1),
-                SwitchListTile(
+                ListTile(
+                  leading: const Icon(Icons.volume_up_outlined),
                   title: const Text('Notification Sound'),
-                  subtitle: const Text('Play sound for new messages'),
-                  secondary: const Icon(Icons.volume_up_outlined),
-                  value: _notificationSound,
-                  onChanged: _notificationsEnabled
-                      ? (value) {
-                          setState(() => _notificationSound = value);
-                          _settingsService.setNotificationSound(value);
-                        }
-                      : null,
+                  subtitle: const Text('Managed in system settings'),
+                  trailing: const Icon(Icons.open_in_new, size: 18),
+                  onTap: () => openAppSettings(),
                 ),
                 const Divider(height: 1),
-                SwitchListTile(
+                ListTile(
+                  leading: const Icon(Icons.vibration),
                   title: const Text('Vibration'),
-                  subtitle: const Text('Vibrate for new messages'),
-                  secondary: const Icon(Icons.vibration),
-                  value: _notificationVibration,
-                  onChanged: _notificationsEnabled
-                      ? (value) {
-                          setState(() => _notificationVibration = value);
-                          _settingsService.setNotificationVibration(value);
-                        }
-                      : null,
+                  subtitle: const Text('Vibrate for new messages — managed in system settings'),
+                  trailing: const Icon(Icons.open_in_new, size: 18),
+                  onTap: () => openAppSettings(),
                 ),
                 const Divider(height: 1),
                 SwitchListTile(
@@ -144,9 +137,12 @@ class _SettingsPageState extends State<SettingsPage> {
                   secondary: const Icon(Icons.chat_bubble_outline),
                   value: _messagePreview,
                   onChanged: _notificationsEnabled
-                      ? (value) {
+                      ? (value) async {
                           setState(() => _messagePreview = value);
-                          _settingsService.setMessagePreview(value);
+                          await _settingsService.setMessagePreview(value);
+                          await AuthService().registerFirebaseToken(
+                            messagePreview: value,
+                          );
                         }
                       : null,
                 ),

@@ -38,9 +38,10 @@ public class MessagesController : ControllerBase
     }
 
     /// <summary>
-    /// Get messages for a conversation (paginated)
+    /// Get all messages for a conversation with pagination. Use skip/take for paging.
     /// </summary>
     [HttpGet]
+    [HttpGet("messages")]
     public async Task<ActionResult<MessagesResponseDto>> GetMessages(
         [FromQuery] string conversationId,
         [FromQuery] int skip = 0,
@@ -191,7 +192,22 @@ public class MessagesController : ControllerBase
                     var recipient = await _userRepository.GetByIdAsync(recipientId);
                     if (recipient != null)
                     {
-                        // Send push notification
+                        // Build preview body (per-token MessagePreview is applied in NotificationsService)
+                        var previewBody = message.Type == MessageType.Text
+                            ? (string.IsNullOrEmpty(message.EncryptedContent)
+                                ? "New message"
+                                : message.EncryptedContent.Length > 120
+                                    ? message.EncryptedContent[..117] + "..."
+                                    : message.EncryptedContent)
+                            : message.Type switch
+                            {
+                                MessageType.Image => "Sent an image",
+                                MessageType.Video => "Sent a video",
+                                MessageType.Audio => "Sent a voice message",
+                                MessageType.File => "Sent a file",
+                                _ => "New message"
+                            };
+
                         var notificationData = System.Text.Json.JsonSerializer.Serialize(new
                         {
                             type = "message",
@@ -204,7 +220,7 @@ public class MessagesController : ControllerBase
                         await _notificationsService.SendNotificationAsync(
                             recipientId,
                             sender.Username ?? "New message",
-                            "You have a new message",
+                            previewBody,
                             sender.AvatarUrl,
                             notificationData
                         );
@@ -227,10 +243,11 @@ public class MessagesController : ControllerBase
     }
 
     /// <summary>
-    /// Get pending messages for the current user (messages sent while offline)
+    /// Get pending (unread) messages for the current user. Optional conversationId to filter by chat.
+    /// Each user has their own read state; marking as delivered only affects the current user.
     /// </summary>
     [HttpGet("pending")]
-    public async Task<ActionResult<MessagesResponseDto>> GetPendingMessages()
+    public async Task<ActionResult<MessagesResponseDto>> GetPendingMessages([FromQuery] string? conversationId = null)
     {
         try
         {
@@ -241,7 +258,12 @@ public class MessagesController : ControllerBase
                 return Unauthorized(new { message = "User not authenticated" });
             }
 
-            var messages = await _messageRepository.GetPendingMessagesForUserAsync(userId);
+            if (!string.IsNullOrEmpty(conversationId) && !await _conversationRepository.IsParticipantAsync(conversationId, userId))
+            {
+                return Forbid();
+            }
+
+            var messages = await _messageRepository.GetPendingMessagesForUserAsync(userId, conversationId);
 
             // Note: Reactions are fetched separately since messages are ephemeral
             var messageDtos = messages.Select(m => new MessageDto(

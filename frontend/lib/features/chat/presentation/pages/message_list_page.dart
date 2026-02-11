@@ -94,14 +94,14 @@ class _MessageListPageState extends State<MessageListPage> {
       }),
     );
 
-    // Start periodic sync for this conversation
+    // Start periodic sync: fetch all messages with pagination + pending
     _syncTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (!mounted) return;
-      _syncMessages();
+      _syncMessagesWithPaginationAndPending();
     });
 
-    // Sync immediately when page loads
-    _syncMessages();
+    // On open: sync full history with pagination and pending, then load from local
+    _syncMessagesWithPaginationAndPending();
 
     WebSocketManager()
         .initialize()
@@ -271,21 +271,27 @@ class _MessageListPageState extends State<MessageListPage> {
     }
   }
 
-  Future<void> _syncMessages() async {
+  /// Syncs chat from backend: paginated messages to local DB, then pending (unread) for this user, then reload UI from local.
+  Future<void> _syncMessagesWithPaginationAndPending() async {
+    await _messageService
+        .syncConversationMessagesWithPagination(widget.conversation.id)
+        .catchError((error) {
+          _logger.e('Error syncing messages (paginated): $error');
+        });
     await _messageService
         .syncPendingMessages(widget.conversation.id)
         .catchError((error) {
-          _logger.e('Error syncing messages: $error');
+          _logger.e('Error syncing pending messages: $error');
         });
 
+    if (!mounted) return;
     _messageService.getMessages(widget.conversation.id, take: _upperBound).then(
       (messages) async {
-        // Only update if messages have actually changed
+        if (!mounted) return;
         if (!listEquals(_messages, messages)) {
           setState(() {
             _messages = messages;
           });
-          // Fetch reactions for new messages
           final newMessageIds = messages
               .where((m) => !_messageReactions.containsKey(m.id))
               .map((m) => m.id)
@@ -300,12 +306,17 @@ class _MessageListPageState extends State<MessageListPage> {
     ConversationService().getConversationById(widget.conversation.id).then((
       conversation,
     ) {
+      if (!mounted) return;
       setState(() {
         for (var participant in conversation.participants) {
           _chatParticipants[participant.id] = participant;
         }
       });
     });
+  }
+
+  Future<void> _syncMessages() async {
+    await _syncMessagesWithPaginationAndPending();
   }
 
   @override

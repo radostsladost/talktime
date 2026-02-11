@@ -50,8 +50,8 @@ class AuthService {
     }
   }
 
-  /// Register Firebase token with the backend
-  Future<void> _registerFirebaseToken(String? token) async {
+  /// Register Firebase token with the backend. [messagePreview] is sent when provided (e.g. from Settings).
+  Future<void> _registerFirebaseToken(String? token, {bool? messagePreview}) async {
     if (token == null || token.isEmpty) {
       return;
     }
@@ -59,9 +59,18 @@ class AuthService {
     try {
       var (deviceId, deviceInfo) = await getDeviceInfo();
 
+      final body = <String, dynamic>{
+        'token': token,
+        'deviceId': deviceId,
+        'deviceInfo': deviceInfo,
+      };
+      if (messagePreview != null) {
+        body['messagePreview'] = messagePreview;
+      }
+
       await _apiClient.post(
         ApiConstants.registerFirebaseToken,
-        body: {'token': token, 'deviceId': deviceId, 'deviceInfo': deviceInfo},
+        body: body,
         requiresAuth: true,
       );
       Logger().i('Firebase token registered successfully');
@@ -72,6 +81,28 @@ class AuthService {
         stackTrace: stackTrace,
       );
       // Don't throw - this is not critical for login/registration
+    }
+  }
+
+  /// Remove Firebase token for this device (disables push notifications on backend).
+  Future<void> deleteFirebaseToken() async {
+    final token = await _getFcmToken();
+    if (token == null || token.isEmpty) {
+      return;
+    }
+    try {
+      await _apiClient.delete(
+        ApiConstants.deleteFirebaseToken,
+        body: {'token': token},
+        requiresAuth: true,
+      );
+      Logger().i('Firebase token removed');
+    } catch (e, stackTrace) {
+      Logger().e(
+        'Failed to remove Firebase token: $e',
+        error: e,
+        stackTrace: stackTrace,
+      );
     }
   }
 
@@ -292,13 +323,34 @@ class AuthService {
     return await _apiClient.getRefreshToken();
   }
 
-  /// Register Firebase Cloud Messaging token
-  /// Call this when the app is already authenticated and opened
-  Future<void> registerFirebaseToken() async {
+  /// Register Firebase Cloud Messaging token.
+  /// Call when the app is already authenticated. Pass [messagePreview] from Settings when updating preferences.
+  Future<void> registerFirebaseToken({bool? messagePreview}) async {
     final fcmToken = await _getFcmToken();
     if (fcmToken != null) {
-      await _registerFirebaseToken(fcmToken);
+      await _registerFirebaseToken(fcmToken, messagePreview: messagePreview);
     }
+  }
+
+  /// Returns current notification permission status (iOS/Android). Null on web or on error.
+  Future<AuthorizationStatus?> getNotificationPermissionStatus() async {
+    try {
+      final settings =
+          await FirebaseMessaging.instance.getNotificationSettings();
+      return settings.authorizationStatus;
+    } catch (e) {
+      Logger().d('Could not get notification settings: $e');
+      return null;
+    }
+  }
+
+  /// True when notifications are not granted (user should be prompted). Use on iOS to show modal.
+  Future<bool> shouldPromptForNotificationPermission() async {
+    if (kIsWeb) return false;
+    if (!Platform.isIOS) return false;
+    final status = await getNotificationPermissionStatus();
+    return status == AuthorizationStatus.denied ||
+        status == AuthorizationStatus.notDetermined;
   }
 
   Future<(String deviceId, String deviceInfo)> getDeviceInfo() async {

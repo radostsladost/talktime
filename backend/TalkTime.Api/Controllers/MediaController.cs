@@ -65,8 +65,9 @@ public class MediaController : ControllerBase
             var extension = Path.GetExtension(file.FileName);
             var fileName = $"{fileId}{extension}";
 
-            // Create uploads directory if it doesn't exist
-            var uploadsPath = Path.Combine(_environment.ContentRootPath, "uploads", "images");
+            // Save under wwwroot so UseStaticFiles serves them at /uploads/images/...
+            var webRoot = _environment.WebRootPath ?? Path.Combine(_environment.ContentRootPath, "wwwroot");
+            var uploadsPath = Path.Combine(webRoot, "uploads", "images");
             if (!Directory.Exists(uploadsPath))
             {
                 Directory.CreateDirectory(uploadsPath);
@@ -80,13 +81,11 @@ public class MediaController : ControllerBase
                 await file.CopyToAsync(stream);
             }
 
-            // Generate URL
-            var request = HttpContext.Request;
-            var baseUrl = _configuration.GetSection("PublicUrl").Value;
-            // var baseUrl = $"{request.Scheme}://{request.Host}";
+            // URL path for static files: /uploads/images/{fileName} (no api prefix)
+            var baseUrl = _configuration.GetSection("PublicUrl").Value?.TrimEnd('/') ?? $"{HttpContext.Request.Scheme}://{HttpContext.Request.Host}";
             var fileUrl = $"{baseUrl}/uploads/images/{fileName}";
 
-            // Save to database
+            // Save to database (StoragePath is relative to wwwroot for consistency)
             var mediaFile = new MediaFile
             {
                 Id = fileId,
@@ -94,7 +93,7 @@ public class MediaController : ControllerBase
                 FileName = file.FileName,
                 ContentType = file.ContentType,
                 Size = file.Length,
-                StoragePath = $"images/{fileName}",
+                StoragePath = Path.Combine("uploads", "images", fileName).Replace('\\', '/'),
                 Url = fileUrl,
                 CreatedAt = DateTime.UtcNow
             };
@@ -187,8 +186,9 @@ public class MediaController : ControllerBase
                 return Forbid();
             }
 
-            // Delete physical file
-            var filePath = Path.Combine(_environment.ContentRootPath, "uploads", mediaFile.StoragePath);
+            // Delete physical file (stored under wwwroot/uploads/...)
+            var webRoot = _environment.WebRootPath ?? Path.Combine(_environment.ContentRootPath, "wwwroot");
+            var filePath = Path.Combine(webRoot, mediaFile.StoragePath);
             if (System.IO.File.Exists(filePath))
             {
                 System.IO.File.Delete(filePath);

@@ -25,12 +25,28 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:talktime/features/call/presentation/pages/conference_page.dart';
 import 'package:talktime/core/desktop/desktop_services.dart';
 import 'package:talktime/features/call/data/call_service.dart';
+import 'package:window_manager/window_manager.dart';
 import 'firebase_options.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await dotenv.load(fileName: ".env");
+
+  // Desktop: init window_manager so tray can show/focus the window; close button hides to tray
+  if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+    try {
+      await windowManager.ensureInitialized();
+      // Where we have a tray (Windows/macOS), closing the window hides it instead of exiting
+      if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+        await windowManager.setPreventClose(true);
+        windowManager.addListener(_CloseToTrayListener());
+      }
+    } catch (e) {
+      Logger().e('window_manager init failed: $e');
+    }
+  }
+
   initFirebaseServices().catchError((error) {
     Logger().e("Firebase exception: $error", error: error);
   });
@@ -335,7 +351,7 @@ Future<void> handleCall(Map<String, dynamic> data) async {
           // logoUrl: 'https://i.pravatar.cc/100',
           ringtonePath: 'system_ringtone_default',
           backgroundColor: '#152545',
-          backgroundUrl: 'https://v776682.macloud.host:7081/icons/call_bg.jpg',
+          backgroundUrl: 'https://radost.dev/icons/call_bg.jpg',
           actionColor: '#6b80de',
           textColor: '#ffffff',
           incomingCallNotificationChannelName: "Incoming Call",
@@ -361,5 +377,13 @@ Future<void> handleCall(Map<String, dynamic> data) async {
       );
       await FlutterCallkitIncoming.showCallkitIncoming(callKitParams);
     }
+  }
+}
+
+/// Hides the window when user clicks close (X); app stays running in tray.
+class _CloseToTrayListener with WindowListener {
+  @override
+  void onWindowClose() async {
+    await windowManager.hide();
   }
 }

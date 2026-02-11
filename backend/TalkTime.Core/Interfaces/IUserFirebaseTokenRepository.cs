@@ -20,9 +20,14 @@ public interface IUserFirebaseTokenRepository
     Task<UserFirebaseToken?> GetByTokenAsync(string token);
 
     /// <summary>
-    /// Delete a Firebase token
+    /// Delete a Firebase token by id
     /// </summary>
     Task DeleteAsync(string id);
+
+    /// <summary>
+    /// Delete a token by value for a given user (used when user disables notifications on this device).
+    /// </summary>
+    Task<bool> DeleteByUserIdAndTokenAsync(string userId, string token);
 
     /// <summary>
     /// Delete all tokens for a user

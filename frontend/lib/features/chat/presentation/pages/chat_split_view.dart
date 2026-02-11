@@ -1,7 +1,11 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:logger/logger.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:talktime/core/navigation_manager.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/features/call/data/call_service.dart';
@@ -123,6 +127,58 @@ class _ChatSplitViewState extends State<ChatSplitView>
       });
       return true;
     });
+
+    // iOS: show modal if notification permission is not granted
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _maybeShowNotificationPermissionDialog();
+    });
+  }
+
+  Future<void> _maybeShowNotificationPermissionDialog() async {
+    if (kIsWeb || !Platform.isIOS || !mounted) return;
+    final shouldPrompt =
+        await AuthService().shouldPromptForNotificationPermission();
+    if (!shouldPrompt || !mounted) return;
+    final status = await AuthService().getNotificationPermissionStatus();
+    if (status == null || !mounted) return;
+    if (status != AuthorizationStatus.denied &&
+        status != AuthorizationStatus.notDetermined) return;
+
+    if (!mounted) return;
+    final isDenied = status == AuthorizationStatus.denied;
+
+    if (!context.mounted) return;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: Text(
+          isDenied ? 'Notifications are off' : 'Enable notifications',
+        ),
+        content: Text(
+          isDenied
+              ? 'To receive calls and messages when the app is in the background, open Settings and allow notifications for TalkTime.'
+              : 'Allow TalkTime to send you notifications for calls and new messages.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Not now'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              Navigator.of(ctx).pop();
+              if (isDenied) {
+                await openAppSettings();
+              } else {
+                await AuthService().registerFirebaseToken();
+              }
+            },
+            child: Text(isDenied ? 'Open Settings' : 'Enable'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override

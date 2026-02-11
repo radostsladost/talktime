@@ -35,16 +35,19 @@ public class MessageRepository : IMessageRepository
             .ToListAsync();
     }
 
-    public async Task<IEnumerable<Message>> GetPendingMessagesForUserAsync(string userId)
+    public async Task<IEnumerable<Message>> GetPendingMessagesForUserAsync(string userId, string? conversationId = null)
     {
         await using var dbContext = _context.CreateDbContext();
-        // Get messages where this user is a recipient but hasn't received them yet
-        return await dbContext.Messages
+        // Get messages where this user is a recipient but hasn't read them yet (per-user read indicator)
+        var query = dbContext.Messages
             .Include(m => m.Sender)
             .Include(m => m.Deliveries)
-            .Where(m => m.Deliveries.Any(d => d.RecipientId == userId && !d.IsDelivered))
-            .OrderBy(m => m.SentAt)
-            .ToListAsync();
+            .Where(m => m.Deliveries.Any(d => d.RecipientId == userId && !d.IsDelivered));
+
+        if (!string.IsNullOrEmpty(conversationId))
+            query = query.Where(m => m.ConversationId == conversationId);
+
+        return await query.OrderBy(m => m.SentAt).ToListAsync();
     }
 
     public async Task<Message> CreateAsync(Message message)
@@ -84,25 +87,7 @@ public class MessageRepository : IMessageRepository
             delivery.IsDelivered = true;
             delivery.DeliveredAt = DateTime.UtcNow;
             await dbContext.SaveChangesAsync();
-
-            // Check if all recipients have received the message
-            await TryDeleteFullyDeliveredMessageAsync(messageId);
-        }
-    }
-
-    public async Task DeleteDeliveredMessagesAsync()
-    {
-        await using var dbContext = _context.CreateDbContext();
-        // Find messages where all deliveries are marked as delivered
-        var fullyDeliveredMessages = await dbContext.Messages
-            .Include(m => m.Deliveries)
-            .Where(m => m.Deliveries.All(d => d.IsDelivered))
-            .ToListAsync();
-
-        if (fullyDeliveredMessages.Any())
-        {
-            dbContext.Messages.RemoveRange(fullyDeliveredMessages);
-            await dbContext.SaveChangesAsync();
+            // Messages are kept in DB; read indicator is per-user so others still see them as pending
         }
     }
 
@@ -123,20 +108,4 @@ public class MessageRepository : IMessageRepository
         await dbContext.SaveChangesAsync();
     }
 
-    /// <summary>
-    /// Check if all recipients have received the message and delete it if so
-    /// </summary>
-    private async Task TryDeleteFullyDeliveredMessageAsync(string messageId)
-    {
-        await using var dbContext = _context.CreateDbContext();
-        var message = await dbContext.Messages
-            .Include(m => m.Deliveries)
-            .FirstOrDefaultAsync(m => m.Id == messageId);
-
-        if (message != null && message.Deliveries.All(d => d.IsDelivered))
-        {
-            dbContext.Messages.Remove(message);
-            await dbContext.SaveChangesAsync();
-        }
-    }
 }

@@ -124,7 +124,7 @@ public class TalkTimeHub : Hub
             }
         }
 
-        // Send pending messages to the user
+        // Send pending (unread) messages to the user; read state is per-user so others still see them as pending
         var pendingMessages = await _messageRepository.GetPendingMessagesForUserAsync(userId);
         foreach (var message in pendingMessages)
         {
@@ -134,11 +134,14 @@ public class TalkTimeHub : Hub
                 new UserDto(message.Sender.Id, message.Sender.Username, message.Sender.AvatarUrl, message.Sender.Description, message.Sender.IsOnline, message.Sender.LastSeenAt),
                 message.EncryptedContent,
                 message.Type.ToString().ToLower(),
-                message.SentAt.ToString("o")
+                message.SentAt.ToString("o"),
+                message.MediaUrl,
+                message.ThumbnailUrl,
+                null
             );
             await Clients.Caller.SendAsync("ReceiveMessage", messageDto);
 
-            // Mark as delivered
+            // Mark as delivered for this user only
             await _messageRepository.MarkAsDeliveredAsync(message.Id, userId);
         }
 

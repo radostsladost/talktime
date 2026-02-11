@@ -28,13 +28,6 @@ public class NotificationsService(
                 return;
             }
 
-            var notification = new Notification
-            {
-                Title = title,
-                Body = message,
-                ImageUrl = imageUrl
-            };
-
             var dataDict = new Dictionary<string, string>();
             if (!string.IsNullOrEmpty(data))
             {
@@ -52,6 +45,18 @@ public class NotificationsService(
                         return;
                     }
 
+                    // Respect per-device message preview setting
+                    var effectiveTitle = token.MessagePreview ? title : "New message";
+                    var effectiveBody = token.MessagePreview ? message : "You have a new message";
+                    var effectiveImageUrl = token.MessagePreview ? imageUrl : null;
+
+                    var notification = new Notification
+                    {
+                        Title = effectiveTitle,
+                        Body = effectiveBody,
+                        ImageUrl = effectiveImageUrl
+                    };
+
                     var firebaseMessage = new Message
                     {
                         Token = token.Token,
@@ -62,9 +67,9 @@ public class NotificationsService(
                             Priority = Priority.Normal,
                             Notification = new AndroidNotification
                             {
-                                Title = title,
-                                Body = message,
-                                ImageUrl = imageUrl,
+                                Title = effectiveTitle,
+                                Body = effectiveBody,
+                                ImageUrl = effectiveImageUrl,
                                 Sound = "default",
                                 ChannelId = "default"
                             }
@@ -75,8 +80,8 @@ public class NotificationsService(
                             {
                                 Alert = new ApsAlert
                                 {
-                                    Title = title,
-                                    Body = message
+                                    Title = effectiveTitle,
+                                    Body = effectiveBody
                                 },
                                 Sound = "default",
                                 Badge = 1

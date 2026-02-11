@@ -46,7 +46,11 @@ dependencies:
   web: ^1.1.1  # Cookie backup for auth tokens on web
   # Desktop-only (no-op on other platforms when not initialized)
   hotkey_manager: ^0.2.3
-  # tray_manager removed: Linux build fails (deprecated app_indicator). Re-add when plugin migrates to libnativeapi.
+  system_tray: ^2.0.3   # System tray icon (Windows, macOS; Linux needs appindicator)
+  window_manager: ^0.5.1  # Show/focus window from tray
+
+dependency_overrides:
+  uuid: ^3.0.6
 
 dev_dependencies:
   flutter_test:
@@ -58,3 +62,5 @@ flutter:
   uses-material-design: true
   assets:
     - .env
+    - assets/app_icon.ico
+    - assets/app_icon.png
