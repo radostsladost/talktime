@@ -46,6 +46,13 @@ public class AppDbContext : DbContext
                 .HasColumnName("password_hash")
                 .IsRequired();
 
+            entity.Property(e => e.WrongPasswordsCount)
+                .HasColumnName("wrong_passwords_count")
+                .HasDefaultValue(0);
+
+            entity.Property(e => e.WrongPasswordDate)
+                .HasColumnName("wrong_password_date");
+
             entity.Property(e => e.AvatarUrl)
                 .HasColumnName("avatar_url")
                 .HasMaxLength(500);

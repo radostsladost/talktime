@@ -34,6 +34,9 @@ public class AuthController : ControllerBase
         _configuration = configuration;
     }
 
+    private static readonly TimeSpan FailedLoginWindow = TimeSpan.FromMinutes(5);
+    private const int MaxFailedLoginAttempts = 10;
+
     [HttpPost("login")]
     [AllowAnonymous]
     public async Task<ActionResult<LoginResponse>> Login([FromBody] LoginRequest request)
@@ -48,11 +51,41 @@ public class AuthController : ControllerBase
                 return Unauthorized(new { message = "Invalid email or password" });
             }
 
+            // Account locked after too many failed attempts (password cleared)
+            if (string.IsNullOrEmpty(user.PasswordHash))
+            {
+                _logger.LogWarning("Login attempt rejected: Account locked for user {UserId}", user.Id);
+                return StatusCode(403, new { message = "Account locked due to too many failed login attempts." });
+            }
+
             if (!BCrypt.Net.BCrypt.Verify(request.Password, user.PasswordHash))
             {
                 _logger.LogWarning("Login attempt failed: Invalid password for user {UserId}", user.Id);
+                var now = DateTime.UtcNow;
+                // Start new window if none or outside 5-minute window
+                if (user.WrongPasswordDate == null || (now - user.WrongPasswordDate.Value) > FailedLoginWindow)
+                {
+                    user.WrongPasswordDate = now;
+                    user.WrongPasswordsCount = 0;
+                }
+                user.WrongPasswordsCount++;
+
+                if (user.WrongPasswordsCount >= MaxFailedLoginAttempts)
+                {
+                    user.PasswordHash = string.Empty;
+                    user.WrongPasswordsCount = 0;
+                    user.WrongPasswordDate = null;
+                    _logger.LogWarning("Account locked due to brute force: user {UserId}", user.Id);
+                }
+
+                await _userRepository.UpdateAsync(user);
                 return Unauthorized(new { message = "Invalid email or password" });
             }
+
+            // Successful login: clear failure state
+            user.WrongPasswordsCount = 0;
+            user.WrongPasswordDate = null;
+            await _userRepository.UpdateAsync(user);
 
             var (accessToken, refreshToken, accessTokenExpires, refreshTokenExpires) = await GenerateTokensAsync(user);
 
@@ -350,6 +383,11 @@ public class AuthController : ControllerBase
         if (user == null || dto == null)
         {
             return NotFound(new { message = "User not found" });
+        }
+
+        if (string.IsNullOrEmpty(user.PasswordHash))
+        {
+            return StatusCode(403, new { message = "Account locked. Cannot update profile." });
         }
 
         if (dto.Username != null && dto.Username.Trim().Length >= 1) user.Username = dto.Username.Trim();

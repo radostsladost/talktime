@@ -1,6 +1,7 @@
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using TalkTime.Api.Hubs;
@@ -151,7 +152,18 @@ if (app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 
 // Serve static files from wwwroot (uploads/images/... served at /uploads/images/...)
-app.UseStaticFiles();
+// When API is behind a base path (e.g. /api), also serve at /api/uploads/images/...
+var webRootPath = Path.Combine(builder.Environment.ContentRootPath, "wwwroot");
+if (!Directory.Exists(webRootPath))
+    Directory.CreateDirectory(webRootPath);
+
+app.UseStaticFiles(); // /uploads/images/x.png -> wwwroot/uploads/images/x.png
+
+app.UseStaticFiles(new StaticFileOptions
+{
+    RequestPath = "/api",
+    FileProvider = new PhysicalFileProvider(webRootPath)
+}); // /api/uploads/images/x.png -> wwwroot/uploads/images/x.png
 
 // Use CORS before authentication
 app.UseCors();
