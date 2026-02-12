@@ -51,7 +51,10 @@ class AuthService {
   }
 
   /// Register Firebase token with the backend. [messagePreview] is sent when provided (e.g. from Settings).
-  Future<void> _registerFirebaseToken(String? token, {bool? messagePreview}) async {
+  Future<void> _registerFirebaseToken(
+    String? token, {
+    bool? messagePreview,
+  }) async {
     if (token == null || token.isEmpty) {
       return;
     }
@@ -173,9 +176,10 @@ class AuthService {
 
     // Add FCM token if available
     if (fcmToken != null) {
+      var (deviceId, deviceInfo) = await getDeviceInfo();
       body['firebaseToken'] = fcmToken;
-      body['deviceId'] = Platform.isAndroid ? 'android' : 'ios';
-      body['deviceInfo'] = Platform.operatingSystem;
+      body['deviceId'] = deviceId;
+      body['deviceInfo'] = deviceInfo;
     }
 
     final response = await _apiClient.post(
@@ -259,11 +263,21 @@ class AuthService {
     );
   }
 
+  User? _cachedUser;
+  DateTime? _cachedUserExpiration;
+
   /// Get current user information
   Future<User> getCurrentUser() async {
+    if (_cachedUser != null) {
+      if (_cachedUserExpiration != null &&
+          _cachedUserExpiration!.isAfter(DateTime.now())) {
+        return _cachedUser!;
+      }
+    }
     final response = await _apiClient.get(ApiConstants.me, requiresAuth: true);
-
-    return User.fromJson(response);
+    _cachedUserExpiration = DateTime.now().add(Duration(minutes: 1));
+    _cachedUser = User.fromJson(response);
+    return _cachedUser!;
   }
 
   /// Check if user is authenticated (has valid token)
@@ -335,8 +349,8 @@ class AuthService {
   /// Returns current notification permission status (iOS/Android). Null on web or on error.
   Future<AuthorizationStatus?> getNotificationPermissionStatus() async {
     try {
-      final settings =
-          await FirebaseMessaging.instance.getNotificationSettings();
+      final settings = await FirebaseMessaging.instance
+          .getNotificationSettings();
       return settings.authorizationStatus;
     } catch (e) {
       Logger().d('Could not get notification settings: $e');
