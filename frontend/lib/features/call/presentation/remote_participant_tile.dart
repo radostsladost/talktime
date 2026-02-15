@@ -12,7 +12,6 @@ class RemoteParticipantTile extends StatefulWidget {
   final bool? fitInRect;
 
   /// Output device for this participant's audio (desktop/web only).
-  /// On Android routing is via platform; remote audio is played by this renderer.
   final String? speakerDeviceId;
 
   const RemoteParticipantTile({
@@ -77,7 +76,6 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
   }
 
   void _setupTrackListeners(IMediaStreamTrack track) {
-    // Listen for mute/unmute events on the track
     track.onMute = () {
       if (mounted) {
         setState(() => _updateTrackStates());
@@ -101,15 +99,12 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
     final videoTracks = widget.stream.getVideoTracks();
     final audioTracks = widget.stream.getAudioTracks();
 
-    // Check video: track exists, is enabled, and is not muted
     _hasActiveVideo =
         videoTracks.isNotEmpty &&
         videoTracks.any(
           (track) => track.enabled == true && track.muted == false,
-          // && track.readyState == 'live',
         );
 
-    // Check audio: track exists and is enabled and not muted
     _hasActiveAudio =
         audioTracks.isEmpty ||
         audioTracks.any(
@@ -136,17 +131,12 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
         widget.speakerDeviceId != null) {
       _renderer.audioOutput(widget.speakerDeviceId!).catchError((_) {});
     }
-    // If the stream reference changes (rare, but possible), update the renderer
     if (oldWidget.stream.id != widget.stream.id) {
-      // Dispose old stream listeners
       _disposeStreamListeners();
-
-      // Setup new stream
       _renderer.srcObject = widget.stream;
       _setupStreamListeners();
       _updateTrackStates();
     } else {
-      // Same stream, but tracks might have changed
       _updateTrackStates();
     }
   }
@@ -154,23 +144,19 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
   @override
   void dispose() {
     _disposeStreamListeners();
-    // Only dispose the UI renderer, NOT the stream (which lives in CallService)
     _renderer.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    // Re-check track states on every build for safety
     final videoTracks = widget.stream.getVideoTracks();
     final hasVideo =
         videoTracks.isNotEmpty &&
         videoTracks.any(
           (track) => track.enabled == true && track.muted == false,
-          // && track.readyState == 'live',
         );
 
-    // Update renderer source if we have active video
     if (hasVideo && _isRendererReady) {
       _renderer.srcObject = widget.stream;
     }

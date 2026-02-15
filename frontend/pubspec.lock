@@ -250,7 +250,7 @@ packages:
     source: hosted
     version: "3.1.4"
   dart_webrtc:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: dart_webrtc
       sha256: "4ed7b9fa9924e5a81eb39271e2c2356739dd1039d60a13b86ba6c5f448625086"

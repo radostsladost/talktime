@@ -6,7 +6,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:logger/web.dart';
 import 'package:talktime/features/call/data/call_service.dart';
-import 'package:talktime/features/call/data/echo_reduction_web.dart';
 import 'package:talktime/features/call/data/signaling_service.dart';
 import 'package:talktime/features/call/presentation/remote_participant_tile.dart';
 import 'package:talktime/features/call/presentation/widgets/audio_chooser_popup.dart';
@@ -54,8 +53,6 @@ class _ConferencePageState extends State<ConferencePage> {
   StreamSubscription? _speakerStateSubscription;
   StreamSubscription? _speakerDeviceIdSubscription;
 
-  /// Web only: dispose callback for receive-side echo reduction.
-  void Function()? _echoReductionDispose;
 
   @override
   void initState() {
@@ -193,24 +190,6 @@ class _ConferencePageState extends State<ConferencePage> {
   }
 
   void _handleRemoteStreamsUpdate(Map<String, IMediaStream> streams) {
-    if (kIsWeb) {
-      _echoReductionDispose?.call();
-      _echoReductionDispose = null;
-      if (streams.length == 1) {
-        final local = _callService.localStream;
-        if (local != null && local.getAudioTracks().isNotEmpty) {
-          final remote = streams.values.first;
-          if (remote.getAudioTracks().isNotEmpty) {
-            _echoReductionDispose = startEchoReduction(
-              remote,
-              local,
-              delaySeconds: 0.3,
-            );
-          }
-        }
-      }
-    }
-
     final activeIds = streams.keys.toSet();
     final currentIds = _remoteRenderers.keys.toSet();
 
@@ -219,16 +198,17 @@ class _ConferencePageState extends State<ConferencePage> {
       _remoteRenderers.remove(id);
     }
 
+    final assignStream = !kIsWeb; // Web: only tile renderers get stream to avoid duplicate audio
     for (final id in activeIds) {
       if (!_remoteRenderers.containsKey(id)) {
         final newRenderer = getWebRTCPlatform().createVideoRenderer();
         newRenderer.initialize().then((_) {
-          newRenderer.srcObject = streams[id];
+          if (assignStream) newRenderer.srcObject = streams[id];
           if (mounted) setState(() {});
         });
         _remoteRenderers[id] = newRenderer;
       } else {
-        _remoteRenderers[id]!.srcObject = streams[id];
+        if (assignStream) _remoteRenderers[id]!.srcObject = streams[id];
       }
     }
 
@@ -267,9 +247,6 @@ class _ConferencePageState extends State<ConferencePage> {
     _screenShareSubscription?.cancel();
     _speakerStateSubscription?.cancel();
     _speakerDeviceIdSubscription?.cancel();
-
-    _echoReductionDispose?.call();
-    _echoReductionDispose = null;
 
     // Dispose the RENDERERS (UI), but DO NOT stop the call.
     _localRenderer.dispose();
