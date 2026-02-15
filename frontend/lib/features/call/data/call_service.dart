@@ -2,10 +2,10 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
-import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:path/path.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:logger/logger.dart';
@@ -13,6 +13,7 @@ import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:flutter_callkit_incoming/entities/call_kit_params.dart';
 import 'package:pip/pip.dart';
 import 'package:talktime/features/call/data/signaling_service.dart';
+import 'package:talktime/features/call/webrtc/webrtc_platform.dart';
 import 'package:talktime/core/network/api_client.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/shared/models/user.dart';
@@ -28,23 +29,24 @@ class CallService {
 
   final Logger _logger = Logger(output: ConsoleOutput());
   SignalingService? _signalingService;
+  IWebRTCPlatform get _platform => getWebRTCPlatform();
 
   // State Variables
   CallState _state = CallState.idle;
-  MediaStream? _localStream;
-  MediaStream? _cachedVideoStream;
-  final Map<String, RTCPeerConnection> _peerConnections = {};
-  final Map<String, MediaStream> _remoteStreams = {};
+  IMediaStream? _localStream;
+  IMediaStream? _cachedVideoStream;
+  final Map<String, IPeerConnection> _peerConnections = {};
+  final Map<String, IMediaStream> _remoteStreams = {};
   final Map<String, UserInfo> _participantInfo = {};
   final Set<String> _participantIds = {};
 
   // Stream Controllers (To update UI)
   final _stateController = StreamController<CallState>.broadcast();
-  final _localStreamController = StreamController<MediaStream?>.broadcast();
+  final _localStreamController = StreamController<IMediaStream?>.broadcast();
   final _cachedVideoStreamController =
-      StreamController<MediaStream?>.broadcast();
+      StreamController<IMediaStream?>.broadcast();
   final _remoteStreamsController =
-      StreamController<Map<String, MediaStream>>.broadcast();
+      StreamController<Map<String, IMediaStream>>.broadcast();
   final _micStateController = StreamController<bool>.broadcast();
   final _camStateController = StreamController<bool>.broadcast();
   final _isScreenSharingController = StreamController<bool>.broadcast();
@@ -54,21 +56,23 @@ class CallService {
   // Public Getters
   Stream<bool> get isScreenSharing => _isScreenSharingController.stream;
   Stream<bool> get speakerStateStream => _speakerStateController.stream;
-  Stream<String?> get speakerDeviceIdStream => _speakerDeviceIdController.stream;
+  Stream<String?> get speakerDeviceIdStream =>
+      _speakerDeviceIdController.stream;
   bool get isScreenSharingValue => _isScreenSharing;
   Stream<CallState> get callStateStream => _stateController.stream;
-  Stream<MediaStream?> get localStreamStream => _localStreamController.stream;
-  Stream<MediaStream?> get cachedVideoStreamStream =>
+  Stream<IMediaStream?> get localStreamStream => _localStreamController.stream;
+  Stream<IMediaStream?> get cachedVideoStreamStream =>
       _cachedVideoStreamController.stream;
-  Stream<Map<String, MediaStream>> get remoteStreamsStream =>
+  Stream<Map<String, IMediaStream>> get remoteStreamsStream =>
       _remoteStreamsController.stream;
   Stream<bool> get micStateStream => _micStateController.stream;
   Stream<bool> get camStateStream => _camStateController.stream;
   // State Getters for UI initialization on navigation return
-  MediaStream? get localStream => _localStream;
-  MediaStream? get cachedVideoStream => _cachedVideoStream;
-  Map<String, MediaStream> get remoteStreams => Map.from(_remoteStreams);
+  IMediaStream? get localStream => _localStream;
+  IMediaStream? get cachedVideoStream => _cachedVideoStream;
+  Map<String, IMediaStream> get remoteStreams => Map.from(_remoteStreams);
   CallState get currentState => _state;
+
   /// Room/conversation id of the current call, if any.
   String? get currentRoomId => _currentRoomId;
   Map<String, UserInfo> get participantInfo => _participantInfo;
@@ -76,12 +80,16 @@ class CallService {
   bool get isMuted => _isMuted;
   String? get speakerDeviceId => _speakerDeviceId;
 
+  /// On Android/iOS: true = loudspeaker, false = earpiece. Only updated when setSpeakerDevice is used.
+  bool get isSpeakerOn => _speakerOn;
+
   String? _currentRoomId;
   bool _isMuted = false;
   bool _isCameraOff = true;
   bool _isScreenSharing = false;
   bool _isSpeakerMuted = false;
   String? _speakerDeviceId;
+  bool _speakerOn = true;
   Timer? _timer;
   User? _currentUser;
 
@@ -91,6 +99,16 @@ class CallService {
 
   Future<void> initService() async {
     _logger.i('Initializing CallService...');
+
+    // Android: initialize WebRTC (Google WebRTC bridge with AEC) or other platform init.
+    if (!kIsWeb && Platform.isAndroid) {
+      await _platform.initialize();
+      _logger.i('WebRTC platform initialized for Android');
+      final ok = await verifyAudioChannel();
+      _logger.i(
+        'audio_manager channel: ${ok ? "OK" : "not implemented (setAudioMode/Bluetooth will no-op)"}',
+      );
+    }
 
     // Always load current user
     try {
@@ -137,6 +155,8 @@ class CallService {
     _currentRoomId = roomId;
     _updateState(CallState.connecting);
     _logger.i("Call state updated to connecting for room: $roomId");
+
+    await _setAudioMode(3);
 
     // CallKit: Start outgoing call
     _callKitStartCall();
@@ -185,6 +205,8 @@ class CallService {
   }
 
   Future<void> endCall() async {
+    await _setAudioMode(0);
+
     final roomIdToEnd = _currentRoomId;
     _logger.i("End call called for room: $roomIdToEnd, current state: $_state");
 
@@ -256,12 +278,12 @@ class CallService {
   // MEDIA CONTROL
   // =========================================================
 
-  Future<void> toggleScreenShare({DesktopCapturerSource? source}) async {
-    await activateCameraOrScreenShare(newScreenShareValue: !_isScreenSharing);
+  Future<void> toggleScreenShare({DesktopCapturerSourceDto? source}) async {
+    await activateCameraOrScreenShare(newScreenShareValue: !_isScreenSharing, source: source);
   }
 
   Future<void> activateCameraOrScreenShare({
-    DesktopCapturerSource? source,
+    DesktopCapturerSourceDto? source,
     bool? forceStop,
     bool? newScreenShareValue,
   }) async {
@@ -272,14 +294,13 @@ class CallService {
       _isScreenSharing = newScreenShareValue ?? false;
       _isScreenSharingController.sink.add(_isScreenSharing);
 
-      MediaStreamTrack? newVideoTrack;
-      MediaStream? cachedVideoStream;
+      IMediaStreamTrack? newVideoTrack;
+      IMediaStream? cachedVideoStream;
 
       if (_localStream != null) {
         // Remove old video tracks
         final oldVideoTracks = [..._localStream!.getVideoTracks()];
         for (var track in oldVideoTracks) {
-          // print("Enumerating oldTracks: ${track.label} - ${track.kind}");
           try {
             await _localStream!.removeTrack(track);
           } catch (_) {}
@@ -304,7 +325,6 @@ class CallService {
       }
 
       if (_isScreenSharing) {
-        // Get screen stream and extract video track
         cachedVideoStream = await _getScreenStream(source?.id);
       }
       if (!_isScreenSharing || cachedVideoStream == null) {
@@ -328,7 +348,7 @@ class CallService {
         return;
       }
 
-      newVideoTrack = cachedVideoStream.getVideoTracks().firstOrNull;
+      newVideoTrack = cachedVideoStream.getVideoTracks().isNotEmpty ? cachedVideoStream.getVideoTracks().first : null;
 
       if (newVideoTrack == null) {
         _logger.e('Failed to get media stream (track)');
@@ -377,7 +397,7 @@ class CallService {
   }
 
   Future<void> _replaceVideoTrackInPeerConnections(
-    MediaStreamTrack? newTrack,
+    IMediaStreamTrack? newTrack,
   ) async {
     _logger.i(
       'Replacing video track in ${_peerConnections.length} peer connections, '
@@ -403,10 +423,8 @@ class CallService {
 
         var success = false;
         for (final transceiver in transceivers) {
-          // Use transceiver.sender.track?.kind for active tracks,
-          // or check the transceiver's mid/receiver for video type when track is null
           final senderTrackKind = transceiver.sender.track?.kind;
-          final receiverTrackKind = transceiver.receiver.track?.kind;
+          final receiverTrackKind = transceiver.receiverTrack?.kind;
           final isVideoTransceiver =
               senderTrackKind == 'video' || receiverTrackKind == 'video';
 
@@ -440,13 +458,14 @@ class CallService {
     }
   }
 
-  Future<MediaStream?> _getCameraStream() async {
+  Future<IMediaStream?> _getCameraStream() async {
     if (_usePermissionHandler) {
       final permissions = <Permission>[Permission.camera];
       final statuses = await permissions.request();
       if (statuses[Permission.camera] != PermissionStatus.granted) {
         _logger.i(
-            'Camera permission not granted ${statuses[Permission.camera]}');
+          'Camera permission not granted ${statuses[Permission.camera]}',
+        );
         if (navigatorKey.currentContext != null) {
           ScaffoldMessenger.of(navigatorKey.currentContext!).showSnackBar(
             const SnackBar(content: Text('Camera permission not granted')),
@@ -465,10 +484,10 @@ class CallService {
       }),
     });
 
-    return await navigator.mediaDevices.getUserMedia(constraints);
+    return await _platform.getUserMedia(constraints);
   }
 
-  Future<MediaStream> _getScreenStream(String? sourceId) async {
+  Future<IMediaStream?> _getScreenStream(String? sourceId) async {
     final constraints = sourceId != null
         ? {
             'video': {
@@ -481,8 +500,7 @@ class CallService {
             'audio': false,
           };
 
-    final stream = await navigator.mediaDevices.getDisplayMedia(constraints);
-    return stream;
+    return await _platform.getDisplayMedia(constraints);
   }
 
   void toggleMic({bool? forceValue}) {
@@ -584,11 +602,91 @@ class CallService {
   }
 
   /// Set the audio output device (speaker) for remote playback.
-  /// The UI should call [RTCVideoRenderer.audioOutput(deviceId)] when this changes.
+  /// The UI should call [IVideoRenderer.audioOutput(deviceId)] when this changes.
   void setSpeakerDevice(String? deviceId) {
-    _speakerDeviceId = deviceId;
-    _speakerDeviceIdController.add(deviceId);
     _logger.i('Speaker device set to: $deviceId');
+    if (!kIsWeb && Platform.isAndroid) {
+      _routeAudioAndroid(deviceId);
+    } else {
+      _speakerDeviceId = deviceId;
+      _speakerDeviceIdController.add(deviceId);
+    }
+  }
+
+  Future<void> _routeAudioAndroid(String? deviceId) async {
+    try {
+      final useSpeaker =
+          deviceId?.contains('speaker') == true ||
+          deviceId?.contains('loud') == true;
+      final useEarpiece =
+          deviceId?.contains('earpiece') == true ||
+          deviceId?.contains('phone') == true;
+
+      if (deviceId?.contains('bluetooth') == true) {
+        await _audioChannel.invokeMethod('startBluetoothSco');
+        return;
+      }
+
+      // Prefer setCommunicationDevice (API 31+) for better AEC/routing; fallback to setSpeakerphoneOn.
+      try {
+        final ok = await _audioChannel.invokeMethod<bool>(
+          'setCommunicationDevice',
+          <String, dynamic>{'speaker': useSpeaker && !useEarpiece},
+        );
+        if (ok == true) {
+          _speakerOn = useSpeaker && !useEarpiece;
+          _logger.i(
+            'Android audio routed via setCommunicationDevice: $deviceId',
+          );
+          return;
+        }
+      } catch (_) {
+        // Channel or method not available (old Android), use fallback
+      }
+
+      await _setAudioMode(3); // MODE_IN_COMMUNICATION
+      if (useSpeaker) {
+        _speakerOn = true;
+        await _platform.setSpeakerphoneOn(true);
+      } else {
+        _speakerOn = false;
+        await _platform.setSpeakerphoneOn(false);
+      }
+      _logger.i('Android audio routed via setSpeakerphoneOn: $deviceId');
+    } catch (e) {
+      _logger.e('Android audio routing failed: $e');
+    }
+  }
+
+  /// Method channel for Android audio routing (mode, Bluetooth SCO).
+  /// Requires native implementation: MainActivity or a plugin must register
+  /// a MethodChannel named 'audio_manager' and handle 'setAudioMode' (and
+  /// optionally 'startBluetoothSco'). If not implemented, invokeMethod throws
+  /// and we log and continue (speaker/earpiece still work via platform.setSpeakerphoneOn).
+  static const _audioChannel = MethodChannel('audio_manager');
+
+  /// Call once (e.g. from initService or a debug screen) to verify the native
+  /// side responds. Returns true if setAudioMode succeeded, false otherwise.
+  static Future<bool> verifyAudioChannel() async {
+    if (kIsWeb || !Platform.isAndroid) return true;
+    try {
+      await _audioChannel.invokeMethod('setAudioMode', {'mode': 0});
+      return true;
+    } catch (e) {
+      debugPrint('audio_manager channel not implemented or error: $e');
+      return false;
+    }
+  }
+
+  Future _setAudioMode(int mode) async {
+    if (!kIsWeb && !Platform.isAndroid) return;
+
+    try {
+      await _audioChannel.invokeMethod('setAudioMode', {'mode': mode});
+      _logger.d('Audio mode set to $mode (0=NORMAL, 3=IN_COMMUNICATION)');
+    } catch (e) {
+      _logger.d('Failed to set audio mode: $e');
+    }
   }
 
   /// Switch the audio input device (microphone) to the given [deviceId].
@@ -597,33 +695,33 @@ class CallService {
     try {
       _logger.i('Switching audio device to: $deviceId');
 
-      // Get a new stream with the selected audio device
-      final newStream = await navigator.mediaDevices.getUserMedia({
-        'audio': {
-          'deviceId': deviceId,
-          'echoCancellation': true,
-          'noiseSuppression': true,
-        },
-      });
+      final audioOpts = <String, dynamic>{
+        'deviceId': deviceId,
+        ..._audioConstraintsForCall(),
+      };
+      final newStream = await _platform.getUserMedia({'audio': audioOpts});
+      if (newStream == null) throw Exception('getUserMedia returned null');
 
-      final newAudioTrack = newStream.getAudioTracks().first;
+      final audioTracks = newStream.getAudioTracks();
+      if (audioTracks.isEmpty) throw Exception('No audio track in stream');
+      final newAudioTrack = audioTracks.first;
 
       // Replace audio track in local stream
       if (_localStream != null) {
         final oldAudioTracks = _localStream!.getAudioTracks();
         for (final oldTrack in oldAudioTracks) {
-          _localStream!.removeTrack(oldTrack);
+          await _localStream!.removeTrack(oldTrack);
           oldTrack.stop();
         }
-        _localStream!.addTrack(newAudioTrack);
+        await _localStream!.addTrack(newAudioTrack);
       }
 
-      // Replace audio track in all peer connections
+      // Replace audio track in all peer connections (via transceivers)
       for (final pc in _peerConnections.values) {
-        final senders = await pc.getSenders();
-        for (final sender in senders) {
-          if (sender.track?.kind == 'audio') {
-            await sender.replaceTrack(newAudioTrack);
+        final transceivers = await pc.getTransceivers();
+        for (final transceiver in transceivers) {
+          if (transceiver.sender.track?.kind == 'audio') {
+            await transceiver.sender.replaceTrack(newAudioTrack);
           }
         }
       }
@@ -647,6 +745,23 @@ class CallService {
   bool get _usePermissionHandler =>
       !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 
+  /// Audio constraints for the call mic. Strong AEC/AGC/NS to reduce acoustic echo
+  /// when using speaker (phone plays remote audio → mic picks it up → remote hears echo).
+  Map<String, dynamic> _audioConstraintsForCall() {
+    final base = <String, dynamic>{
+      'echoCancellation': true,
+      'noiseSuppression': true,
+      'autoGainControl': true,
+    };
+    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+      base['googEchoCancellation'] = true;
+      base['googNoiseSuppression'] = true;
+      base['googAutoGainControl'] = true;
+      base['googHighpassFilter'] = true; // often used with AEC on Android
+    }
+    return base;
+  }
+
   Future<void> _getUserMedia() async {
     int retries = 0;
 
@@ -667,14 +782,15 @@ class CallService {
           break;
         }
 
-        var audioConstraints = audioGranted
-            ? {'echoCancellation': true, 'noiseSuppression': true}
+        // Strong AEC/AGC/NS on mobile to reduce acoustic echo (phone speaker → mic → back to PC).
+        final audioConstraints = audioGranted
+            ? _audioConstraintsForCall()
             : false;
 
-        // Create single stream with both audio and video
-        final stream = await navigator.mediaDevices.getUserMedia({
+        final stream = await _platform.getUserMedia({
           'audio': audioConstraints,
         });
+        if (stream == null) break;
 
         _localStream = stream;
         _localStreamController.sink.add(_localStream);
@@ -731,32 +847,28 @@ class CallService {
       'sdpSemantics': 'unified-plan',
     };
 
-    final pc = await createPeerConnection(config);
+    final pc = await _platform.createPeerConnection(config);
 
-    // Add local tracks from single local stream
     if (_localStream != null) {
       for (var track in _localStream!.getTracks()) {
         await pc.addTrack(track, _localStream!);
       }
     }
 
-    // Handle Remote Stream
-    pc.onTrack = (RTCTrackEvent event) {
+    pc.onTrack = (RTCTrackEventDto event) {
       if (event.streams.isNotEmpty) {
-        _logger.i('Received remote stream ${event.streams.firstOrNull?.id}');
-        // Store only the first/primary stream for this participant
+        _logger.i('Received remote stream ${event.streams.first.id}');
         final stream = event.streams.first;
         _remoteStreams[participantId] = stream;
-        // Apply current speaker mute state to new stream
         for (final track in stream.getAudioTracks()) {
           track.enabled = !_isSpeakerMuted;
         }
-        // Notify UI
+        if (!kIsWeb && Platform.isAndroid) {
+          _setAudioMode(3);
+        }
         _remoteStreamsController.add(Map.from(_remoteStreams));
       } else {
         _logger.i('Received remote stream {empty}');
-
-        // Handle case where no stream is available
         if (_remoteStreams.containsKey(participantId)) {
           _remoteStreams.remove(participantId);
         }
@@ -764,22 +876,10 @@ class CallService {
       }
     };
 
-    // pc.onRemoveTrack = (MediaStream stream, MediaStreamTrack track) {
-    //   if (_remoteStreams.containsKey(participantId)) {
-    //     _remoteStreamsController.add(Map.from(_remoteStreams));
-    //   }
-    // };
-    // pc.onRemoveStream = (MediaStream stream) {
-    //   if (_remoteStreams.containsKey(participantId)) {
-    //     _remoteStreams.remove(participantId);
-    //     _remoteStreamsController.add(Map.from(_remoteStreams));
-    //   }
-    // };
-
     pc.onIceCandidate = (candidate) {
       _signalingService!.sendIceCandidate(
         participantId,
-        candidate.candidate!,
+        candidate.candidate ?? '',
         candidate.sdpMid,
         candidate.sdpMLineIndex,
         roomId: _currentRoomId,
@@ -790,8 +890,8 @@ class CallService {
       _logger.i('ICE connection state for $participantId: $state');
 
       final isDisconnectedOrFailed =
-          state == RTCIceConnectionState.RTCIceConnectionStateDisconnected ||
-          state == RTCIceConnectionState.RTCIceConnectionStateFailed;
+          state == RTCIceConnectionStateDto.disconnected ||
+          state == RTCIceConnectionStateDto.failed;
 
       if (isDisconnectedOrFailed &&
           _peerConnections.containsKey(participantId)) {
@@ -812,7 +912,7 @@ class CallService {
       }
     };
 
-    _peerConnections[participantId] = pc; // add
+    _peerConnections[participantId] = pc;
   }
 
   // ... (Include _handleOffer, _handleAnswer, _handleIceCandidate logic here essentially copied from your original file but removing setState calls)
@@ -845,10 +945,10 @@ class CallService {
       }
 
       final state = await pc!.getSignalingState();
-      if (state == RTCSignalingState.RTCSignalingStateStable) {
+      if (state == RTCSignalingStateDto.stable) {
         final offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
-        _signalingService?.sendOffer(id, offer.sdp!, roomId: _currentRoomId);
+        _signalingService?.sendOffer(id, offer.sdp ?? '', roomId: _currentRoomId);
         _logger.i(
           'Offer sent to $id${forceRenegotiation ? " (renegotiation)" : ""}',
         );
@@ -919,35 +1019,29 @@ class CallService {
       final state = await pc.getSignalingState();
       final polite = _isPolite(event.fromUserId);
 
-      // Perfect negotiation pattern:
-      // - If we have a local offer pending (have-local-offer) and we're impolite, ignore incoming offer
-      // - If we're polite, we should rollback and accept the incoming offer
-      if (state == RTCSignalingState.RTCSignalingStateHaveLocalOffer) {
+      if (state == RTCSignalingStateDto.haveLocalOffer) {
         if (!polite) {
-          // We are impolite, ignore their offer - our offer wins
           _logger.w(
             "Collision detected. Impolite peer ignoring offer from ${event.fromUserId}",
           );
           return;
         } else {
-          // We are polite, rollback our offer and accept theirs
           _logger.i(
             "Collision detected. Polite peer rolling back for ${event.fromUserId}",
           );
-          await pc.setLocalDescription(RTCSessionDescription(null, 'rollback'));
+          await pc.setLocalDescription(RTCSessionDescriptionDto(null, 'rollback'));
         }
       }
 
-      final offer = RTCSessionDescription(event.sdp, 'offer');
+      final offer = RTCSessionDescriptionDto(event.sdp, 'offer');
       await pc.setRemoteDescription(offer);
 
-      // Create and send answer
       final answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
 
       await _signalingService!.sendAnswer(
         event.fromUserId,
-        answer.sdp!,
+        answer.sdp ?? '',
         roomId: _currentRoomId!,
       );
 
@@ -975,22 +1069,19 @@ class CallService {
     // Wait for syncronization
     await Future.delayed(const Duration(seconds: 1), () {});
 
-    // --- FIX START ---
-    // Check if we are actually waiting for an answer
     final state = await pc.getSignalingState();
-    if (state == RTCSignalingState.RTCSignalingStateStable) {
+    if (state == RTCSignalingStateDto.stable) {
       _logger.w(
         "Ignored answer from ${event.fromUserId} because connection is already stable.",
       );
       return;
     }
-    // --- FIX END ---
 
     try {
       final currentState = await pc.getSignalingState();
-      if (currentState != RTCSignalingState.RTCSignalingStateHaveRemoteOffer &&
-          currentState != RTCSignalingState.RTCSignalingStateStable) {
-        final answer = RTCSessionDescription(event.sdp, 'answer');
+      if (currentState != RTCSignalingStateDto.haveRemoteOffer &&
+          currentState != RTCSignalingStateDto.stable) {
+        final answer = RTCSessionDescriptionDto(event.sdp, 'answer');
         await pc.setRemoteDescription(answer);
       }
 
@@ -1024,18 +1115,14 @@ class CallService {
         return;
       }
 
-      // if its just sync error
       var remoteDesc = await pc.getRemoteDescription();
       if (remoteDesc == null) {
         int retries = 0;
         while (retries < 3 && remoteDesc == null) {
           retries++;
-          await Future.delayed(Duration(seconds: 1 * retries), () async {
-            return 1;
-          });
+          await Future.delayed(Duration(seconds: 1 * retries));
           remoteDesc = await pc.getRemoteDescription();
         }
-
         if (remoteDesc == null) {
           _logger.i(
             '_handleIceCandidate remoteDesc is null: ${event.fromUserId}',
@@ -1044,15 +1131,12 @@ class CallService {
         }
       }
 
-      final candidate = RTCIceCandidate(
+      final candidate = RTCIceCandidateDto(
         event.candidate,
-
-        event.sdpMid ?? '',
-
-        event.sdpMLineIndex ?? 0,
+        event.sdpMid,
+        event.sdpMLineIndex,
       );
-
-      await pc.addCandidate(candidate);
+      await pc.addIceCandidate(candidate);
     } catch (e) {
       _logger.e('Error adding ICE candidate: $e');
     }
@@ -1079,7 +1163,7 @@ class CallService {
       await pc.setLocalDescription(offer);
       await _signalingService!.sendOffer(
         event.user.id,
-        offer.sdp!,
+        offer.sdp ?? '',
         roomId: _currentRoomId,
       );
       _logger.i('Participant offer sent: ${event.user.id}');

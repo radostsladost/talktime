@@ -43,6 +43,10 @@ android {
     }
 }
 
+dependencies {
+    implementation("io.github.webrtc-sdk:android:125.6422.07")
+}
+
 flutter {
     source = "../.."
 }

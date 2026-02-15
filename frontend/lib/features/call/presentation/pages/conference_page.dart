@@ -4,13 +4,14 @@ import 'dart:io';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:logger/web.dart';
 import 'package:talktime/features/call/data/call_service.dart';
+import 'package:talktime/features/call/data/echo_reduction_web.dart';
 import 'package:talktime/features/call/data/signaling_service.dart';
 import 'package:talktime/features/call/presentation/remote_participant_tile.dart';
 import 'package:talktime/features/call/presentation/widgets/audio_chooser_popup.dart';
 import 'package:talktime/features/call/presentation/widgets/screen_window_chooser_popup.dart';
+import 'package:talktime/features/call/webrtc/webrtc_platform.dart';
 import 'package:talktime/features/chat/presentation/pages/message_list_page.dart';
 import 'package:talktime/shared/models/conversation.dart';
 
@@ -35,8 +36,8 @@ class _ConferencePageState extends State<ConferencePage> {
   final Logger _logger = Logger(output: ConsoleOutput());
 
   // UI Specific Renderers (must be disposed when page closes)
-  final RTCVideoRenderer _localRenderer = RTCVideoRenderer();
-  final Map<String, RTCVideoRenderer> _remoteRenderers = {};
+  late final IVideoRenderer _localRenderer;
+  final Map<String, IVideoRenderer> _remoteRenderers = {};
   bool _isPresentationMode = false;
   String? _focusedParticipantId; // Optional: manually select who to focus
   bool _cam = false;
@@ -53,9 +54,13 @@ class _ConferencePageState extends State<ConferencePage> {
   StreamSubscription? _speakerStateSubscription;
   StreamSubscription? _speakerDeviceIdSubscription;
 
+  /// Web only: dispose callback for receive-side echo reduction.
+  void Function()? _echoReductionDispose;
+
   @override
   void initState() {
     super.initState();
+    _localRenderer = getWebRTCPlatform().createVideoRenderer();
     _initRenderers();
 
     _callService
@@ -95,6 +100,7 @@ class _ConferencePageState extends State<ConferencePage> {
 
   Future<void> _initRenderers() async {
     await _localRenderer.initialize();
+    _localRenderer.muted = true;
   }
 
   void _setupListeners() {
@@ -154,18 +160,20 @@ class _ConferencePageState extends State<ConferencePage> {
     _speakerStateSubscription = _callService.speakerStateStream.listen((_) {
       setState(() {});
     });
-    _speakerDeviceIdSubscription =
-        _callService.speakerDeviceIdStream.listen((_) {
+    _speakerDeviceIdSubscription = _callService.speakerDeviceIdStream.listen((
+      _,
+    ) {
       setState(() {});
     });
   }
 
   void _attachExistingStreams() {
     try {
-      // 1. Attach local stream if it exists right away
+      // 1. Attach local stream if it exists right away (video-only for preview)
       final currentLocalStream = _callService.cachedVideoStream;
       if (currentLocalStream != null && _localRenderer.srcObject == null) {
         _localRenderer.srcObject = currentLocalStream;
+        _localRenderer.muted = true; // avoid local echo
       }
 
       // Set initial mic/cam state reflected in controls based on service state
@@ -184,36 +192,46 @@ class _ConferencePageState extends State<ConferencePage> {
     }
   }
 
-  void _handleRemoteStreamsUpdate(Map<String, MediaStream> streams) {
-    // 1. Sync up _remoteRenderers map with incoming streams map
+  void _handleRemoteStreamsUpdate(Map<String, IMediaStream> streams) {
+    if (kIsWeb) {
+      _echoReductionDispose?.call();
+      _echoReductionDispose = null;
+      if (streams.length == 1) {
+        final local = _callService.localStream;
+        if (local != null && local.getAudioTracks().isNotEmpty) {
+          final remote = streams.values.first;
+          if (remote.getAudioTracks().isNotEmpty) {
+            _echoReductionDispose = startEchoReduction(
+              remote,
+              local,
+              delaySeconds: 0.3,
+            );
+          }
+        }
+      }
+    }
+
     final activeIds = streams.keys.toSet();
     final currentIds = _remoteRenderers.keys.toSet();
 
-    // Remove renderers for participants who left
     for (final id in currentIds.difference(activeIds)) {
       _remoteRenderers[id]?.dispose();
       _remoteRenderers.remove(id);
     }
 
-    // Initialize/Attach renderers for new/current participants
     for (final id in activeIds) {
       if (!_remoteRenderers.containsKey(id)) {
-        // Initialize new renderer if one doesn't exist for this ID
-        final newRenderer = RTCVideoRenderer();
+        final newRenderer = getWebRTCPlatform().createVideoRenderer();
         newRenderer.initialize().then((_) {
-          // After initialization, assign the stream object we already have
           newRenderer.srcObject = streams[id];
-          // Update state to trigger UI redraw with the new tile
           if (mounted) setState(() {});
         });
         _remoteRenderers[id] = newRenderer;
       } else {
-        // Update existing renderer's stream object (Handles track changes/reconnects)
         _remoteRenderers[id]!.srcObject = streams[id];
       }
     }
 
-    // Trigger a rebuild to reflect the updated map/state
     setState(() {});
   }
 
@@ -250,8 +268,10 @@ class _ConferencePageState extends State<ConferencePage> {
     _speakerStateSubscription?.cancel();
     _speakerDeviceIdSubscription?.cancel();
 
+    _echoReductionDispose?.call();
+    _echoReductionDispose = null;
+
     // Dispose the RENDERERS (UI), but DO NOT stop the call.
-    // The call lives in the service.
     _localRenderer.dispose();
     for (var r in _remoteRenderers.values) r.dispose();
     super.dispose();
@@ -264,7 +284,7 @@ class _ConferencePageState extends State<ConferencePage> {
       body: Stack(
         children: [
           // REMOTE STREAMS GRID
-          StreamBuilder<Map<String, MediaStream>>(
+          StreamBuilder<Map<String, IMediaStream>>(
             stream: _callService.remoteStreamsStream,
             initialData: _callService.remoteStreams,
             builder: (context, snapshot) {
@@ -281,25 +301,21 @@ class _ConferencePageState extends State<ConferencePage> {
               child: SizedBox(
                 width: 100,
                 height: 150,
-                child: StreamBuilder<MediaStream?>(
+                child: StreamBuilder<IMediaStream?>(
                   stream: _callService.cachedVideoStreamStream,
                   initialData: _callService.cachedVideoStream,
                   builder: (context, snapshot) {
                     final stream = snapshot.data;
-                    // print('Local stream: $stream');
 
                     if (stream != null &&
-                        stream.getVideoTracks()?.isNotEmpty == true) {
-                      // CRITICAL FIX: Only update srcObject if reference changes
-                      // to prevent flickering/detaching native resources.
+                        stream.getVideoTracks().isNotEmpty) {
                       if (_localRenderer.srcObject != stream) {
                         _localRenderer.srcObject = stream;
+                        _localRenderer.muted = true;
                       }
-                      return RTCVideoView(_localRenderer, mirror: _screenShare);
+                      return _localRenderer.buildView(mirror: _screenShare);
                     }
 
-                    // If stream is null, display placeholder.
-                    // This happens on endCall or during initialization if media acquisition fails.
                     return Container(color: Colors.transparent);
                   },
                 ),
@@ -313,10 +329,7 @@ class _ConferencePageState extends State<ConferencePage> {
     );
   }
 
-  Widget _buildGrid(Map<String, MediaStream> streams) {
-    // Logic to sync _remoteRenderers map with streams map
-    // and render RTCVideoView for each
-    // ...
+  Widget _buildGrid(Map<String, IMediaStream> streams) {
     // 1. Prepare data
     final participants = streams.keys.toList();
     // Use the service to get user info (names)
@@ -517,9 +530,24 @@ class _ConferencePageState extends State<ConferencePage> {
   }
 
   void _showSpeakerDeviceSelector() async {
-    final selectedDevice =
-        await AudioDevicePopupChooser.showSpeaker(context: context);
-    if (selectedDevice != null) {
+    // On mobile, showSpeaker shows only the speaker toggle (via onSpeakerToggle).
+    final selectedDevice = await AudioDevicePopupChooser.showSpeaker(
+      context: context,
+      initialSpeakerOn: _callService.isSpeakerOn,
+      onSpeakerToggle: _isMobile
+          ? (bool on) {
+              _callService.setSpeakerDevice(on ? 'speaker' : 'earpiece');
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(on ? 'Speaker phone on' : 'Earpiece'),
+                  ),
+                );
+              }
+            }
+          : null,
+    );
+    if (!_isMobile && selectedDevice != null) {
       try {
         _callService.setSpeakerDevice(selectedDevice.deviceId);
         if (mounted) {
@@ -545,21 +573,26 @@ class _ConferencePageState extends State<ConferencePage> {
     }
   }
 
-  void _showCombinedAudioSelector() async {
-    // Mobile / web(mobile): one dialog with mic + speaker sections
-    final mic = await AudioDevicePopupChooser.show(context: context);
-    if (mic != null) {
-      try {
-        await _callService.changeAudioDevice(mic.deviceId);
+  bool get _isMobile =>
+      !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+
+  /// On mobile: opens a dialog with only speaker on/off toggle (no device list).
+  void _showSpeakerToggleForMobile() async {
+    await AudioDevicePopupChooser.showSpeakerToggle(
+      context: context,
+      title: 'Speaker phone',
+      initialSpeakerOn: _callService.isSpeakerOn,
+      onChanged: (bool on) {
+        _callService.setSpeakerDevice(on ? 'speaker' : 'earpiece');
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Audio: ${mic.label.isNotEmpty ? mic.label : "selected"}')),
+            SnackBar(
+              content: Text(on ? 'Speaker phone on' : 'Earpiece'),
+            ),
           );
         }
-      } catch (e) {
-        _logger.e('Error switching audio: $e');
-      }
-    }
+      },
+    );
   }
 
   void _showAudioSettingsPanel() {
@@ -569,9 +602,10 @@ class _ConferencePageState extends State<ConferencePage> {
       builder: (context) => _AudioSettingsSheet(
         callService: _callService,
         isDesktop: _isDesktop,
+        isMobile: _isMobile,
         onSelectMic: _showAudioDeviceSelector,
         onSelectSpeaker: _showSpeakerDeviceSelector,
-        onSelectCombinedAudio: _showCombinedAudioSelector,
+        onSelectSpeakerToggle: _showSpeakerToggleForMobile,
       ),
     );
   }
@@ -668,16 +702,18 @@ class _AudioSettingsSheet extends StatelessWidget {
   const _AudioSettingsSheet({
     required this.callService,
     required this.isDesktop,
+    required this.isMobile,
     required this.onSelectMic,
     required this.onSelectSpeaker,
-    required this.onSelectCombinedAudio,
+    required this.onSelectSpeakerToggle,
   });
 
   final CallService callService;
   final bool isDesktop;
+  final bool isMobile;
   final VoidCallback onSelectMic;
   final VoidCallback onSelectSpeaker;
-  final VoidCallback onSelectCombinedAudio;
+  final VoidCallback onSelectSpeakerToggle;
 
   @override
   Widget build(BuildContext context) {
@@ -719,8 +755,10 @@ class _AudioSettingsSheet extends StatelessWidget {
               builder: (context, snapshot) {
                 final micOn = snapshot.data ?? true;
                 return ListTile(
-                  leading: Icon(micOn ? Icons.mic : Icons.mic_off,
-                      color: micOn ? null : Colors.red),
+                  leading: Icon(
+                    micOn ? Icons.mic : Icons.mic_off,
+                    color: micOn ? null : Colors.red,
+                  ),
                   title: const Text('Microphone'),
                   subtitle: Text(micOn ? 'On' : 'Muted'),
                   trailing: Switch(
@@ -771,15 +809,15 @@ class _AudioSettingsSheet extends StatelessWidget {
                   onSelectSpeaker();
                 },
               ),
-            ] else ...[
+            ] else if (isMobile) ...[
               ListTile(
-                leading: const Icon(Icons.volume_up),
-                title: const Text('Audio device'),
-                subtitle: const Text('Choose microphone or speaker'),
+                leading: const Icon(Icons.speaker_phone),
+                title: const Text('Speaker phone'),
+                subtitle: const Text('Loudspeaker or earpiece'),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () {
                   Navigator.pop(context);
-                  onSelectCombinedAudio();
+                  onSelectSpeakerToggle();
                 },
               ),
             ],

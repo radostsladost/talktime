@@ -1,16 +1,20 @@
+import 'dart:io';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:talktime/features/call/webrtc/webrtc_platform.dart';
+
+bool get _isMobile => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 
 class AudioDevicePopupChooser {
   /// Shows a popup dialog to select an audio input (microphone) device.
-  /// Returns the selected [MediaDeviceInfo], or null if canceled.
-  static Future<MediaDeviceInfo?> show({
+  /// Returns the selected [MediaDeviceInfoDto], or null if canceled.
+  static Future<MediaDeviceInfoDto?> show({
     required BuildContext context,
     String title = 'Select Microphone',
   }) async {
-    return await showDialog<MediaDeviceInfo>(
+    return await showDialog<MediaDeviceInfoDto>(
       context: context,
       builder: (context) {
         return _AudioDeviceListDialog(
@@ -23,12 +27,24 @@ class AudioDevicePopupChooser {
   }
 
   /// Shows a popup dialog to select an audio output (speaker) device.
-  /// Returns the selected [MediaDeviceInfo], or null if canceled.
-  static Future<MediaDeviceInfo?> showSpeaker({
+  /// On mobile shows only a speaker on/off toggle.
+  /// Returns the selected [MediaDeviceInfoDto], or null if canceled (on mobile, always null).
+  static Future<MediaDeviceInfoDto?> showSpeaker({
     required BuildContext context,
     String title = 'Select Speaker',
+    bool initialSpeakerOn = true,
+    ValueChanged<bool>? onSpeakerToggle,
   }) async {
-    return await showDialog<MediaDeviceInfo>(
+    if (_isMobile && onSpeakerToggle != null) {
+      await showSpeakerToggle(
+        context: context,
+        title: title,
+        initialSpeakerOn: initialSpeakerOn,
+        onChanged: onSpeakerToggle,
+      );
+      return null;
+    }
+    return await showDialog<MediaDeviceInfoDto>(
       context: context,
       builder: (context) {
         return _AudioDeviceListDialog(
@@ -37,6 +53,74 @@ class AudioDevicePopupChooser {
           icon: Icons.volume_up,
         );
       },
+    );
+  }
+
+  /// Shows a dialog with only a speaker-phone on/off toggle (for mobile).
+  /// [onChanged] is called when the user toggles the switch.
+  static Future<void> showSpeakerToggle({
+    required BuildContext context,
+    String title = 'Speaker',
+    required bool initialSpeakerOn,
+    required ValueChanged<bool> onChanged,
+  }) async {
+    return showDialog<void>(
+      context: context,
+      builder: (context) => _SpeakerToggleDialog(
+        title: title,
+        initialSpeakerOn: initialSpeakerOn,
+        onChanged: onChanged,
+      ),
+    );
+  }
+}
+
+// Dialog that shows only speaker on/off toggle (mobile)
+class _SpeakerToggleDialog extends StatefulWidget {
+  final String title;
+  final bool initialSpeakerOn;
+  final ValueChanged<bool> onChanged;
+
+  const _SpeakerToggleDialog({
+    required this.title,
+    required this.initialSpeakerOn,
+    required this.onChanged,
+  });
+
+  @override
+  State<_SpeakerToggleDialog> createState() => _SpeakerToggleDialogState();
+}
+
+class _SpeakerToggleDialogState extends State<_SpeakerToggleDialog> {
+  late bool _speakerOn;
+
+  @override
+  void initState() {
+    super.initState();
+    _speakerOn = widget.initialSpeakerOn;
+  }
+
+  void _onToggle(bool value) {
+    setState(() => _speakerOn = value);
+    widget.onChanged(value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.title),
+      content: SwitchListTile(
+        value: _speakerOn,
+        onChanged: _onToggle,
+        title: const Text('Speaker phone'),
+        subtitle: Text(_speakerOn ? 'Loudspeaker' : 'Earpiece'),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Done'),
+        ),
+      ],
     );
   }
 }
@@ -58,8 +142,8 @@ class _AudioDeviceListDialog extends StatefulWidget {
 }
 
 class _AudioDeviceListDialogState extends State<_AudioDeviceListDialog> {
-  List<MediaDeviceInfo> _devices = [];
-  MediaDeviceInfo? _selectedDevice;
+  List<MediaDeviceInfoDto> _devices = [];
+  MediaDeviceInfoDto? _selectedDevice;
   bool _isLoading = true;
 
   @override
@@ -70,7 +154,7 @@ class _AudioDeviceListDialogState extends State<_AudioDeviceListDialog> {
 
   Future<void> _loadDevices() async {
     try {
-      final devices = await Helper.enumerateDevices(widget.kind);
+      final devices = await getWebRTCPlatform().enumerateDevices(widget.kind);
       if (mounted) {
         setState(() {
           _devices = devices;

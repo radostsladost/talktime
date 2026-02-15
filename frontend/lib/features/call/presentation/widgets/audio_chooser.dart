@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:talktime/features/call/webrtc/webrtc_platform.dart';
 
 class AudioDeviceChooser extends StatefulWidget {
-  final ValueChanged<MediaDeviceInfo> onDeviceSelected;
+  final ValueChanged<MediaDeviceInfoDto> onDeviceSelected;
 
   const AudioDeviceChooser({super.key, required this.onDeviceSelected});
 
@@ -11,8 +11,8 @@ class AudioDeviceChooser extends StatefulWidget {
 }
 
 class _AudioDeviceChooserState extends State<AudioDeviceChooser> {
-  List<MediaDeviceInfo> _devices = [];
-  MediaDeviceInfo? _selectedDevice;
+  List<MediaDeviceInfoDto> _devices = [];
+  MediaDeviceInfoDto? _selectedDevice;
 
   @override
   void initState() {
@@ -22,8 +22,7 @@ class _AudioDeviceChooserState extends State<AudioDeviceChooser> {
 
   Future<void> _loadDevices() async {
     try {
-      // Get microphone devices
-      final devices = await Helper.enumerateDevices("audioinput");
+      final devices = await getWebRTCPlatform().enumerateDevices('audioinput');
       if (mounted) {
         setState(() {
           _devices = devices;
@@ -40,10 +39,10 @@ class _AudioDeviceChooserState extends State<AudioDeviceChooser> {
 
   @override
   Widget build(BuildContext context) {
-    return DropdownButtonFormField<MediaDeviceInfo>(
+    return DropdownButtonFormField<MediaDeviceInfoDto>(
       value: _selectedDevice,
       items: _devices.map((device) {
-        return DropdownMenuItem<MediaDeviceInfo>(
+        return DropdownMenuItem<MediaDeviceInfoDto>(
           value: device,
           child: Text(device.label),
         );

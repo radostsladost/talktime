@@ -1,18 +1,18 @@
 import 'dart:math';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:talktime/features/call/webrtc/webrtc_platform.dart';
 
 class ScreenWindowPopupChooser {
   /// Shows a popup dialog with a grid of screen/window sources.
-  /// Returns the selected [DesktopCapturerSource], or null if canceled.
-  static Future<DesktopCapturerSource?> show({
+  /// Returns the selected [DesktopCapturerSourceDto], or null if canceled.
+  static Future<DesktopCapturerSourceDto?> show({
     required BuildContext context,
     String title = 'Select Screen or Window',
     double thumbnailWidth = 180,
     double thumbnailHeight = 80,
   }) async {
-    return await showDialog<DesktopCapturerSource>(
+    return await showDialog<DesktopCapturerSourceDto>(
       context: context,
       builder: (context) {
         return _ScreenWindowGridDialog(
@@ -25,7 +25,6 @@ class ScreenWindowPopupChooser {
   }
 }
 
-// Internal dialog widget
 class _ScreenWindowGridDialog extends StatefulWidget {
   final String title;
   final double thumbnailWidth;
@@ -43,8 +42,8 @@ class _ScreenWindowGridDialog extends StatefulWidget {
 }
 
 class _ScreenWindowGridDialogState extends State<_ScreenWindowGridDialog> {
-  List<DesktopCapturerSource> _sources = [];
-  DesktopCapturerSource? _selectedSource;
+  List<DesktopCapturerSourceDto> _sources = [];
+  DesktopCapturerSourceDto? _selectedSource;
   bool _isLoading = true;
 
   @override
@@ -55,13 +54,7 @@ class _ScreenWindowGridDialogState extends State<_ScreenWindowGridDialog> {
 
   Future<void> _loadSources() async {
     try {
-      final sources = await desktopCapturer.getSources(
-        types: [SourceType.Screen, SourceType.Window],
-        thumbnailSize: ThumbnailSize(
-          widget.thumbnailWidth.toInt(),
-          widget.thumbnailHeight.toInt(),
-        ),
-      );
+      final sources = await getWebRTCPlatform().getDesktopSources();
       if (mounted) {
         setState(() {
           _sources = sources;
@@ -142,7 +135,7 @@ class _ScreenWindowGridDialogState extends State<_ScreenWindowGridDialog> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              buildSourcePreview(source),
+                              _buildSourcePreview(source),
                               Container(
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 6,
@@ -191,14 +184,7 @@ class _ScreenWindowGridDialogState extends State<_ScreenWindowGridDialog> {
     );
   }
 
-  Widget buildSourcePreview(DesktopCapturerSource source) {
-    if (source.thumbnail != null) {
-      return Expanded(
-        child: Image.memory(source.thumbnail!, fit: BoxFit.cover),
-      );
-    }
-
-    // Fallback icons based on source type
+  Widget _buildSourcePreview(DesktopCapturerSourceDto source) {
     final isScreen =
         source.id.toLowerCase().contains('screen') ||
         source.name.toLowerCase().contains('screen');

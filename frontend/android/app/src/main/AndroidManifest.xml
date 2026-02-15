@@ -14,10 +14,14 @@
         android:required="false"
     />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
-
-    <uses-feature
+    <uses-permission
+        android:name="android.permission.MODIFY_AUDIO_SETTINGS"
+    />re
         android:name="android.hardware.camera"
         android:required="false"
+    />
+    <uses-feature
+        android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"
     />
     <uses-permission android:name="android.permission.CAMERA" />
 

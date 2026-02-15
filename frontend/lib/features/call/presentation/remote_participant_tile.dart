@@ -1,17 +1,18 @@
 import 'dart:async';
+import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:talktime/features/call/webrtc/webrtc_platform.dart';
 
-// This widget is the "smart" component. When you navigate away and come back,
-// this widget re-mounts, initializes a fresh renderer,
-// and attaches the existing stream from the service immediately.
 class RemoteParticipantTile extends StatefulWidget {
   final String participantId;
   final String username;
-  final MediaStream stream;
+  final IMediaStream stream;
   final Function(String, bool)? onParticipantTap;
   final bool? fitInRect;
-  /// When set, routes this participant's audio to the given output device (e.g. speaker).
+
+  /// Output device for this participant's audio (desktop/web only).
+  /// On Android routing is via platform; remote audio is played by this renderer.
   final String? speakerDeviceId;
 
   const RemoteParticipantTile({
@@ -29,17 +30,15 @@ class RemoteParticipantTile extends StatefulWidget {
 }
 
 class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
-  final RTCVideoRenderer _renderer = RTCVideoRenderer();
+  late final IVideoRenderer _renderer;
   bool _isRendererReady = false;
   bool _hasActiveVideo = false;
   bool _hasActiveAudio = true;
 
-  StreamSubscription? _onAddTrackSubscription;
-  StreamSubscription? _onRemoveTrackSubscription;
-
   @override
   void initState() {
     super.initState();
+    _renderer = getWebRTCPlatform().createVideoRenderer();
     _initRenderer();
     _setupStreamListeners();
   }
@@ -49,7 +48,9 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
     _renderer.srcObject = widget.stream;
     if (widget.speakerDeviceId != null) {
       try {
-        await _renderer.audioOutput(widget.speakerDeviceId!);
+        if ((kIsWeb || !Platform.isAndroid) && widget.speakerDeviceId != null) {
+          await _renderer.audioOutput(widget.speakerDeviceId!);
+        }
       } catch (_) {}
     }
     if (mounted) {
@@ -61,24 +62,21 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
   }
 
   void _setupStreamListeners() {
-    // Listen for track additions
-    widget.stream.onAddTrack = (event) {
+    widget.stream.onAddTrack = (_, track) {
       _updateTrackStates();
-      _setupTrackListeners(event);
+      _setupTrackListeners(track);
     };
 
-    // Listen for track removals
-    widget.stream.onRemoveTrack = (event) {
+    widget.stream.onRemoveTrack = (_, track) {
       _updateTrackStates();
     };
 
-    // Setup listeners for existing tracks
     for (final track in widget.stream.getTracks()) {
       _setupTrackListeners(track);
     }
   }
 
-  void _setupTrackListeners(MediaStreamTrack track) {
+  void _setupTrackListeners(IMediaStreamTrack track) {
     // Listen for mute/unmute events on the track
     track.onMute = () {
       if (mounted) {
@@ -124,10 +122,6 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
   }
 
   void _disposeStreamListeners() {
-    _onAddTrackSubscription?.cancel();
-    _onRemoveTrackSubscription?.cancel();
-
-    // Clear track listeners
     for (final track in widget.stream.getTracks()) {
       track.onMute = null;
       track.onUnMute = null;
@@ -194,11 +188,10 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
             children: [
               // 1. Video Layer
               if (_isRendererReady && hasVideo)
-                RTCVideoView(
-                  _renderer,
+                _renderer.buildView(
                   objectFit: widget.fitInRect == true
-                      ? RTCVideoViewObjectFit.RTCVideoViewObjectFitContain
-                      : RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                      ? VideoObjectFit.contain
+                      : VideoObjectFit.cover,
                   mirror: false,
                 )
               else
