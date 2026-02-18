@@ -247,6 +247,16 @@ class MessageService {
     return _localStorage.markAsRead(message.id);
   }
 
+  /// Mark all messages in the conversation from others as read (e.g. when user opens the chat).
+  Future<void> markConversationAsRead(String conversationId) async {
+    try {
+      final myUserId = (await AuthService().getCurrentUser()).id;
+      await _localStorage.markConversationAsRead(conversationId, myUserId);
+    } catch (e) {
+      _logger.e('Error marking conversation as read: $e');
+    }
+  }
+
   /// Send a new message to a conversation
   Future<Message> sendMessage(
     String conversationId,

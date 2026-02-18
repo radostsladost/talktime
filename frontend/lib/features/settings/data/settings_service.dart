@@ -13,6 +13,7 @@ class SettingsService {
   static const String _notificationSoundKey = 'notification_sound';
   static const String _notificationVibrationKey = 'notification_vibration';
   static const String _messagePreviewKey = 'message_preview';
+  static const String _callNoiseCancellationKey = 'call_noise_cancellation';
 
   // Stream controllers for reactive updates
   final _themeModeController = StreamController<ThemeMode>.broadcast();
@@ -115,6 +116,17 @@ class SettingsService {
   Future<void> setMessagePreview(bool enabled) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_messagePreviewKey, enabled);
+  }
+
+  /// Call noise cancellation (PC only). Default true.
+  Future<bool> getCallNoiseCancellation() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_callNoiseCancellationKey) ?? true;
+  }
+
+  Future<void> setCallNoiseCancellation(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_callNoiseCancellationKey, enabled);
   }
 
   void dispose() {

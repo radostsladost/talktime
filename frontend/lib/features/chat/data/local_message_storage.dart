@@ -89,6 +89,17 @@ class LocalMessageStorage {
     );
   }
 
+  /// Mark all messages in a conversation from others as read (when user opens the chat).
+  Future<void> markConversationAsRead(String conversationId, String myUserId) async {
+    var db = await _getDb();
+    await db.update(
+      'message',
+      {'readAt': DateTime.now().millisecondsSinceEpoch},
+      where: 'conversationId = ? AND senderId != ? AND (readAt IS NULL OR readAt = 0)',
+      whereArgs: [conversationId, myUserId],
+    );
+  }
+
   /// Get all messages across all conversations for sync
   /// Optionally filter by sinceTimestamp (messages newer than this timestamp)
   Future<List<Message>> getAllMessagesForSync({

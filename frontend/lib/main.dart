@@ -15,6 +15,7 @@ import 'package:flutter_callkit_incoming/entities/ios_params.dart';
 import 'package:flutter_callkit_incoming/entities/notification_params.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:talktime/app.dart';
+import 'package:talktime/core/config/environment.dart';
 import 'package:talktime/core/global_key.dart';
 import 'package:talktime/core/navigation_manager.dart';
 import 'package:talktime/features/call/data/incoming_call_manager.dart';
@@ -314,6 +315,7 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 }
 
 Future<void> handleCall(Map<String, dynamic> data) async {
+  var backUrl = Environment.apiBaseUrl;
   Logger().i("Handling a background message: ${jsonEncode(data)}");
 
   if ((data['type'] as String?) == 'call') {
@@ -345,13 +347,13 @@ Future<void> handleCall(Map<String, dynamic> data) async {
         duration: 30000,
         extra: <String, dynamic>{'userId': '1a2b3c4d'},
         headers: <String, dynamic>{'apiKey': 'Abc@123!', 'platform': 'flutter'},
-        android: const AndroidParams(
+        android: AndroidParams(
           isCustomNotification: true,
           isShowLogo: false,
           // logoUrl: 'https://i.pravatar.cc/100',
           ringtonePath: 'system_ringtone_default',
           backgroundColor: '#152545',
-          backgroundUrl: 'https://radost.dev/icons/call_bg.jpg',
+          backgroundUrl: '$backUrl/icons/call_bg.jpg',
           actionColor: '#6b80de',
           textColor: '#ffffff',
           incomingCallNotificationChannelName: "Incoming Call",

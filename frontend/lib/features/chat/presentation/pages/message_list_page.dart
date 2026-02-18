@@ -103,6 +103,14 @@ class _MessageListPageState extends State<MessageListPage> {
     // On open: sync full history with pagination and pending, then load from local
     _syncMessagesWithPaginationAndPending();
 
+    // Mark all messages in this conversation as read when user opens the chat
+    _messageService.markConversationAsRead(widget.conversation.id).then((_) {
+      if (!mounted) return;
+      _loadMessagesWithReactions().then((_) {
+        if (mounted) widget.onConversationActivity?.call();
+      });
+    });
+
     WebSocketManager()
         .initialize()
         .then((_) {

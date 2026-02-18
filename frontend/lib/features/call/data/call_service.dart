@@ -6,12 +6,12 @@ import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
-import 'package:path/path.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:logger/logger.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:flutter_callkit_incoming/entities/call_kit_params.dart';
 import 'package:pip/pip.dart';
+import 'package:talktime/features/call/audio/desktop_noise_cancellation_pipeline.dart';
 import 'package:talktime/features/call/data/signaling_service.dart';
 import 'package:talktime/features/call/webrtc/webrtc_platform.dart';
 import 'package:talktime/core/network/api_client.dart';
@@ -83,6 +83,12 @@ class CallService {
   /// On Android/iOS: true = loudspeaker, false = earpiece. Only updated when setSpeakerDevice is used.
   bool get isSpeakerOn => _speakerOn;
 
+  /// Noise cancellation (PC only). When true, desktop uses NN pipeline when native bridge is ready; until then, constraints apply.
+  bool get noiseCancellationEnabled => _noiseCancellationEnabled;
+  void setNoiseCancellation(bool value) {
+    _noiseCancellationEnabled = value;
+  }
+
   String? _currentRoomId;
   bool _isMuted = false;
   bool _isCameraOff = true;
@@ -92,6 +98,11 @@ class CallService {
   bool _speakerOn = true;
   Timer? _timer;
   User? _currentUser;
+  bool _noiseCancellationEnabled = true;
+  String? _currentMicDeviceId;
+  final DesktopNoiseCancellationPipeline _ncPipeline = DesktopNoiseCancellationPipeline();
+
+  bool get _isDesktop => !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
 
   // =========================================================
   // INITIALIZATION & CONNECTION
@@ -267,6 +278,10 @@ class CallService {
     _updateState(CallState.idle);
     _localStreamController.add(null);
     _remoteStreamsController.add({});
+
+    if (_ncPipeline.isRunning) {
+      await _ncPipeline.stop();
+    }
 
     _logger.i("Call ended successfully, state reset to idle");
 
@@ -693,6 +708,7 @@ class CallService {
   /// Replaces the audio track in the local stream and all peer connections.
   Future<void> changeAudioDevice(String deviceId) async {
     try {
+      _currentMicDeviceId = deviceId;
       _logger.i('Switching audio device to: $deviceId');
 
       final audioOpts = <String, dynamic>{
@@ -734,6 +750,49 @@ class CallService {
     }
   }
 
+  /// Re-applies audio constraints (e.g. after toggling noise cancellation) and replaces the sent audio track.
+  Future<void> reapplyAudioConstraints() async {
+    if (_state == CallState.idle) return;
+    if (_ncPipeline.isRunning) await _ncPipeline.stop();
+    try {
+      final audioOpts = <String, dynamic>{
+        ..._audioConstraintsForCall(),
+      };
+      if (_currentMicDeviceId != null) {
+        audioOpts['deviceId'] = _currentMicDeviceId;
+      }
+      final newStream = await _platform.getUserMedia({'audio': audioOpts});
+      if (newStream == null) throw Exception('getUserMedia returned null');
+      final audioTracks = newStream.getAudioTracks();
+      if (audioTracks.isEmpty) throw Exception('No audio track in stream');
+      final newAudioTrack = audioTracks.first;
+      if (_localStream != null) {
+        final oldAudioTracks = _localStream!.getAudioTracks();
+        for (final oldTrack in oldAudioTracks) {
+          await _localStream!.removeTrack(oldTrack);
+          oldTrack.stop();
+        }
+        await _localStream!.addTrack(newAudioTrack);
+      }
+      for (final pc in _peerConnections.values) {
+        final transceivers = await pc.getTransceivers();
+        for (final transceiver in transceivers) {
+          if (transceiver.sender.track?.kind == 'audio') {
+            await transceiver.sender.replaceTrack(newAudioTrack);
+          }
+        }
+      }
+      _localStreamController.sink.add(_localStream);
+      if (_isDesktop && _noiseCancellationEnabled) {
+        await _ncPipeline.start(deviceId: _currentMicDeviceId);
+      }
+      _logger.i('Audio constraints reapplied');
+    } catch (e) {
+      _logger.e('Error reapplying audio constraints: $e');
+      rethrow;
+    }
+  }
+
   void _updateState(CallState newState) {
     _state = newState;
     _stateController.add(newState);
@@ -747,12 +806,17 @@ class CallService {
 
   /// Audio constraints for the call mic. Strong AEC/AGC/NS to reduce acoustic echo
   /// when using speaker (phone plays remote audio → mic picks it up → remote hears echo).
+  /// On desktop, noiseSuppression/echoCancellation follow the noise cancellation setting.
   Map<String, dynamic> _audioConstraintsForCall() {
     final base = <String, dynamic>{
       'echoCancellation': true,
       'noiseSuppression': true,
       'autoGainControl': true,
     };
+    if (_isDesktop) {
+      base['echoCancellation'] = _noiseCancellationEnabled;
+      base['noiseSuppression'] = _noiseCancellationEnabled;
+    }
     if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
       base['googEchoCancellation'] = true;
       base['googNoiseSuppression'] = true;
@@ -794,6 +858,12 @@ class CallService {
 
         _localStream = stream;
         _localStreamController.sink.add(_localStream);
+
+        if (_isDesktop && _noiseCancellationEnabled) {
+          _ncPipeline.start(deviceId: _currentMicDeviceId).catchError((e) {
+            _logger.w('Desktop NC pipeline start failed: $e');
+          });
+        }
 
         if (_isMuted) {
           Future.delayed(Duration(milliseconds: 300), () {

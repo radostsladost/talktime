@@ -23,6 +23,7 @@ dependencies:
   signalr_netcore: ^1.4.4 # SignalR client for real-time communication
   flutter_dotenv: ^6.0.0
   flutter_nnnoiseless: ^1.0.1
+  record: ^6.0.0
   audio_service: ^0.18.18
   flutter_background_service: ^5.1.0
   sqflite: ^2.4.2

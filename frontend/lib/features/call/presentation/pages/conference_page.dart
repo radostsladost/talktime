@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:logger/web.dart';
 import 'package:talktime/features/call/data/call_service.dart';
 import 'package:talktime/features/call/data/signaling_service.dart';
+import 'package:talktime/features/settings/data/settings_service.dart';
 import 'package:talktime/features/call/presentation/remote_participant_tile.dart';
 import 'package:talktime/features/call/presentation/widgets/audio_chooser_popup.dart';
 import 'package:talktime/features/call/presentation/widgets/screen_window_chooser_popup.dart';
@@ -53,7 +54,6 @@ class _ConferencePageState extends State<ConferencePage> {
   StreamSubscription? _speakerStateSubscription;
   StreamSubscription? _speakerDeviceIdSubscription;
 
-
   @override
   void initState() {
     super.initState();
@@ -65,7 +65,12 @@ class _ConferencePageState extends State<ConferencePage> {
         .catchError((error) {
           _logger.e("Error initializing call service: $error");
         })
-        .then((_) {
+        .then((_) async {
+          // Apply desktop noise cancellation setting before starting media
+          if (_isDesktop) {
+            final nc = await SettingsService().getCallNoiseCancellation();
+            _callService.setNoiseCancellation(nc);
+          }
           // Check if we are already in this call, if not, start it
           if (_callService.currentState == CallState.idle) {
             _callService
@@ -198,7 +203,8 @@ class _ConferencePageState extends State<ConferencePage> {
       _remoteRenderers.remove(id);
     }
 
-    final assignStream = !kIsWeb; // Web: only tile renderers get stream to avoid duplicate audio
+    final assignStream =
+        !kIsWeb; // Web: only tile renderers get stream to avoid duplicate audio
     for (final id in activeIds) {
       if (!_remoteRenderers.containsKey(id)) {
         final newRenderer = getWebRTCPlatform().createVideoRenderer();
@@ -284,8 +290,7 @@ class _ConferencePageState extends State<ConferencePage> {
                   builder: (context, snapshot) {
                     final stream = snapshot.data;
 
-                    if (stream != null &&
-                        stream.getVideoTracks().isNotEmpty) {
+                    if (stream != null && stream.getVideoTracks().isNotEmpty) {
                       if (_localRenderer.srcObject != stream) {
                         _localRenderer.srcObject = stream;
                         _localRenderer.muted = true;
@@ -516,9 +521,7 @@ class _ConferencePageState extends State<ConferencePage> {
               _callService.setSpeakerDevice(on ? 'speaker' : 'earpiece');
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(on ? 'Speaker phone on' : 'Earpiece'),
-                  ),
+                  SnackBar(content: Text(on ? 'Speaker phone on' : 'Earpiece')),
                 );
               }
             }
@@ -550,8 +553,7 @@ class _ConferencePageState extends State<ConferencePage> {
     }
   }
 
-  bool get _isMobile =>
-      !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+  bool get _isMobile => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 
   /// On mobile: opens a dialog with only speaker on/off toggle (no device list).
   void _showSpeakerToggleForMobile() async {
@@ -563,9 +565,7 @@ class _ConferencePageState extends State<ConferencePage> {
         _callService.setSpeakerDevice(on ? 'speaker' : 'earpiece');
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(on ? 'Speaker phone on' : 'Earpiece'),
-            ),
+            SnackBar(content: Text(on ? 'Speaker phone on' : 'Earpiece')),
           );
         }
       },
@@ -675,7 +675,7 @@ class _ConferencePageState extends State<ConferencePage> {
   }
 }
 
-class _AudioSettingsSheet extends StatelessWidget {
+class _AudioSettingsSheet extends StatefulWidget {
   const _AudioSettingsSheet({
     required this.callService,
     required this.isDesktop,
@@ -693,9 +693,27 @@ class _AudioSettingsSheet extends StatelessWidget {
   final VoidCallback onSelectSpeakerToggle;
 
   @override
+  State<_AudioSettingsSheet> createState() => _AudioSettingsSheetState();
+}
+
+class _AudioSettingsSheetState extends State<_AudioSettingsSheet> {
+  bool _noiseCancellation = true;
+
+  @override
+  void initState() {
+    super.initState();
+    SettingsService().getCallNoiseCancellation().then((value) {
+      if (mounted) setState(() => _noiseCancellation = value);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
+    final callService = widget.callService;
+    final isDesktop = widget.isDesktop;
+    final isMobile = widget.isMobile;
 
     return Container(
       decoration: BoxDecoration(
@@ -704,101 +722,134 @@ class _AudioSettingsSheet extends StatelessWidget {
       ),
       padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
       child: SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                margin: const EdgeInsets.only(bottom: 20),
-                decoration: BoxDecoration(
-                  color: colorScheme.onSurfaceVariant.withOpacity(0.4),
-                  borderRadius: BorderRadius.circular(2),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 20),
+                  decoration: BoxDecoration(
+                    color: colorScheme.onSurfaceVariant.withOpacity(0.4),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
               ),
-            ),
-            Text(
-              'Audio',
-              style: theme.textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.bold,
+              Text(
+                'Audio',
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
               ),
-            ),
-            const SizedBox(height: 16),
-            StreamBuilder<bool>(
-              stream: callService.micStateStream,
-              initialData: true,
-              builder: (context, snapshot) {
-                final micOn = snapshot.data ?? true;
-                return ListTile(
-                  leading: Icon(
-                    micOn ? Icons.mic : Icons.mic_off,
-                    color: micOn ? null : Colors.red,
-                  ),
-                  title: const Text('Microphone'),
-                  subtitle: Text(micOn ? 'On' : 'Muted'),
+              const SizedBox(height: 16),
+              StreamBuilder<bool>(
+                stream: callService.micStateStream,
+                initialData: true,
+                builder: (context, snapshot) {
+                  final micOn = snapshot.data ?? true;
+                  return ListTile(
+                    leading: Icon(
+                      micOn ? Icons.mic : Icons.mic_off,
+                      color: micOn ? null : Colors.red,
+                    ),
+                    title: const Text('Microphone'),
+                    subtitle: Text(micOn ? 'On' : 'Muted'),
+                    trailing: Switch(
+                      value: micOn,
+                      onChanged: (_) => callService.toggleMic(),
+                    ),
+                  );
+                },
+              ),
+              StreamBuilder<bool>(
+                stream: callService.speakerStateStream,
+                initialData: true,
+                builder: (context, snapshot) {
+                  final speakerOn = snapshot.data ?? true;
+                  return ListTile(
+                    leading: Icon(
+                      speakerOn ? Icons.volume_up : Icons.volume_off,
+                      color: speakerOn ? null : Colors.red,
+                    ),
+                    title: const Text('Speaker'),
+                    subtitle: Text(speakerOn ? 'On' : 'Muted'),
+                    trailing: Switch(
+                      value: speakerOn,
+                      onChanged: (_) => callService.toggleSpeakerMute(),
+                    ),
+                  );
+                },
+              ),
+              if (isDesktop) ...[
+                const Divider(height: 24),
+                ListTile(
+                  leading: const Icon(Icons.noise_control_off),
+                  title: const Text('Noise cancellation'),
+                  subtitle: Text(_noiseCancellation ? 'On' : 'Off'),
                   trailing: Switch(
-                    value: micOn,
-                    onChanged: (_) => callService.toggleMic(),
+                    value: _noiseCancellation,
+                    onChanged: (value) async {
+                      setState(() => _noiseCancellation = value);
+                      await SettingsService().setCallNoiseCancellation(value);
+                      callService.setNoiseCancellation(value);
+                      try {
+                        await callService.reapplyAudioConstraints();
+                      } catch (e) {
+                        if (mounted) {
+                          setState(() => _noiseCancellation = !value);
+                          SettingsService().setCallNoiseCancellation(!value);
+                          callService.setNoiseCancellation(!value);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Failed to apply: $e'),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                        }
+                      }
+                    },
                   ),
-                );
-              },
-            ),
-            StreamBuilder<bool>(
-              stream: callService.speakerStateStream,
-              initialData: true,
-              builder: (context, snapshot) {
-                final speakerOn = snapshot.data ?? true;
-                return ListTile(
-                  leading: Icon(
-                    speakerOn ? Icons.volume_up : Icons.volume_off,
-                    color: speakerOn ? null : Colors.red,
-                  ),
-                  title: const Text('Speaker'),
-                  subtitle: Text(speakerOn ? 'On' : 'Muted'),
-                  trailing: Switch(
-                    value: speakerOn,
-                    onChanged: (_) => callService.toggleSpeakerMute(),
-                  ),
-                );
-              },
-            ),
-            const Divider(height: 24),
-            if (isDesktop) ...[
-              ListTile(
-                leading: const Icon(Icons.mic),
-                title: const Text('Microphone device'),
-                subtitle: const Text('Choose input device'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () {
-                  Navigator.pop(context);
-                  onSelectMic();
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.volume_up),
-                title: const Text('Speaker device'),
-                subtitle: const Text('Choose output device'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () {
-                  Navigator.pop(context);
-                  onSelectSpeaker();
-                },
-              ),
-            ] else if (isMobile) ...[
-              ListTile(
-                leading: const Icon(Icons.speaker_phone),
-                title: const Text('Speaker phone'),
-                subtitle: const Text('Loudspeaker or earpiece'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () {
-                  Navigator.pop(context);
-                  onSelectSpeakerToggle();
-                },
-              ),
+                ),
+              ],
+              const Divider(height: 24),
+              if (isDesktop) ...[
+                ListTile(
+                  leading: const Icon(Icons.mic),
+                  title: const Text('Microphone device'),
+                  subtitle: const Text('Choose input device'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () {
+                    Navigator.pop(context);
+                    widget.onSelectMic();
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.volume_up),
+                  title: const Text('Speaker device'),
+                  subtitle: const Text('Choose output device'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () {
+                    Navigator.pop(context);
+                    widget.onSelectSpeaker();
+                  },
+                ),
+              ] else if (isMobile) ...[
+                ListTile(
+                  leading: const Icon(Icons.speaker_phone),
+                  title: const Text('Speaker phone'),
+                  subtitle: const Text('Loudspeaker or earpiece'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () {
+                    Navigator.pop(context);
+                    widget.onSelectSpeakerToggle();
+                  },
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
