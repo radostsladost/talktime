@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:logger/logger.dart';
 import 'package:talktime/core/navigation_manager.dart';
+import 'package:talktime/core/websocket/websocket_manager.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/features/chat/data/conversation_service.dart';
 import 'package:talktime/features/chat/data/message_service.dart';
@@ -25,6 +26,7 @@ class _ChatListPageState extends State<ChatListPage>
   late Timer _timer;
   final Logger _logger = Logger(output: ConsoleOutput());
   final Map<String, Message> _lastMessageMap = {};
+  void Function(String, ConferenceParticipant, String)? _conferenceParticipantCallback;
 
   @override
   void initState() {
@@ -64,6 +66,11 @@ class _ChatListPageState extends State<ChatListPage>
         .catchError((error) {
           _logger.e('Error fetching conversations $error');
         });
+
+    _conferenceParticipantCallback = (_, __, ___) {
+      if (mounted) setState(() {});
+    };
+    WebSocketManager().onConferenceParticipant(_conferenceParticipantCallback!);
   }
 
   @override
@@ -94,6 +101,11 @@ class _ChatListPageState extends State<ChatListPage>
         if (lastMessage != null) _lastMessageMap[conversation.id] = lastMessage;
       });
     }
+    WebSocketManager().initialize().then((_) {
+      for (final c in conversations) {
+        WebSocketManager().requestRoomParticipants(c.id);
+      }
+    });
   }
 
   @override
@@ -152,6 +164,8 @@ class _ChatListPageState extends State<ChatListPage>
                               User(id: '0', username: 'Unknown'),
                           sentAt: convo.lastMessageAt ?? "",
                         );
+                    final inCallParticipants =
+                        WebSocketManager().getConferenceParticipants(convo.id);
 
                     return Card(
                       margin: const EdgeInsets.symmetric(
@@ -195,18 +209,30 @@ class _ChatListPageState extends State<ChatListPage>
                                 fontWeight: FontWeight.w600,
                               ),
                         ),
-                        subtitle: Text(
-                          lastMessage.content,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodyMedium
-                              ?.copyWith(
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .onSurfaceVariant,
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (inCallParticipants.isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 4),
+                                child: _buildInCallAvatars(
+                                    context, inCallParticipants),
                               ),
+                            Text(
+                              lastMessage.content,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodyMedium
+                                  ?.copyWith(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant,
+                                  ),
+                            ),
+                          ],
                         ),
                         trailing: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
@@ -325,8 +351,83 @@ class _ChatListPageState extends State<ChatListPage>
     NavigationManager().openSettings();
   }
 
+  static const double _inCallAvatarSize = 18;
+  static const double _inCallAvatarOverlap = -5;
+
+  Widget _buildInCallAvatars(
+    BuildContext context,
+    List<ConferenceParticipant> participants,
+  ) {
+    const maxAvatars = 4;
+    final show = participants.take(maxAvatars).toList();
+    final extra =
+        participants.length > maxAvatars ? participants.length - maxAvatars : 0;
+    final theme = Theme.of(context);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var i = 0; i < show.length; i++)
+          Container(
+            margin: EdgeInsets.only(
+              left: i == 0 ? 0 : _inCallAvatarOverlap,
+            ),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: theme.colorScheme.surface,
+                width: 1.2,
+              ),
+            ),
+            child: CircleAvatar(
+              radius: _inCallAvatarSize / 2,
+              backgroundColor: theme.colorScheme.primaryContainer,
+              foregroundColor: theme.colorScheme.onPrimaryContainer,
+              child: Text(
+                (show[i].username.isNotEmpty
+                    ? show[i].username[0].toUpperCase()
+                    : '?'),
+                style: theme.textTheme.labelSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 10,
+                ),
+              ),
+            ),
+          ),
+        if (extra > 0)
+          Padding(
+            padding: const EdgeInsets.only(left: 4),
+            child: Text(
+              '+$extra',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.primary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        const SizedBox(width: 6),
+        Icon(
+          Icons.mic,
+          size: 14,
+          color: theme.colorScheme.primary,
+        ),
+        const SizedBox(width: 2),
+        Text(
+          'In call',
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: theme.colorScheme.primary,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   void dispose() {
+    if (_conferenceParticipantCallback != null) {
+      WebSocketManager()
+          .removeConferenceParticipantCallback(_conferenceParticipantCallback!);
+    }
     _timer.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();

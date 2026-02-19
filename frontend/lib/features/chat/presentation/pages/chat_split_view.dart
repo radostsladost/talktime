@@ -19,6 +19,7 @@ import 'package:talktime/features/saved_messages/presentation/pages/saved_messag
 import 'package:talktime/features/call/data/incoming_call_manager.dart';
 import 'package:talktime/features/chat/data/conversation_service.dart';
 import 'package:talktime/features/settings/presentation/pages/settings_page.dart';
+import 'package:talktime/core/websocket/websocket_manager.dart';
 import 'package:talktime/shared/models/conversation.dart';
 import 'package:talktime/shared/models/message.dart';
 import 'package:talktime/shared/models/user.dart';
@@ -53,6 +54,8 @@ class _ChatSplitViewState extends State<ChatSplitView>
   TabController? _callPanelTabController;
   // When user accepts an incoming call on wide screen, open chat+call panel instead of full-screen
   String? _pendingAcceptedCallRoomId;
+  // Conference participant updates (to refresh in-call avatars on chat list)
+  void Function(String, ConferenceParticipant, String)? _conferenceParticipantCallback;
 
   void _startCallInPanel(Conversation conversation) {
     setState(() {
@@ -127,6 +130,12 @@ class _ChatSplitViewState extends State<ChatSplitView>
       });
       return true;
     });
+
+    // Listen for conference participant join/leave so chat list in-call avatars update
+    _conferenceParticipantCallback = (_, __, ___) {
+      if (mounted) setState(() {});
+    };
+    WebSocketManager().onConferenceParticipant(_conferenceParticipantCallback!);
 
     // iOS: show modal if notification permission is not granted
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -211,6 +220,85 @@ class _ChatSplitViewState extends State<ChatSplitView>
       _unreadCountMap[conversation.id] = unreadCount;
     }
     setState(() {});
+    // Request voice-call participants for each chat so we can show "in call" avatars
+    WebSocketManager().initialize().then((_) {
+      for (final c in conversations) {
+        WebSocketManager().requestRoomParticipants(c.id);
+      }
+    });
+  }
+
+  /// Small avatars row for "in voice call" indicator under chat name
+  static const double _inCallAvatarSize = 18;
+  static const double _inCallAvatarOverlap = -5;
+
+  Widget _buildInCallAvatars(
+    BuildContext context,
+    List<ConferenceParticipant> participants,
+  ) {
+    const maxAvatars = 4;
+    final show = participants.take(maxAvatars).toList();
+    final extra = participants.length > maxAvatars
+        ? participants.length - maxAvatars
+        : 0;
+    final theme = Theme.of(context);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var i = 0; i < show.length; i++)
+          Container(
+            margin: EdgeInsets.only(
+              left: i == 0 ? 0 : _inCallAvatarOverlap,
+            ),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: theme.colorScheme.surface,
+                width: 1.2,
+              ),
+            ),
+            child: CircleAvatar(
+              radius: _inCallAvatarSize / 2,
+              backgroundColor: theme.colorScheme.primaryContainer,
+              foregroundColor: theme.colorScheme.onPrimaryContainer,
+              child: Text(
+                (show[i].username.isNotEmpty
+                    ? show[i].username[0].toUpperCase()
+                    : '?'),
+                style: theme.textTheme.labelSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 10,
+                ),
+              ),
+            ),
+          ),
+        if (extra > 0)
+          Padding(
+            padding: const EdgeInsets.only(left: 4),
+            child: Text(
+              '+$extra',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.primary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        const SizedBox(width: 6),
+        Icon(
+          Icons.mic,
+          size: 14,
+          color: theme.colorScheme.primary,
+        ),
+        const SizedBox(width: 2),
+        Text(
+          'In call',
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: theme.colorScheme.primary,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    );
   }
 
   /// Refresh chat list from local storage so order/last message update in real time after send/receive.
@@ -477,6 +565,8 @@ class _ChatSplitViewState extends State<ChatSplitView>
 
             final isSelected = _selectedConversation?.id == convo.id;
             final unreadCount = _unreadCountMap[convo.id] ?? 0;
+            final inCallParticipants =
+                WebSocketManager().getConferenceParticipants(convo.id);
 
             return Card(
               margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -525,7 +615,7 @@ class _ChatSplitViewState extends State<ChatSplitView>
                             horizontal: 6,
                             vertical: 2,
                           ),
-                          decoration: BoxDecoration(
+                            decoration: BoxDecoration(
                             color: Theme.of(context).colorScheme.error,
                             shape: BoxShape.circle,
                             border: Border.all(
@@ -557,13 +647,26 @@ class _ChatSplitViewState extends State<ChatSplitView>
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                subtitle: Text(
-                  lastMessage.content,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
+                subtitle: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (inCallParticipants.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: _buildInCallAvatars(context, inCallParticipants),
+                      ),
+                    Text(
+                      lastMessage.content,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurfaceVariant,
+                      ),
+                    ),
+                  ],
                 ),
                 trailing: Text(
                   _formatTimeAgo(lastMessage.sentAt),
@@ -753,6 +856,9 @@ class _ChatSplitViewState extends State<ChatSplitView>
 
   @override
   void dispose() {
+    if (_conferenceParticipantCallback != null) {
+      WebSocketManager().removeConferenceParticipantCallback(_conferenceParticipantCallback!);
+    }
     _callPanelTabController?.dispose();
     _callStateSubscription?.cancel();
     _timer.cancel();

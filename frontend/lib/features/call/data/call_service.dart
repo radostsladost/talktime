@@ -95,7 +95,8 @@ class CallService {
   bool _isScreenSharing = false;
   bool _isSpeakerMuted = false;
   String? _speakerDeviceId;
-  bool _speakerOn = true;
+  /// On mobile (Android/iOS) default to earpiece (false); on desktop/web default to speaker (true).
+  bool _speakerOn = !kIsWeb && (Platform.isAndroid || Platform.isIOS) ? false : true;
   Timer? _timer;
   User? _currentUser;
   bool _noiseCancellationEnabled = true;
@@ -865,13 +866,13 @@ class CallService {
           });
         }
 
-        if (_isMuted) {
-          Future.delayed(Duration(milliseconds: 300), () {
-            toggleMic(forceValue: !_isMuted);
-          });
+        // Apply current mute state to the new stream (user may have toggled mic during "connecting").
+        final tracks = _localStream!.getAudioTracks();
+        if (tracks.isNotEmpty) {
+          tracks[0].enabled = !_isMuted;
+          _logger.i("Audio track ${tracks[0].enabled ? 'enabled' : 'disabled'} (applied initial mute state)");
         }
-
-        _micStateController.add(audioGranted);
+        _micStateController.add(!_isMuted);
         return;
       } catch (e) {
         retries++;

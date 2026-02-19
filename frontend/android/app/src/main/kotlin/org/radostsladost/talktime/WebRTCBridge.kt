@@ -376,6 +376,19 @@ class WebRTCBridge(
     }
 
     private fun handleTrackSetEnabled(call: MethodCall, result: MethodChannel.Result) {
+        val trackId = call.argument<String>("trackId") ?: ""
+        val enabled = call.argument<Boolean>("enabled") ?: true
+        for (stream in localStreams.values) {
+            val audio = stream.audioTracks.find { it.id() == trackId }
+            val video = stream.videoTracks.find { it.id() == trackId }
+            val track = audio ?: video
+            if (track != null) {
+                track.setEnabled(enabled)
+                result.success(null)
+                return
+            }
+        }
+        Log.w(TAG, "trackSetEnabled: track not found id=$trackId")
         result.success(null)
     }
 
