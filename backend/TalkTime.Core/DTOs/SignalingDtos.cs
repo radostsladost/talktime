@@ -1,12 +1,13 @@
 namespace TalkTime.Core.DTOs;
 
 /// <summary>
-/// Base class for all signaling messages
+/// Base class for all signaling messages.
+/// FromDeviceId/ToDeviceId identify the source and target devices for WebRTC signaling.
 /// </summary>
 public record SignalingMessage(
     string Type,
-    string FromUserId,
-    string ToUserId,
+    string FromDeviceId,
+    string ToDeviceId,
     string? RoomId
 );
 
@@ -14,33 +15,33 @@ public record SignalingMessage(
 /// Offer for initiating a WebRTC connection
 /// </summary>
 public record SignalingOffer(
-    string FromUserId,
-    string ToUserId,
+    string FromDeviceId,
+    string ToDeviceId,
     string? RoomId,
     string Sdp
-) : SignalingMessage("offer", FromUserId, ToUserId, RoomId);
+) : SignalingMessage("offer", FromDeviceId, ToDeviceId, RoomId);
 
 /// <summary>
 /// Answer to a WebRTC offer
 /// </summary>
 public record SignalingAnswer(
-    string FromUserId,
-    string ToUserId,
+    string FromDeviceId,
+    string ToDeviceId,
     string? RoomId,
     string Sdp
-) : SignalingMessage("answer", FromUserId, ToUserId, RoomId);
+) : SignalingMessage("answer", FromDeviceId, ToDeviceId, RoomId);
 
 /// <summary>
 /// ICE candidate for WebRTC connection establishment
 /// </summary>
 public record SignalingIceCandidate(
-    string FromUserId,
-    string ToUserId,
+    string FromDeviceId,
+    string ToDeviceId,
     string? RoomId,
     string Candidate,
     string? SdpMid,
     int? SdpMLineIndex
-) : SignalingMessage("ice-candidate", FromUserId, ToUserId, RoomId);
+) : SignalingMessage("ice-candidate", FromDeviceId, ToDeviceId, RoomId);
 
 /// <summary>
 /// Call initiation request
@@ -67,7 +68,7 @@ public record CallResponse(
 /// </summary>
 public record CallEnded(
     string CallId,
-    string UserId,
+    string DeviceId,
     string Reason // "ended", "rejected", "timeout", "error"
 );
 
@@ -89,7 +90,8 @@ public record RoomInfo(
     string Name,
     List<UserDto> Participants,
     string CreatedBy,
-    DateTime CreatedAt
+    DateTime CreatedAt,
+    string? InviteKey = null
 );
 
 /// <summary>

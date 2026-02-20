@@ -15,6 +15,7 @@ import 'package:talktime/features/call/audio/desktop_noise_cancellation_pipeline
 import 'package:talktime/features/call/data/signaling_service.dart';
 import 'package:talktime/features/call/webrtc/webrtc_platform.dart';
 import 'package:talktime/core/network/api_client.dart';
+import 'package:talktime/core/websocket/websocket_manager.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/shared/models/user.dart';
 import 'package:talktime/core/global_key.dart';
@@ -103,14 +104,39 @@ class CallService {
   String? _currentMicDeviceId;
   final DesktopNoiseCancellationPipeline _ncPipeline = DesktopNoiseCancellationPipeline();
 
+  bool _isGuest = false;
+  String? _guestDisplayName;
+  String? _localDeviceId;
+  String? _inviteKey;
+
+  /// The local identity used for signaling (deviceId for both auth and guest)
+  String get localId => _localDeviceId ?? _currentUser?.id ?? '';
+  bool get isGuest => _isGuest;
+
+  /// The invite key for the current room (set after RoomCreated/RoomJoined).
+  /// Used to build shareable links that allow guests to join.
+  String? get inviteKey => _inviteKey;
+
   bool get _isDesktop => !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
 
   // =========================================================
   // INITIALIZATION & CONNECTION
   // =========================================================
 
-  Future<void> initService() async {
-    _logger.i('Initializing CallService...');
+  Future<void> initService({
+    bool isGuest = false,
+    String? guestDeviceId,
+    String? guestDisplayName,
+  }) async {
+    // Already initialized with an active signaling connection - skip re-init.
+    // This prevents ConferencePage from overwriting a prior guest setup.
+    if (_signalingService != null && _signalingService!.isConnected) {
+      _logger.i('CallService already initialized with active signaling, skipping re-init');
+      return;
+    }
+
+    _logger.i('Initializing CallService... (guest=$isGuest)');
+    _isGuest = isGuest;
 
     // Android: initialize WebRTC (Google WebRTC bridge with AEC) or other platform init.
     if (!kIsWeb && Platform.isAndroid) {
@@ -122,7 +148,18 @@ class CallService {
       );
     }
 
-    // Always load current user
+    if (isGuest) {
+      _guestDisplayName = guestDisplayName;
+      _localDeviceId = guestDeviceId!;
+
+      _signalingService = SignalingService();
+      await _signalingService!.connectAsGuest(_localDeviceId!, _guestDisplayName!);
+      await _setupSignalingListeners();
+      _logger.i('CallService initialized for guest');
+      return;
+    }
+
+    // Authenticated user path
     try {
       _currentUser = await AuthService().getCurrentUser();
       _logger.i('Current user loaded: ${_currentUser?.id}');
@@ -130,7 +167,9 @@ class CallService {
       _logger.e('Failed to load current user: $e');
     }
 
-    // Setup signaling service
+    _localDeviceId = WebSocketManager().deviceId ?? _currentUser?.id;
+    _logger.i('Local device ID for signaling: $_localDeviceId');
+
     final token = await ApiClient().getToken();
     if (token == null) {
       _logger.w('No token available, skipping signaling setup');
@@ -138,11 +177,11 @@ class CallService {
     }
 
     if (_signalingService == null || !_signalingService!.isConnected) {
-      _logger.i('Setting up signaling service...');
+      _logger.i('Setting up signaling service (reusing WebSocketManager connection)...');
       _signalingService = SignalingService();
       await _signalingService!.connect();
       await _setupSignalingListeners();
-      _logger.i('Signaling service connected');
+      _logger.i('Signaling service attached');
     } else {
       _logger.i('Signaling service already connected');
     }
@@ -152,12 +191,13 @@ class CallService {
 
   Future<void> startCall(
     String roomId,
-    List<UserInfo> initialParticipants,
-  ) async {
-    _logger.i("Start call called: $_state for room: $roomId");
+    List<UserInfo> initialParticipants, {
+    String? inviteKey,
+  }) async {
+    _logger.i("Start call called: $_state for room: $roomId (guest=$_isGuest)");
     if (_state != CallState.idle) {
       _logger.w("Call already in progress, ignoring startCall request");
-      return; // Already in a call
+      return;
     }
 
     setupPip().catchError((error) {
@@ -170,17 +210,13 @@ class CallService {
 
     await _setAudioMode(3);
 
-    // CallKit: Start outgoing call
     _callKitStartCall();
 
     try {
-      // 1. Get Permissions & Media
       await _getUserMedia();
-      // await activateCameraOrScreenShare(newScreenShareValue: false);
       await _startBackgroundService(roomId);
 
-      // 2. Setup initial participants
-      final selfId = _currentUser!.id;
+      final selfId = localId;
       for (var user in initialParticipants) {
         if (user.id != selfId) {
           _participantIds.add(user.id);
@@ -189,15 +225,19 @@ class CallService {
         }
       }
 
-      // 3. Join Room via Signaling
-      await _signalingService?.createRoom(roomId); // Or joinRoom based on logic
+      if (_isGuest) {
+        final key = inviteKey ?? _inviteKey;
+        if (key == null || key.isEmpty) {
+          throw Exception('Invite key is required for guest calls');
+        }
+        await _signalingService?.joinRoomAsGuest(key, _guestDisplayName!);
+      } else {
+        await _signalingService?.createRoom(roomId);
+      }
 
       _updateState(CallState.connected);
-
-      // CallKit: Set call as connected
       _callKitSetConnected();
 
-      // 4. Send Offers
       if (_participantIds.isNotEmpty) {
         await _createAndSendOffers();
       }
@@ -206,10 +246,6 @@ class CallService {
         _timer!.cancel();
         _timer = null;
       }
-      // _timer = Timer.periodic(
-      //   Duration(seconds: 30),
-      //   (Timer t) => _createAndSendOffers(),
-      // );
     } catch (e, stackTrace) {
       _logger.e("Start call failed: $e", error: e, stackTrace: stackTrace);
       endCall();
@@ -276,6 +312,7 @@ class CallService {
     _participantIds.clear();
 
     _currentRoomId = null;
+    _inviteKey = null;
     _updateState(CallState.idle);
     _localStreamController.add(null);
     _remoteStreamsController.add({});
@@ -997,7 +1034,7 @@ class CallService {
     bool forceRenegotiation = false,
   }) async {
     for (final id in _participantIds) {
-      if (id == _currentUser!.id ||
+      if (id == localId ||
           (onlyParticipantId != null && id != onlyParticipantId)) {
         continue;
       }
@@ -1031,22 +1068,17 @@ class CallService {
 
   final List<StreamSubscription> _subscriptions = [];
   Future<void> _setupSignalingListeners() async {
-    // Setup listeners similar to your original code,
-    // but call internal private methods (_handleOffer, etc)
-    // and update the Streams instead of calling setState
     if (_subscriptions.isNotEmpty && _signalingService?.isConnected == true) {
       _logger.i("Signaling listeners already set up. Skipping.");
 
-      if (_currentRoomId != null) {
+      if (_currentRoomId != null && !_isGuest) {
         _signalingService!.createRoom(_currentRoomId!);
       }
       return;
     }
 
-    final token = await ApiClient().getToken();
-    if (token == null) throw Exception('No token');
-
-    if (_signalingService == null || !_signalingService!.isConnected) {
+    if (!_isGuest && (_signalingService == null || !_signalingService!.isConnected)) {
+      _logger.i('Re-attaching signaling service to shared connection...');
       _signalingService = SignalingService();
       await _signalingService!.connect();
     }
@@ -1061,44 +1093,62 @@ class CallService {
       )
       ..add(
         _signalingService!.onParticipantLeft.listen(_handleParticipantLeft),
-      );
+      )
+      ..add(_signalingService!.onRoomCreated.listen((event) {
+        if (event.inviteKey != null) {
+          _inviteKey = event.inviteKey;
+          _logger.i('Invite key received from RoomCreated');
+        }
+      }))
+      ..add(_signalingService!.onRoomJoined.listen((event) {
+        if (event.inviteKey != null) {
+          _inviteKey = event.inviteKey;
+          _logger.i('Invite key received from RoomJoined');
+        }
+        // For guests, the real roomId is only known after the backend resolves
+        // the invite key. Update _currentRoomId so signaling targets the correct room.
+        if (_isGuest && event.roomId.isNotEmpty) {
+          _currentRoomId = event.roomId;
+          _logger.i('Guest room ID resolved to: ${event.roomId}');
+        }
+      }));
 
-    if (_currentRoomId != null) _signalingService!.createRoom(_currentRoomId!);
+    if (_currentRoomId != null && !_isGuest) {
+      _signalingService!.createRoom(_currentRoomId!);
+    }
   }
 
-  // Determine if we are the "polite" peer (lower ID is polite, higher ID is impolite)
-  bool _isPolite(String otherUserId) {
-    return _currentUser!.id.compareTo(otherUserId) < 0;
+  bool _isPolite(String otherId) {
+    return localId.compareTo(otherId) < 0;
   }
 
   Future<void> _handleOffer(SignalingOfferEvent event) async {
-    _logger.i('_handleOffer from ${event.fromUserId} to ${event.toUserId}');
+    _logger.i('_handleOffer from ${event.fromDeviceId} to ${event.toDeviceId}');
 
-    // Only process offers intended for us
-    if (event.toUserId != _currentUser!.id) {
-      _logger.i('Ignoring offer not intended for us (to: ${event.toUserId})');
+    if (event.toDeviceId != localId) {
+      _logger.i('Ignoring offer not intended for us (to: ${event.toDeviceId})');
       return;
     }
 
-    if (!_peerConnections.containsKey(event.fromUserId)) {
-      _participantIds.add(event.fromUserId);
-      await _createPeerConnection(event.fromUserId);
+    if (!_peerConnections.containsKey(event.fromDeviceId)) {
+      _participantIds.add(event.fromDeviceId);
+      await _createPeerConnection(event.fromDeviceId);
     }
 
     try {
-      final pc = _peerConnections[event.fromUserId]!;
+      final pc = _peerConnections[event.fromDeviceId]!;
       final state = await pc.getSignalingState();
-      final polite = _isPolite(event.fromUserId);
+      final polite = _isPolite(event.fromDeviceId);
 
       if (state == RTCSignalingStateDto.haveLocalOffer) {
         if (!polite) {
           _logger.w(
-            "Collision detected. Impolite peer ignoring offer from ${event.fromUserId}",
+            "Collision detected. Impolite peer ignoring offer from ${event.fromDeviceId}",
           );
           return;
         } else {
           _logger.i(
-            "Collision detected. Polite peer rolling back for ${event.fromUserId}",
+            "Collision detected. Polite peer rolling back for ${event.fromDeviceId}",
           );
           await pc.setLocalDescription(RTCSessionDescriptionDto(null, 'rollback'));
         }
@@ -1111,39 +1161,37 @@ class CallService {
       await pc.setLocalDescription(answer);
 
       await _signalingService!.sendAnswer(
-        event.fromUserId,
+        event.fromDeviceId,
         answer.sdp ?? '',
         roomId: _currentRoomId!,
       );
 
-      _logger.i('_handleOffer sendAnswer to ${event.fromUserId}');
+      _logger.i('_handleOffer sendAnswer to ${event.fromDeviceId}');
     } catch (e) {
-      _logger.e('Error handling offer from ${event.fromUserId}: $e');
+      _logger.e('Error handling offer from ${event.fromDeviceId}: $e');
     }
   }
 
   Future<void> _handleAnswer(SignalingAnswerEvent event) async {
-    _logger.i('_handleAnswer from ${event.fromUserId} to ${event.toUserId}');
+    _logger.i('_handleAnswer from ${event.fromDeviceId} to ${event.toDeviceId}');
 
-    // Only process answers intended for us
-    if (event.toUserId != _currentUser!.id) {
-      _logger.i('Ignoring answer not intended for us (to: ${event.toUserId})');
+    if (event.toDeviceId != localId) {
+      _logger.i('Ignoring answer not intended for us (to: ${event.toDeviceId})');
       return;
     }
 
-    final pc = _peerConnections[event.fromUserId];
+    final pc = _peerConnections[event.fromDeviceId];
     if (pc == null) {
-      _logger.e('_handleAnswer _peerConnection is null: ${event.fromUserId}');
+      _logger.e('_handleAnswer _peerConnection is null: ${event.fromDeviceId}');
       return;
     }
 
-    // Wait for syncronization
     await Future.delayed(const Duration(seconds: 1), () {});
 
     final state = await pc.getSignalingState();
     if (state == RTCSignalingStateDto.stable) {
       _logger.w(
-        "Ignored answer from ${event.fromUserId} because connection is already stable.",
+        "Ignored answer from ${event.fromDeviceId} because connection is already stable.",
       );
       return;
     }
@@ -1160,28 +1208,27 @@ class CallService {
         _state = CallState.connected;
       }
     } catch (e) {
-      _logger.e('Error handling answer from ${event.fromUserId}: $e');
+      _logger.e('Error handling answer from ${event.fromDeviceId}: $e');
     }
   }
 
   Future<void> _handleIceCandidate(SignalingIceCandidateEvent event) async {
     _logger.i(
-      '_handleIceCandidate from ${event.fromUserId} to ${event.toUserId}',
+      '_handleIceCandidate from ${event.fromDeviceId} to ${event.toDeviceId}',
     );
 
-    // Only process ICE candidates intended for us
-    if (event.toUserId != _currentUser!.id) {
+    if (event.toDeviceId != localId) {
       _logger.i(
-        'Ignoring ICE candidate not intended for us (to: ${event.toUserId})',
+        'Ignoring ICE candidate not intended for us (to: ${event.toDeviceId})',
       );
       return;
     }
 
     try {
-      final pc = _peerConnections[event.fromUserId];
+      final pc = _peerConnections[event.fromDeviceId];
       if (pc == null) {
         _logger.e(
-          '_handleIceCandidate _peerConnection is null: ${event.fromUserId}',
+          '_handleIceCandidate _peerConnection is null: ${event.fromDeviceId}',
         );
         return;
       }
@@ -1196,7 +1243,7 @@ class CallService {
         }
         if (remoteDesc == null) {
           _logger.i(
-            '_handleIceCandidate remoteDesc is null: ${event.fromUserId}',
+            '_handleIceCandidate remoteDesc is null: ${event.fromDeviceId}',
           );
           return;
         }
@@ -1214,46 +1261,46 @@ class CallService {
   }
 
   Future<void> _handleParticipantJoined(RoomParticipantUpdate event) async {
-    _logger.i('_handleParticipantJoined  ${event.user.id}');
-    if (_currentUser!.id == event.user.id) {
+    final participantId = event.user.id; // deviceId from backend
+    _logger.i('_handleParticipantJoined $participantId');
+    if (localId == participantId) {
       return;
     }
     await Future.delayed(const Duration(seconds: 1), () {});
 
-    _participantIds.add(event.user.id);
-    _participantInfo[event.user.id] = event.user;
-    await _createPeerConnection(event.user.id);
+    _participantIds.add(participantId);
+    _participantInfo[participantId] = event.user;
+    await _createPeerConnection(participantId);
 
-    _logger.i('Participant joined: ${event.user.id}');
+    _logger.i('Participant joined: $participantId');
 
-    // Only the "impolite" peer (higher ID) initiates the offer to avoid glare
-    if (!_isPolite(event.user.id)) {
-      _logger.i('We are impolite, sending offer to ${event.user.id}');
-      final pc = _peerConnections[event.user.id]!;
+    if (!_isPolite(participantId)) {
+      _logger.i('We are impolite, sending offer to $participantId');
+      final pc = _peerConnections[participantId]!;
       final offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
       await _signalingService!.sendOffer(
-        event.user.id,
+        participantId,
         offer.sdp ?? '',
         roomId: _currentRoomId,
       );
-      _logger.i('Participant offer sent: ${event.user.id}');
+      _logger.i('Participant offer sent: $participantId');
     } else {
-      _logger.i('We are polite, waiting for offer from ${event.user.id}');
+      _logger.i('We are polite, waiting for offer from $participantId');
     }
   }
 
   Future<void> _handleParticipantLeft(RoomParticipantUpdate event) async {
-    _logger.i('_handleParticipantLeft  ${event.user.id}');
-    if (_currentUser!.id == event.user.id) {
+    final participantId = event.user.id;
+    _logger.i('_handleParticipantLeft $participantId');
+    if (localId == participantId) {
       return;
     }
 
-    if (_participantIds.remove(event.user.id)) {
-      _participantInfo.remove(event.user.id);
-
-      _removePeerConnection(event.user.id);
-      _logger.i('Participant left: ${event.user.id}');
+    if (_participantIds.remove(participantId)) {
+      _participantInfo.remove(participantId);
+      _removePeerConnection(participantId);
+      _logger.i('Participant left: $participantId');
     }
   }
 

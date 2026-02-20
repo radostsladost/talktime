@@ -33,6 +33,8 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
   bool _isRendererReady = false;
   bool _hasActiveVideo = false;
   bool _hasActiveAudio = true;
+  Timer? _trackPollTimer;
+  int _videoTrackCount = 0;
 
   @override
   void initState() {
@@ -40,6 +42,12 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
     _renderer = getWebRTCPlatform().createVideoRenderer();
     _initRenderer();
     _setupStreamListeners();
+
+    // Poll track states as a safety net for platforms where events are unreliable
+    // (e.g. Safari). Short interval at first, then backs off.
+    _trackPollTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      _checkAndUpdateTrackStates();
+    });
   }
 
   Future<void> _initRenderer() async {
@@ -62,12 +70,16 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
 
   void _setupStreamListeners() {
     widget.stream.onAddTrack = (_, track) {
-      _updateTrackStates();
       _setupTrackListeners(track);
+      _checkAndUpdateTrackStates();
+      // Force re-assign srcObject so the renderer picks up the new track
+      if (_isRendererReady) {
+        _renderer.srcObject = widget.stream;
+      }
     };
 
     widget.stream.onRemoveTrack = (_, track) {
-      _updateTrackStates();
+      _checkAndUpdateTrackStates();
     };
 
     for (final track in widget.stream.getTracks()) {
@@ -77,51 +89,69 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
 
   void _setupTrackListeners(IMediaStreamTrack track) {
     track.onMute = () {
-      if (mounted) {
-        setState(() => _updateTrackStates());
-      }
+      if (mounted) _checkAndUpdateTrackStates();
     };
 
     track.onUnMute = () {
-      if (mounted) {
-        setState(() => _updateTrackStates());
-      }
+      if (mounted) _checkAndUpdateTrackStates();
     };
 
     track.onEnded = () {
-      if (mounted) {
-        setState(() => _updateTrackStates());
-      }
+      if (mounted) _checkAndUpdateTrackStates();
     };
   }
 
-  void _updateTrackStates() {
-    final videoTracks = widget.stream.getVideoTracks();
-    final audioTracks = widget.stream.getAudioTracks();
+  /// Check if track state actually changed, and only call setState if it did.
+  void _checkAndUpdateTrackStates() {
+    final oldVideo = _hasActiveVideo;
+    final oldAudio = _hasActiveAudio;
+    final oldCount = _videoTrackCount;
+    _updateTrackStatesInternal();
 
-    _hasActiveVideo =
-        videoTracks.isNotEmpty &&
-        videoTracks.any(
-          (track) => track.enabled == true && track.muted == false,
-        );
-
-    _hasActiveAudio =
-        audioTracks.isEmpty ||
-        audioTracks.any(
-          (track) => track.enabled == true && track.muted == false,
-        );
-
-    if (mounted) {
-      setState(() {});
+    if (oldVideo != _hasActiveVideo ||
+        oldAudio != _hasActiveAudio ||
+        oldCount != _videoTrackCount) {
+      // Track configuration changed — re-assign srcObject to ensure renderer
+      // picks up new tracks (especially important after renegotiation).
+      if (_isRendererReady && _hasActiveVideo) {
+        _renderer.srcObject = widget.stream;
+      }
+      if (mounted) setState(() {});
     }
   }
 
+  void _updateTrackStates() {
+    _updateTrackStatesInternal();
+    if (mounted) setState(() {});
+  }
+
+  void _updateTrackStatesInternal() {
+    final videoTracks = widget.stream.getVideoTracks();
+    final audioTracks = widget.stream.getAudioTracks();
+
+    _videoTrackCount = videoTracks.length;
+
+    // Show the video renderer if any video track exists and is enabled.
+    // We intentionally do NOT require track.muted == false because Safari
+    // reports remote tracks as muted until media starts flowing — the
+    // <video> element will display frames the moment they arrive.
+    _hasActiveVideo =
+        videoTracks.isNotEmpty &&
+        videoTracks.any((track) => track.enabled);
+
+    _hasActiveAudio =
+        audioTracks.isEmpty ||
+        audioTracks.any((track) => track.enabled);
+  }
+
   void _disposeStreamListeners() {
-    for (final track in widget.stream.getTracks()) {
-      track.onMute = null;
-      track.onUnMute = null;
-      track.onEnded = null;
-    }
+    try {
+      for (final track in widget.stream.getTracks()) {
+        track.onMute = null;
+        track.onUnMute = null;
+        track.onEnded = null;
+      }
+    } catch (_) {}
   }
 
   @override
@@ -137,12 +167,15 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
       _setupStreamListeners();
       _updateTrackStates();
     } else {
-      _updateTrackStates();
+      // Same stream — re-check tracks (new tracks may have been added via
+      // renegotiation without changing the stream object).
+      _checkAndUpdateTrackStates();
     }
   }
 
   @override
   void dispose() {
+    _trackPollTimer?.cancel();
     _disposeStreamListeners();
     _renderer.dispose();
     super.dispose();
@@ -150,16 +183,7 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
 
   @override
   Widget build(BuildContext context) {
-    final videoTracks = widget.stream.getVideoTracks();
-    final hasVideo =
-        videoTracks.isNotEmpty &&
-        videoTracks.any(
-          (track) => track.enabled == true && track.muted == false,
-        );
-
-    if (hasVideo && _isRendererReady) {
-      _renderer.srcObject = widget.stream;
-    }
+    final hasVideo = _hasActiveVideo;
 
     return Material(
       child: InkWell(

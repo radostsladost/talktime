@@ -18,6 +18,13 @@ class WebSocketManager {
 
   static const int _maxReconnectAttempts = 5;
   static const Duration _reconnectDelay = Duration(seconds: 5);
+  static const Duration _healthCheckInterval = Duration(seconds: 30);
+  /// If the periodic timer hasn't updated _lastActiveAt in this window,
+  /// the connection is considered stale after app resume.
+  static const Duration _staleThreshold = Duration(seconds: 45);
+  /// If we were away longer than this, force-reconnect even if SignalR
+  /// still reports Connected (the underlying transport is likely dead).
+  static const Duration _forceReconnectThreshold = Duration(minutes: 2);
 
   bool _isConnected = false;
   bool _isConnecting = false;
@@ -25,6 +32,9 @@ class WebSocketManager {
   final Logger _logger = Logger(output: ConsoleOutput());
   final ApiClient _apiClient = ApiClient();
   HubConnection? _hubConnection;
+  Timer? _healthCheckTimer;
+  DateTime _lastActiveAt = DateTime.now();
+  final List<void Function()> _onConnectionRestoredCallbacks = [];
 
   // Callbacks for different events
   final List<Function(Message)> _onMessageReceivedCallbacks = [];
@@ -91,6 +101,13 @@ class WebSocketManager {
   /// Get the current device ID
   String? get deviceId => _deviceId;
 
+  /// Expose the underlying hub connection so SignalingService can reuse it
+  /// instead of opening a second WebSocket to the same hub.
+  HubConnection? get hubConnection => _hubConnection;
+
+  /// Get or create device ID (public for guest flow)
+  Future<String> getOrCreateDeviceId() => _getOrCreateDeviceId();
+
   /// Initialize WebSocket connection with SignalR
   Future<void> initialize() async {
     _logger.i('Initializing WebSocket manager');
@@ -103,12 +120,13 @@ class WebSocketManager {
 
       if (_hubConnection?.state == HubConnectionState.Connected) {
         _logger.i('SignalR already up');
+        _startHealthCheckTimer();
         return;
       }
 
       if (_hubConnection != null &&
           (_hubConnection!.state != HubConnectionState.Connected)) {
-        _hubConnection!.stop();
+        try { _hubConnection!.stop(); } catch (_) {}
       }
 
       _hubConnection = HubConnectionBuilder()
@@ -124,43 +142,121 @@ class WebSocketManager {
           .withAutomaticReconnect()
           .build();
 
-      // Setup connection event handlers
       _setupConnectionHandlers();
-
-      // Start connection
       await _connect();
 
       _logger.i('SignalR connection established');
       _isConnected = true;
       _isConnecting = false;
       _reconnectAttempts = 0;
-      Timer.periodic(const Duration(seconds: 30), (_) async {
-        if (await _apiClient.getToken() != null &&
-            await _apiClient.isAccessTokenExpired() == false) {
-          await checkConnection().catchError((error) {
-            _logger.e('Failed to check WebSocket connection: $error');
-          });
-        }
-      });
+      _lastActiveAt = DateTime.now();
 
-      // Setup message handlers
+      _startHealthCheckTimer();
       _setupMessageHandlers();
+      _notifyConnectionRestored();
     } catch (e) {
       _logger.e('Failed to initialize WebSocket: $e');
     }
   }
 
-  Future<void> checkConnection() async {
+  void _startHealthCheckTimer() {
+    _healthCheckTimer?.cancel();
+    _healthCheckTimer = Timer.periodic(_healthCheckInterval, (_) async {
+      _lastActiveAt = DateTime.now();
+      if (await _apiClient.getToken() != null &&
+          await _apiClient.isAccessTokenExpired() == false) {
+        await _checkConnectionHealth().catchError((error) {
+          _logger.e('Health check failed: $error');
+        });
+      }
+    });
+  }
+
+  Future<void> _checkConnectionHealth() async {
     if (_hubConnection == null) {
-      return initialize();
+      await initialize();
+      return;
+    }
+
+    if (_hubConnection!.state == HubConnectionState.Disconnected) {
+      _logger.i('Periodic health check: connection disconnected, reconnecting');
+      _reconnectAttempts = 0;
+      await _connect();
+    }
+  }
+
+  /// Aggressive connection check intended for app-resume / tab-visible events.
+  /// Detects stale connections that still report Connected and force-reconnects.
+  Future<void> ensureConnected() async {
+    if (_hubConnection == null) {
+      _logger.i('ensureConnected: no hub connection, initializing');
+      await initialize();
+      return;
+    }
+
+    final now = DateTime.now();
+    final inactiveDuration = now.difference(_lastActiveAt);
+    _lastActiveAt = now;
+
+    // Short inactivity — simple state check is enough
+    if (inactiveDuration < _staleThreshold) {
+      if (_hubConnection!.state == HubConnectionState.Disconnected) {
+        _logger.i('ensureConnected: disconnected after short inactivity, reconnecting');
+        _reconnectAttempts = 0;
+        await _connect();
+      }
+      return;
+    }
+
+    _logger.i('ensureConnected: resuming after ${inactiveDuration.inSeconds}s inactivity');
+
+    // Give SignalR ~1s to detect the dead socket before we check state
+    await Future.delayed(const Duration(seconds: 1));
+
+    final state = _hubConnection!.state;
+
+    if (state == HubConnectionState.Connected && inactiveDuration < _forceReconnectThreshold) {
+      _logger.i('ensureConnected: still connected after moderate inactivity — OK');
+      return;
+    }
+
+    // Either disconnected/reconnecting, or connected after very long inactivity
+    _logger.i('ensureConnected: state=$state after ${inactiveDuration.inSeconds}s — force reconnecting');
+    await _forceReconnect();
+  }
+
+  /// Tear down and restart the existing hub connection.
+  /// Falls back to a full [initialize] if the restart fails.
+  Future<void> _forceReconnect() async {
+    _isConnected = false;
+    _isConnecting = false;
+    _reconnectAttempts = 0;
+
+    try {
+      await _hubConnection?.stop();
+    } catch (e) {
+      _logger.w('Error stopping hub during force reconnect: $e');
     }
 
     try {
-      if (_hubConnection!.state == HubConnectionState.Disconnected) {
-        await _connect();
-      }
+      await _hubConnection!.start();
+      _isConnected = true;
+      _isConnecting = false;
+      _lastActiveAt = DateTime.now();
+      _logger.i('Force reconnect successful (same instance)');
+      _notifyConnectionRestored();
     } catch (e) {
-      _logger.e('Failed to initialize WebSocket: $e');
+      _logger.e('Force reconnect failed, doing full reinitialize: $e');
+      _hubConnection = null;
+      await initialize();
+    }
+  }
+
+  void _notifyConnectionRestored() {
+    for (final cb in List.of(_onConnectionRestoredCallbacks)) {
+      try { cb(); } catch (e) {
+        _logger.e('Connection-restored callback error: $e');
+      }
     }
   }
 
@@ -168,17 +264,15 @@ class WebSocketManager {
   void _setupConnectionHandlers() {
     if (_hubConnection == null) return;
 
-    // Handle connection closed
     _hubConnection!.onclose(({Exception? error}) {
       _logger.i('SignalR connection closed: $error');
       _isConnected = false;
       _isConnecting = false;
 
-      // Attempt to reconnect
       if (_reconnectAttempts < _maxReconnectAttempts) {
         _reconnectAttempts++;
         _logger.i(
-          'Reconnection attempt $_reconnectAttempts of $_maxReconnectAttempts',
+          'Reconnection attempt $_reconnectAttempts/$_maxReconnectAttempts',
         );
         Future.delayed(_reconnectDelay, _connect);
       } else {
@@ -186,12 +280,19 @@ class WebSocketManager {
       }
     });
 
-    // Handle connection established
+    _hubConnection!.onreconnecting(({Exception? error}) {
+      _logger.i('SignalR reconnecting: $error');
+      _isConnected = false;
+      _isConnecting = true;
+    });
+
     _hubConnection!.onreconnected(({String? connectionId}) {
-      _logger.i('SignalR connection established');
+      _logger.i('SignalR reconnected (connectionId=$connectionId)');
       _isConnected = true;
       _isConnecting = false;
       _reconnectAttempts = 0;
+      _lastActiveAt = DateTime.now();
+      _notifyConnectionRestored();
     });
   }
 
@@ -782,9 +883,22 @@ class WebSocketManager {
     _onOtherDevicesAvailableCallbacks.remove(callback);
   }
 
+  /// Register a callback that fires after the connection is restored
+  /// (automatic reconnect, force reconnect, or full reinitialize).
+  void onConnectionRestored(void Function() callback) {
+    _onConnectionRestoredCallbacks.add(callback);
+  }
+
+  void removeConnectionRestoredCallback(void Function() callback) {
+    _onConnectionRestoredCallbacks.remove(callback);
+  }
+
   /// Dispose resources
   void dispose() {
     _logger.i('Disposing WebSocket manager');
+
+    _healthCheckTimer?.cancel();
+    _healthCheckTimer = null;
 
     _hubConnection?.stop();
     _hubConnection = null;
@@ -799,6 +913,7 @@ class WebSocketManager {
     _onDeviceSyncRequestCallbacks.clear();
     _onDeviceSyncDataCallbacks.clear();
     _onOtherDevicesAvailableCallbacks.clear();
+    _onConnectionRestoredCallbacks.clear();
     _conferenceParticipants.clear();
   }
 }

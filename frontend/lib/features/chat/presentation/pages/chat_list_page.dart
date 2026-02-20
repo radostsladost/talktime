@@ -26,7 +26,8 @@ class _ChatListPageState extends State<ChatListPage>
   late Timer _timer;
   final Logger _logger = Logger(output: ConsoleOutput());
   final Map<String, Message> _lastMessageMap = {};
-  void Function(String, ConferenceParticipant, String)? _conferenceParticipantCallback;
+  void Function(String, ConferenceParticipant, String)?
+  _conferenceParticipantCallback;
 
   @override
   void initState() {
@@ -68,6 +69,7 @@ class _ChatListPageState extends State<ChatListPage>
         });
 
     _conferenceParticipantCallback = (_, __, ___) {
+      _logger.i('Conference participant callback');
       if (mounted) setState(() {});
     };
     WebSocketManager().onConferenceParticipant(_conferenceParticipantCallback!);
@@ -164,17 +166,20 @@ class _ChatListPageState extends State<ChatListPage>
                               User(id: '0', username: 'Unknown'),
                           sentAt: convo.lastMessageAt ?? "",
                         );
-                    final inCallParticipants =
-                        WebSocketManager().getConferenceParticipants(convo.id);
+                    final inCallParticipants = WebSocketManager()
+                        .getConferenceParticipants(convo.id);
 
                     return Card(
                       margin: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 4),
+                        horizontal: 16,
+                        vertical: 4,
+                      ),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
                         side: BorderSide(
-                          color:
-                              Theme.of(context).dividerColor.withOpacity(0.2),
+                          color: Theme.of(
+                            context,
+                          ).dividerColor.withOpacity(0.2),
                         ),
                       ),
                       clipBehavior: Clip.hardEdge,
@@ -187,13 +192,12 @@ class _ChatListPageState extends State<ChatListPage>
                           backgroundColor: Theme.of(
                             context,
                           ).colorScheme.primary.withOpacity(0.1),
-                          foregroundColor:
-                              Theme.of(context).colorScheme.primary,
+                          foregroundColor: Theme.of(
+                            context,
+                          ).colorScheme.primary,
                           child: Text(
                             name.isEmpty ? "?" : name[0].toUpperCase(),
-                            style: Theme.of(context)
-                                .textTheme
-                                .titleMedium
+                            style: Theme.of(context).textTheme.titleMedium
                                 ?.copyWith(
                                   fontWeight: FontWeight.w600,
                                   fontSize: 18,
@@ -202,12 +206,8 @@ class _ChatListPageState extends State<ChatListPage>
                         ),
                         title: Text(
                           name,
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleMedium
-                              ?.copyWith(
-                                fontWeight: FontWeight.w600,
-                              ),
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w600),
                         ),
                         subtitle: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -217,19 +217,19 @@ class _ChatListPageState extends State<ChatListPage>
                               Padding(
                                 padding: const EdgeInsets.only(bottom: 4),
                                 child: _buildInCallAvatars(
-                                    context, inCallParticipants),
+                                  context,
+                                  inCallParticipants,
+                                ),
                               ),
                             Text(
                               lastMessage.content,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodyMedium
+                              style: Theme.of(context).textTheme.bodyMedium
                                   ?.copyWith(
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .onSurfaceVariant,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.onSurfaceVariant,
                                   ),
                             ),
                           ],
@@ -240,9 +240,7 @@ class _ChatListPageState extends State<ChatListPage>
                           children: [
                             Text(
                               _formatTimeAgo(lastMessage.sentAt),
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodySmall
+                              style: Theme.of(context).textTheme.bodySmall
                                   ?.copyWith(
                                     color: Theme.of(
                                       context,
@@ -282,27 +280,23 @@ class _ChatListPageState extends State<ChatListPage>
 
   Widget _buildSavedMessagesEntry() {
     return ListTile(
-      contentPadding: const EdgeInsets.symmetric(
-        horizontal: 16,
-        vertical: 8,
-      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       leading: CircleAvatar(
-        backgroundColor:
-            Theme.of(context).colorScheme.primary.withOpacity(0.1),
+        backgroundColor: Theme.of(context).colorScheme.primary.withOpacity(0.1),
         foregroundColor: Theme.of(context).colorScheme.primary,
         child: const Icon(Icons.bookmark),
       ),
       title: Text(
         'Saved Messages',
-        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
+        style: Theme.of(
+          context,
+        ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
       ),
       subtitle: Text(
         'Your bookmarks and notes',
         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        ),
       ),
       onTap: () => NavigationManager().openSavedMessages(),
     );
@@ -360,23 +354,19 @@ class _ChatListPageState extends State<ChatListPage>
   ) {
     const maxAvatars = 4;
     final show = participants.take(maxAvatars).toList();
-    final extra =
-        participants.length > maxAvatars ? participants.length - maxAvatars : 0;
+    final extra = participants.length > maxAvatars
+        ? participants.length - maxAvatars
+        : 0;
     final theme = Theme.of(context);
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         for (var i = 0; i < show.length; i++)
           Container(
-            margin: EdgeInsets.only(
-              left: i == 0 ? 0 : _inCallAvatarOverlap,
-            ),
+            margin: EdgeInsets.only(left: i == 0 ? 0 : _inCallAvatarOverlap),
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              border: Border.all(
-                color: theme.colorScheme.surface,
-                width: 1.2,
-              ),
+              border: Border.all(color: theme.colorScheme.surface, width: 1.2),
             ),
             child: CircleAvatar(
               radius: _inCallAvatarSize / 2,
@@ -405,11 +395,7 @@ class _ChatListPageState extends State<ChatListPage>
             ),
           ),
         const SizedBox(width: 6),
-        Icon(
-          Icons.mic,
-          size: 14,
-          color: theme.colorScheme.primary,
-        ),
+        Icon(Icons.mic, size: 14, color: theme.colorScheme.primary),
         const SizedBox(width: 2),
         Text(
           'In call',
@@ -425,8 +411,9 @@ class _ChatListPageState extends State<ChatListPage>
   @override
   void dispose() {
     if (_conferenceParticipantCallback != null) {
-      WebSocketManager()
-          .removeConferenceParticipantCallback(_conferenceParticipantCallback!);
+      WebSocketManager().removeConferenceParticipantCallback(
+        _conferenceParticipantCallback!,
+      );
     }
     _timer.cancel();
     WidgetsBinding.instance.removeObserver(this);

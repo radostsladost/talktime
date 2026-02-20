@@ -7,6 +7,7 @@ import 'package:talktime/core/websocket/websocket_manager.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/features/auth/presentation/pages/login_page.dart';
 import 'package:talktime/features/call/data/call_service.dart';
+import 'package:talktime/features/call/presentation/pages/guest_name_page.dart';
 import 'package:talktime/features/chat/data/device_sync_service.dart';
 import 'package:talktime/features/chat/presentation/pages/chat_split_view.dart';
 import 'package:talktime/features/settings/data/settings_service.dart';
@@ -38,8 +39,13 @@ class _MyAppState extends State<MyApp> {
       onShow: () {
         AuthService().isAuthenticated().then((value) {
           if (!value) return;
-
-          WebSocketManager().checkConnection();
+          WebSocketManager().ensureConnected();
+        });
+      },
+      onResume: () {
+        AuthService().isAuthenticated().then((value) {
+          if (!value) return;
+          WebSocketManager().ensureConnected();
         });
       },
     );
@@ -115,11 +121,30 @@ class _SplashScreenState extends State<SplashScreen> {
     _checkAuthentication();
   }
 
+  /// Extract the invite key from the current URL (web only).
+  /// Format: ?key=INVITE_KEY (64-char hex string)
+  String? _getDeepLinkInviteKey() {
+    if (!kIsWeb) return null;
+
+    try {
+      final uri = Uri.base;
+      final key = uri.queryParameters['key'];
+      if (key != null && key.length >= 64) {
+        return key;
+      }
+    } catch (e) {
+      Logger().e('Error parsing deep link: $e');
+    }
+
+    return null;
+  }
+
   Future<void> _checkAuthentication() async {
-    // Add a small delay for better UX
     await Future.delayed(const Duration(seconds: 1));
 
     if (!mounted) return;
+
+    final inviteKey = _getDeepLinkInviteKey();
 
     try {
       final isAuthenticated = await _authService.isAuthenticated();
@@ -127,10 +152,7 @@ class _SplashScreenState extends State<SplashScreen> {
       if (!mounted) return;
 
       if (isAuthenticated) {
-        // Register Firebase token only if notifications are enabled (respects user choice).
-        // On web (e.g. iOS Safari), do NOT request permission on startup: Safari blocks
-        // notification permission unless it's triggered by a direct user gesture. Users can
-        // enable notifications via Settings → Enable Notifications (that tap counts as gesture).
+        // Authenticated user flow
         try {
           if (!kIsWeb) {
             final notificationsEnabled = await _settingsService.getNotificationsEnabled();
@@ -139,34 +161,49 @@ class _SplashScreenState extends State<SplashScreen> {
               await _authService.registerFirebaseToken(messagePreview: messagePreview);
             }
           }
-          // On web, registerFirebaseToken() is called when user taps "Enable Notifications" in Settings.
 
           await WebSocketManager().initialize();
-          
-          // Initialize device sync service for cross-device message synchronization
           DeviceSyncService().initialize();
         } catch (e) {
-          // Log error but don't block navigation
           Logger().e('Failed to register Firebase token: $e');
         }
 
-        // User is logged in, go to chat split view (responsive)
+        // Authenticated users always go to the main chat view.
+        // If they have an invite key they can use the share link themselves,
+        // but they join calls through the normal conversation UI.
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (_) => const ChatSplitView()),
         );
       } else {
-        // User is not logged in, go to login page
-        Navigator.of(
-          context,
-        ).pushReplacement(MaterialPageRoute(builder: (_) => const LoginPage()));
+        // Not authenticated
+        if (inviteKey != null) {
+          // Guest flow: show name prompt, then join call directly via invite key
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(
+              builder: (_) => GuestNamePage(inviteKey: inviteKey),
+            ),
+          );
+        } else {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (_) => const LoginPage()),
+          );
+        }
       }
     } catch (e, stackTrace) {
       Logger().e('Failed to _checkAuthentication: $e', stackTrace: stackTrace);
-      // If there's an error, go to login page
       if (!mounted) return;
-      Navigator.of(
-        context,
-      ).pushReplacement(MaterialPageRoute(builder: (_) => const LoginPage()));
+
+      if (inviteKey != null) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (_) => GuestNamePage(inviteKey: inviteKey),
+          ),
+        );
+      } else {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const LoginPage()),
+        );
+      }
     }
   }
 

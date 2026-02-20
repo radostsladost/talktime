@@ -4,9 +4,13 @@ import 'dart:io';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:logger/web.dart';
+import 'package:talktime/core/navigation_manager.dart';
+import 'package:talktime/core/platform_utils_stub.dart';
 import 'package:talktime/features/call/data/call_service.dart';
 import 'package:talktime/features/call/data/signaling_service.dart';
+import 'package:talktime/features/call/presentation/utils/call_url_helper.dart';
 import 'package:talktime/features/settings/data/settings_service.dart';
 import 'package:talktime/features/call/presentation/remote_participant_tile.dart';
 import 'package:talktime/features/call/presentation/widgets/audio_chooser_popup.dart';
@@ -19,12 +23,14 @@ class ConferencePage extends StatefulWidget {
   final String roomId;
   final List<UserInfo> initialParticipants;
   final Conversation? conversation;
+  final String? inviteKey;
 
   const ConferencePage({
     super.key,
     required this.roomId,
     required this.initialParticipants,
     this.conversation,
+    this.inviteKey,
   });
 
   @override
@@ -73,11 +79,21 @@ class _ConferencePageState extends State<ConferencePage> {
           }
           // Check if we are already in this call, if not, start it
           if (_callService.currentState == CallState.idle) {
-            _callService
-                .startCall(widget.roomId, widget.initialParticipants)
+            await _callService
+                .startCall(
+                  widget.roomId,
+                  widget.initialParticipants,
+                  inviteKey: widget.inviteKey,
+                )
                 .catchError((error) {
                   _logger.e("Error starting call: $error");
                 });
+          }
+
+          // Push the invite-key URL once it's available
+          final key = _callService.inviteKey;
+          if (key != null) {
+            CallUrlHelper.pushCallUrl(key);
           }
 
           // Setup listeners and attach existing streams immediately after service is set up/call started
@@ -203,18 +219,18 @@ class _ConferencePageState extends State<ConferencePage> {
       _remoteRenderers.remove(id);
     }
 
-    final assignStream =
-        !kIsWeb; // Web: only tile renderers get stream to avoid duplicate audio
     for (final id in activeIds) {
       if (!_remoteRenderers.containsKey(id)) {
         final newRenderer = getWebRTCPlatform().createVideoRenderer();
         newRenderer.initialize().then((_) {
-          if (assignStream) newRenderer.srcObject = streams[id];
+          if (!kIsWeb) newRenderer.srcObject = streams[id];
           if (mounted) setState(() {});
         });
         _remoteRenderers[id] = newRenderer;
       } else {
-        if (assignStream) _remoteRenderers[id]!.srcObject = streams[id];
+        // Always re-assign srcObject on non-web to ensure new tracks
+        // (e.g. video added mid-call via renegotiation) are picked up.
+        if (!kIsWeb) _remoteRenderers[id]!.srcObject = streams[id];
       }
     }
 
@@ -243,7 +259,6 @@ class _ConferencePageState extends State<ConferencePage> {
 
   @override
   void dispose() {
-    // IMPORTANT: Cancel subscriptions
     _stateSubscription?.cancel();
     _localStreamSubscription?.cancel();
     _cachedVideoSubscription?.cancel();
@@ -254,7 +269,9 @@ class _ConferencePageState extends State<ConferencePage> {
     _speakerStateSubscription?.cancel();
     _speakerDeviceIdSubscription?.cancel();
 
-    // Dispose the RENDERERS (UI), but DO NOT stop the call.
+    // Restore the browser URL when leaving the call
+    CallUrlHelper.restoreUrl();
+
     _localRenderer.dispose();
     for (var r in _remoteRenderers.values) r.dispose();
     super.dispose();
@@ -587,6 +604,21 @@ class _ConferencePageState extends State<ConferencePage> {
     );
   }
 
+  void _shareCallLink() {
+    final key = _callService.inviteKey;
+    if (key == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Invite link not yet available')),
+      );
+      return;
+    }
+    final link = CallUrlHelper.getCallLink(key);
+    Clipboard.setData(ClipboardData(text: link));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Call link copied to clipboard')),
+    );
+  }
+
   Widget _buildControls() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 32.0),
@@ -641,6 +673,12 @@ class _ConferencePageState extends State<ConferencePage> {
             tooltip: 'Audio settings',
             onPressed: _showAudioSettingsPanel,
           ),
+          IconButton(
+            icon: const Icon(Icons.share),
+            color: Colors.white,
+            tooltip: 'Share call link',
+            onPressed: () => _shareCallLink(),
+          ),
           if (widget.conversation != null)
             IconButton(
               icon: const Icon(Icons.chat),
@@ -665,7 +703,9 @@ class _ConferencePageState extends State<ConferencePage> {
                 _logger.e('Error ending call: $error');
               });
               if (Navigator.of(context).canPop()) {
-                Navigator.pop(context);
+                NavigationManager().exitFromCall();
+              } else if (_callService.isGuest) {
+                NavigationManager().openLogin();
               }
             },
           ),

@@ -2,25 +2,27 @@ import 'dart:async';
 import 'package:logger/logger.dart';
 import 'package:signalr_netcore/signalr_client.dart';
 import 'package:talktime/core/constants/api_constants.dart';
-import 'package:talktime/core/network/api_client.dart';
-import 'package:talktime/features/auth/data/auth_service.dart';
+import 'package:talktime/core/websocket/websocket_manager.dart';
+import 'package:signalr_netcore/http_connection_options.dart';
 
-/// SignalR-based signaling service for WebRTC call signaling
-/// Handles connection to the TalkTime SignalR hub and manages call signaling
+/// SignalR-based signaling service for WebRTC call signaling.
+/// For authenticated users it reuses WebSocketManager's existing connection.
+/// For guests it creates its own dedicated connection.
 class SignalingService {
   HubConnection? _hubConnection;
+  bool _ownsConnection = false;
   final Logger _logger = Logger(output: ConsoleOutput());
-  final ApiClient _apiClient = ApiClient();
+  void Function()? _connectionRestoredCb;
 
   // Stream controllers for different signaling events
   final StreamController<IncomingCallEvent> _incomingCallController =
-      StreamController<IncomingCallEvent>.broadcast(); // OBOSLETE
+      StreamController<IncomingCallEvent>.broadcast(); // OBSOLETE
   final StreamController<CallAcceptedEvent> _callAcceptedController =
-      StreamController<CallAcceptedEvent>.broadcast(); // OBOSLETE
+      StreamController<CallAcceptedEvent>.broadcast(); // OBSOLETE
   final StreamController<CallRejectedEvent> _callRejectedController =
-      StreamController<CallRejectedEvent>.broadcast(); // OBOSLETE
+      StreamController<CallRejectedEvent>.broadcast(); // OBSOLETE
   final StreamController<CallEndedEvent> _callEndedController =
-      StreamController<CallEndedEvent>.broadcast(); // OBOSLETE
+      StreamController<CallEndedEvent>.broadcast(); // OBSOLETE
 
   final StreamController<RoomCreatedEvent> _roomCreatedController =
       StreamController<RoomCreatedEvent>.broadcast();
@@ -44,13 +46,13 @@ class SignalingService {
 
   // Public streams
   Stream<IncomingCallEvent> get onIncomingCall =>
-      _incomingCallController.stream; // OBOSLETE
+      _incomingCallController.stream; // OBSOLETE
   Stream<CallAcceptedEvent> get onCallAccepted =>
-      _callAcceptedController.stream; // OBOSLETE
+      _callAcceptedController.stream; // OBSOLETE
   Stream<CallRejectedEvent> get onCallRejected =>
-      _callRejectedController.stream; // OBOSLETE
+      _callRejectedController.stream; // OBSOLETE
   Stream<CallEndedEvent> get onCallEnded =>
-      _callEndedController.stream; // OBOSLETE
+      _callEndedController.stream; // OBSOLETE
 
   Stream<RoomCreatedEvent> get onRoomCreated => _roomCreatedController.stream;
   Stream<RoomJoinedEvent> get onRoomJoined => _roomJoinedController.stream;
@@ -64,46 +66,81 @@ class SignalingService {
       _iceCandidateController.stream;
   Stream<String> get onCallInitiated => _callInitiatedController.stream;
 
-  /// Check if connected to SignalR hub
-  bool get isConnected => _hubConnection?.state == HubConnectionState.Connected;
+  bool get isConnected =>
+      _hubConnection?.state == HubConnectionState.Connected;
 
-  /// Connect to the SignalR hub
+  /// Attach to WebSocketManager's existing hub connection for signaling.
+  /// No new WebSocket is opened — all signaling goes through the shared connection.
   Future<void> connect() async {
     if (isConnected) {
       _logger.w('Already connected to SignalR hub');
       return;
     }
 
+    final shared = WebSocketManager().hubConnection;
+    if (shared == null || shared.state != HubConnectionState.Connected) {
+      _logger.e('WebSocketManager hub connection not available');
+      throw Exception('WebSocketManager is not connected');
+    }
+
+    _hubConnection = shared;
+    _ownsConnection = false;
+    _registerHandlers();
+
+    _connectionRestoredCb = _onSharedConnectionRestored;
+    WebSocketManager().onConnectionRestored(_connectionRestoredCb!);
+
+    _logger.i('Signaling service attached to shared hub connection');
+  }
+
+  /// Called when WebSocketManager restores its connection (force reconnect
+  /// or full reinitialize). Re-grab the hub reference and re-register handlers
+  /// so signaling keeps working after a stale-connection recovery.
+  void _onSharedConnectionRestored() {
+    final shared = WebSocketManager().hubConnection;
+    if (shared == null) return;
+
+    if (shared != _hubConnection) {
+      _logger.i('Shared connection instance changed — re-attaching signaling handlers');
+      _hubConnection = shared;
+      _registerHandlers();
+    } else {
+      _logger.i('Shared connection restored (same instance)');
+    }
+  }
+
+  /// Connect as a guest (no JWT, uses deviceId + guestName query params).
+  /// Guests don't have a WebSocketManager connection, so this creates its own.
+  Future<void> connectAsGuest(String deviceId, String displayName) async {
+    if (isConnected) {
+      _logger.w('Already connected to SignalR hub');
+      return;
+    }
+
     try {
-      final connectionUrl = ApiConstants.getSignalingUrlWithNoToken();
-      _logger.i('Connecting to SignalR hub: $connectionUrl');
+      final encodedName = Uri.encodeComponent(displayName);
+      final connectionUrl =
+          '${ApiConstants.getSignalingUrlWithNoToken()}?deviceId=$deviceId&guestName=$encodedName';
+      _logger.i('Connecting to SignalR hub as guest: $connectionUrl');
 
       _hubConnection = HubConnectionBuilder()
           .withUrl(
             connectionUrl,
-            options: HttpConnectionOptions(
-              accessTokenFactory: () async {
-                await AuthService().refreshTokenIfNeeded();
-                return (await _apiClient.getToken()) ?? "";
-              },
-            ),
+            options: HttpConnectionOptions(),
           )
           .withAutomaticReconnect()
           .build();
 
-      // Register event handlers
+      _ownsConnection = true;
       _registerHandlers();
-
-      // Start connection
       await _hubConnection!.start();
-      _logger.i('Successfully connected to SignalR hub');
+      _logger.i('Successfully connected to SignalR hub as guest');
     } catch (e) {
-      _logger.e('Failed to connect to SignalR hub: $e');
+      _logger.e('Failed to connect to SignalR hub as guest: $e');
       rethrow;
     }
   }
 
-  /// Register SignalR event handlers
   void _registerHandlers() {
     if (_hubConnection == null) return;
 
@@ -135,7 +172,6 @@ class SignalingService {
       }
     });
 
-    // WebRTC offer
     _hubConnection!.on('ReceiveOffer', (arguments) {
       _logger.d('Received ReceiveOffer: $arguments');
       if (arguments != null && arguments.isNotEmpty) {
@@ -145,7 +181,6 @@ class SignalingService {
       }
     });
 
-    // WebRTC answer
     _hubConnection!.on('ReceiveAnswer', (arguments) {
       _logger.d('Received ReceiveAnswer: $arguments');
       if (arguments != null && arguments.isNotEmpty) {
@@ -155,7 +190,6 @@ class SignalingService {
       }
     });
 
-    // ICE candidate
     _hubConnection!.on('ReceiveIceCandidate', (arguments) {
       _logger.d('Received ReceiveIceCandidate: $arguments');
       if (arguments != null && arguments.isNotEmpty) {
@@ -165,7 +199,6 @@ class SignalingService {
       }
     });
 
-    // Call failed
     _hubConnection!.on('CallFailed', (arguments) {
       if (arguments != null && arguments.isNotEmpty) {
         final data = arguments[0] as Map<String, dynamic>;
@@ -176,75 +209,54 @@ class SignalingService {
       }
     });
 
-    // Error
     _hubConnection!.on('Error', (arguments) {
       _logger.e('SignalR error: $arguments');
     });
   }
 
-  /// Initiate a call to another user
   Future<void> initiateCall(String calleeId, String callType) async {
-    if (!isConnected) {
-      throw Exception('Not connected to SignalR hub');
-    }
-
+    if (!isConnected) throw Exception('Not connected to SignalR hub');
     _logger.i('Initiating $callType call to $calleeId');
     await _hubConnection!.invoke('InitiateCall', args: [calleeId, callType]);
   }
 
-  /// Accept an incoming call
   Future<void> acceptCall(String callId) async {
-    if (!isConnected) {
-      throw Exception('Not connected to SignalR hub');
-    }
-
+    if (!isConnected) throw Exception('Not connected to SignalR hub');
     _logger.i('Accepting call $callId');
     await _hubConnection!.invoke('AcceptCall', args: [callId]);
   }
 
-  /// Reject an incoming call
   Future<void> rejectCall(String callId, String reason) async {
-    if (!isConnected) {
-      throw Exception('Not connected to SignalR hub');
-    }
-
+    if (!isConnected) throw Exception('Not connected to SignalR hub');
     _logger.i('Rejecting call $callId: $reason');
     await _hubConnection!.invoke('RejectCall', args: [callId, reason]);
   }
 
-  /// End an active call
   Future<void> endCall(String callId, String reason) async {
-    if (!isConnected) {
-      throw Exception('Not connected to SignalR hub');
-    }
-
+    if (!isConnected) throw Exception('Not connected to SignalR hub');
     _logger.i('Ending call $callId: $reason');
     await _hubConnection!.invoke('EndCall', args: [callId, reason]);
   }
 
-  /// Send WebRTC offer
-  Future<void> sendOffer(String toUserId, String sdp, {String? roomId}) async {
-    if (!isConnected) {
-      throw Exception('Not connected to SignalR hub');
-    }
-
-    _logger.d('Sending offer to $toUserId');
+  /// Send WebRTC offer to a specific device
+  Future<void> sendOffer(String toDeviceId, String sdp,
+      {String? roomId}) async {
+    if (!isConnected) throw Exception('Not connected to SignalR hub');
+    _logger.d('Sending offer to $toDeviceId');
     await _hubConnection!.invoke(
       'SendOffer',
-      args: [toUserId, sdp, roomId as Object],
+      args: [toDeviceId, sdp, roomId as Object],
     );
   }
 
-  /// Send WebRTC answer
-  Future<void> sendAnswer(String toUserId, String sdp, {String? roomId}) async {
-    if (!isConnected) {
-      throw Exception('Not connected to SignalR hub');
-    }
-
-    _logger.d('Sending answer to $toUserId');
+  /// Send WebRTC answer to a specific device
+  Future<void> sendAnswer(String toDeviceId, String sdp,
+      {String? roomId}) async {
+    if (!isConnected) throw Exception('Not connected to SignalR hub');
+    _logger.d('Sending answer to $toDeviceId');
     await _hubConnection!.invoke(
       'SendAnswer',
-      args: [toUserId, sdp, roomId as Object],
+      args: [toDeviceId, sdp, roomId as Object],
     );
   }
 
@@ -258,12 +270,18 @@ class SignalingService {
     await _hubConnection!.invoke('JoinRoom', args: [roomId]);
   }
 
+  /// Join a room as guest using the invite key (no auth required, room must already exist)
+  Future<void> joinRoomAsGuest(String inviteKey, String displayName) async {
+    if (!isConnected) throw Exception('Not connected');
+    await _hubConnection!
+        .invoke('JoinRoomAsGuest', args: [inviteKey, displayName]);
+  }
+
   Future<void> leaveRoom(String roomId, {String reason = 'user_left'}) async {
     if (!isConnected) throw Exception('Not connected');
     await _hubConnection!.invoke('LeaveRoom', args: [roomId, reason]);
   }
 
-  // Room-based signaling
   Future<void> sendRoomOffer(String roomId, String sdp) async {
     if (!isConnected) throw Exception('Not connected');
     await _hubConnection!.invoke('SendRoomOffer', args: [roomId, sdp]);
@@ -282,23 +300,20 @@ class SignalingService {
     );
   }
 
-  /// Send ICE candidate
+  /// Send ICE candidate to a specific device
   Future<void> sendIceCandidate(
-    String toUserId,
+    String toDeviceId,
     String candidate,
     String? sdpMid,
     int? sdpMLineIndex, {
     String? roomId,
   }) async {
-    if (!isConnected) {
-      throw Exception('Not connected to SignalR hub');
-    }
-
-    _logger.d('Sending ICE candidate to $toUserId');
+    if (!isConnected) throw Exception('Not connected to SignalR hub');
+    _logger.d('Sending ICE candidate to $toDeviceId');
     await _hubConnection!.invoke(
       'SendIceCandidate',
       args: [
-        toUserId,
+        toDeviceId,
         candidate,
         sdpMid as Object,
         sdpMLineIndex as Object,
@@ -307,18 +322,26 @@ class SignalingService {
     );
   }
 
-  /// Disconnect from SignalR hub
   Future<void> disconnect() async {
     try {
-      _logger.i('Disconnecting from SignalR hub');
-      await _hubConnection?.stop();
+      if (_connectionRestoredCb != null) {
+        WebSocketManager().removeConnectionRestoredCallback(_connectionRestoredCb!);
+        _connectionRestoredCb = null;
+      }
+
+      if (_ownsConnection) {
+        _logger.i('Stopping owned SignalR hub connection (guest)');
+        await _hubConnection?.stop();
+      } else {
+        _logger.i('Detaching from shared SignalR hub connection');
+      }
       _hubConnection = null;
+      _ownsConnection = false;
     } catch (e) {
       _logger.e('Error disconnecting: $e');
     }
   }
 
-  /// Dispose resources
   void dispose() {
     disconnect();
     _incomingCallController.close();
@@ -399,41 +422,41 @@ class CallRejectedEvent {
 
 class CallEndedEvent {
   final String callId;
-  final String userId;
+  final String deviceId;
   final String reason;
 
   CallEndedEvent({
     required this.callId,
-    required this.userId,
+    required this.deviceId,
     required this.reason,
   });
 
   factory CallEndedEvent.fromJson(Map<String, dynamic> json) {
     return CallEndedEvent(
       callId: json['callId'] as String,
-      userId: json['userId'] as String,
+      deviceId: json['deviceId'] as String,
       reason: json['reason'] as String,
     );
   }
 }
 
 class SignalingOfferEvent {
-  final String fromUserId;
-  final String toUserId;
+  final String fromDeviceId;
+  final String toDeviceId;
   final String? roomId;
   final String sdp;
 
   SignalingOfferEvent({
-    required this.fromUserId,
-    required this.toUserId,
+    required this.fromDeviceId,
+    required this.toDeviceId,
     this.roomId,
     required this.sdp,
   });
 
   factory SignalingOfferEvent.fromJson(Map<String, dynamic> json) {
     return SignalingOfferEvent(
-      fromUserId: json['fromUserId'] as String,
-      toUserId: json['toUserId'] as String,
+      fromDeviceId: json['fromDeviceId'] as String,
+      toDeviceId: json['toDeviceId'] as String,
       roomId: json['roomId'] as String?,
       sdp: json['sdp'] as String,
     );
@@ -441,22 +464,22 @@ class SignalingOfferEvent {
 }
 
 class SignalingAnswerEvent {
-  final String fromUserId;
-  final String toUserId;
+  final String fromDeviceId;
+  final String toDeviceId;
   final String? roomId;
   final String sdp;
 
   SignalingAnswerEvent({
-    required this.fromUserId,
-    required this.toUserId,
+    required this.fromDeviceId,
+    required this.toDeviceId,
     this.roomId,
     required this.sdp,
   });
 
   factory SignalingAnswerEvent.fromJson(Map<String, dynamic> json) {
     return SignalingAnswerEvent(
-      fromUserId: json['fromUserId'] as String,
-      toUserId: json['toUserId'] as String,
+      fromDeviceId: json['fromDeviceId'] as String,
+      toDeviceId: json['toDeviceId'] as String,
       roomId: json['roomId'] as String?,
       sdp: json['sdp'] as String,
     );
@@ -464,16 +487,16 @@ class SignalingAnswerEvent {
 }
 
 class SignalingIceCandidateEvent {
-  final String fromUserId;
-  final String toUserId;
+  final String fromDeviceId;
+  final String toDeviceId;
   final String? roomId;
   final String candidate;
   final String? sdpMid;
   final int? sdpMLineIndex;
 
   SignalingIceCandidateEvent({
-    required this.fromUserId,
-    required this.toUserId,
+    required this.fromDeviceId,
+    required this.toDeviceId,
     this.roomId,
     required this.candidate,
     this.sdpMid,
@@ -482,8 +505,8 @@ class SignalingIceCandidateEvent {
 
   factory SignalingIceCandidateEvent.fromJson(Map<String, dynamic> json) {
     return SignalingIceCandidateEvent(
-      fromUserId: json['fromUserId'] as String,
-      toUserId: json['toUserId'] as String,
+      fromDeviceId: json['fromDeviceId'] as String,
+      toDeviceId: json['toDeviceId'] as String,
       roomId: json['roomId'] as String?,
       candidate: json['candidate'] as String,
       sdpMid: json['sdpMid'] as String?,
@@ -514,6 +537,7 @@ class RoomCreatedEvent {
   final List<UserInfo> participants;
   final String createdBy;
   final DateTime createdAt;
+  final String? inviteKey;
 
   RoomCreatedEvent({
     required this.roomId,
@@ -521,6 +545,7 @@ class RoomCreatedEvent {
     required this.participants,
     required this.createdBy,
     required this.createdAt,
+    this.inviteKey,
   });
 
   factory RoomCreatedEvent.fromJson(Map<String, dynamic> json) {
@@ -531,10 +556,11 @@ class RoomCreatedEvent {
 
     return RoomCreatedEvent(
       roomId: json['roomId'] as String,
-      conversationId: json['name'] as String, // matches `roomState.Name`
+      conversationId: json['name'] as String,
       participants: participants,
       createdBy: json['createdBy'] as String,
       createdAt: DateTime.parse(json['createdAt'] as String),
+      inviteKey: json['inviteKey'] as String?,
     );
   }
 }
@@ -545,6 +571,7 @@ class RoomJoinedEvent {
   final List<UserInfo> participants;
   final String createdBy;
   final DateTime createdAt;
+  final String? inviteKey;
 
   RoomJoinedEvent({
     required this.roomId,
@@ -552,6 +579,7 @@ class RoomJoinedEvent {
     required this.participants,
     required this.createdBy,
     required this.createdAt,
+    this.inviteKey,
   });
 
   factory RoomJoinedEvent.fromJson(Map<String, dynamic> json) {
@@ -566,6 +594,7 @@ class RoomJoinedEvent {
       participants: participants,
       createdBy: json['createdBy'] as String,
       createdAt: DateTime.parse(json['createdAt'] as String),
+      inviteKey: json['inviteKey'] as String?,
     );
   }
 }

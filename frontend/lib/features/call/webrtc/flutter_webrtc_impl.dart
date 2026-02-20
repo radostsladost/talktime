@@ -9,7 +9,11 @@ import 'types.dart';
 // ============== Track wrapper ==============
 
 class MediaStreamTrackWrapper implements IMediaStreamTrack {
-  MediaStreamTrackWrapper(this._track);
+  MediaStreamTrackWrapper(this._track) {
+    _track.onMute = () => onMute?.call();
+    _track.onUnMute = () => onUnMute?.call();
+    _track.onEnded = () => onEnded?.call();
+  }
   final webrtc.MediaStreamTrack _track;
 
   @override
@@ -45,8 +49,35 @@ class MediaStreamTrackWrapper implements IMediaStreamTrack {
 // ============== Stream wrapper ==============
 
 class MediaStreamWrapper implements IMediaStream {
-  MediaStreamWrapper(this._stream);
+  /// Use [wrap] to get a cached wrapper for identity-stable stream objects.
+  MediaStreamWrapper(this._stream) {
+    _wireNativeEvents();
+  }
+
+  MediaStreamWrapper._internal(this._stream) {
+    _wireNativeEvents();
+  }
+
   final webrtc.MediaStream _stream;
+
+  // Cache: same native stream -> same wrapper, so callbacks stay attached.
+  static final Map<String, MediaStreamWrapper> _streamCache = {};
+
+  /// Get or create a wrapper for [s], preserving identity across onTrack calls.
+  static MediaStreamWrapper wrap(webrtc.MediaStream s) {
+    return _streamCache.putIfAbsent(s.id, () => MediaStreamWrapper._internal(s));
+  }
+
+  void _wireNativeEvents() {
+    _stream.onAddTrack = (webrtc.MediaStreamTrack nativeTrack) {
+      final wrapped = _wrapTrack(nativeTrack);
+      onAddTrack?.call(this, wrapped);
+    };
+    _stream.onRemoveTrack = (webrtc.MediaStreamTrack nativeTrack) {
+      final wrapped = _wrapTrack(nativeTrack);
+      onRemoveTrack?.call(this, wrapped);
+    };
+  }
 
   @override
   String get id => _stream.id;
@@ -86,7 +117,10 @@ class MediaStreamWrapper implements IMediaStream {
   }
 
   @override
-  void dispose() => _stream.dispose();
+  void dispose() {
+    _streamCache.remove(_stream.id);
+    _stream.dispose();
+  }
 
   @override
   AddTrackEventCallback? onAddTrack;
@@ -336,7 +370,7 @@ class FlutterWebRTCPlatform implements IWebRTCPlatform {
     pc.onTrack = (webrtc.RTCTrackEvent event) {
       final streams = event.streams;
       if (streams != null && streams.isNotEmpty) {
-        final streamList = streams.map((s) => MediaStreamWrapper(s)).toList();
+        final streamList = streams.map((s) => MediaStreamWrapper.wrap(s)).toList();
         final track = event.track;
         if (track != null) {
           wrapper.onTrack?.call(RTCTrackEventDto(streamList, MediaStreamWrapper._wrapTrack(track)));

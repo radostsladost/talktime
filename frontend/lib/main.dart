@@ -315,7 +315,7 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 }
 
 Future<void> handleCall(Map<String, dynamic> data) async {
-  var backUrl = Environment.apiBaseUrl;
+  var backUrl = Environment.webBaseUrl;
   Logger().i("Handling a background message: ${jsonEncode(data)}");
 
   if ((data['type'] as String?) == 'call') {

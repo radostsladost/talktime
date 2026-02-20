@@ -21,6 +21,7 @@ samples, guidance on mobile development, and a full API reference.
 ```
 API_BASE_URL=https://<your_api_base_host>
 # ex: API_BASE_URL=https://example.com
+WEB_URL=https://<your_url_with_web_build>
 # firebase web variables used for scripts\build-firebase-sw.js
 FIREBASE_WEB_APIKEY=<FROM_FIREBASE_CONFIG>
 FIREBASE_WEB_APPID=<FROM_FIREBASE_CONFIG>

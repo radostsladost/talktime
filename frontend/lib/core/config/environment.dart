@@ -26,6 +26,21 @@ class Environment {
     }
   }
 
+  /// Base URL for the API
+  static String get webBaseUrl {
+    switch (_currentEnv) {
+      case 'production':
+        return dotenv.env['WEB_URL'] ??
+            'https://api.example.host'; // Replace with your production URL
+      case 'development':
+      default:
+        // For Android emulator use 10.0.2.2 instead of localhost
+        // For iOS simulator use localhost
+        // For physical device use your computer's IP address (e.g., 192.168.1.100)
+        return dotenv.env['WEB_URL'] ?? 'http://localhost:5000';
+    }
+  }
+
   /// WebSocket base URL (derived from API base URL)
   static String get wsBaseUrl => apiBaseUrl;
 
@@ -42,6 +57,7 @@ class Environment {
   static Map<String, dynamic> get config => {
     'environment': _currentEnv,
     'apiBaseUrl': apiBaseUrl,
+    'webBaseUrl': webBaseUrl,
     'wsBaseUrl': wsBaseUrl,
     'isDevelopment': isDevelopment,
     'isProduction': isProduction,

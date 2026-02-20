@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:talktime/core/global_key.dart';
+import 'package:talktime/features/auth/presentation/pages/login_page.dart';
 import 'package:talktime/features/call/data/signaling_service.dart';
 import 'package:talktime/features/call/presentation/pages/conference_page.dart';
+import 'package:talktime/features/chat/presentation/pages/chat_split_view.dart';
 import 'package:talktime/features/chat/presentation/pages/create_conversation.dart';
 import 'package:talktime/features/chat/presentation/pages/create_group_chat.dart';
 import 'package:talktime/features/chat/presentation/pages/message_list_page.dart';
@@ -15,6 +17,13 @@ class NavigationManager {
   static final NavigationManager _instance = NavigationManager._internal();
   factory NavigationManager() => _instance;
   NavigationManager._internal();
+
+  void openLogin() {
+    Navigator.push(
+      navigatorKey.currentContext!,
+      MaterialPageRoute(builder: (context) => LoginPage()),
+    );
+  }
 
   void openMessagesList(Conversation conversation) {
     Navigator.push(
@@ -74,6 +83,21 @@ class NavigationManager {
           conversation: conversation,
         ),
       ),
+    );
+  }
+
+  void openSplitView() {
+    Navigator.pushReplacement(
+      navigatorKey.currentContext!,
+      MaterialPageRoute(builder: (_) => const ChatSplitView()),
+    );
+  }
+
+  void exitFromCall() {
+    Navigator.pushAndRemoveUntil(
+      navigatorKey.currentContext!,
+      MaterialPageRoute(builder: (_) => const ChatSplitView()),
+      (Route<dynamic> route) => false,
     );
   }
 }

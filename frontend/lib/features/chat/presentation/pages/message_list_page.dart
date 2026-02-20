@@ -895,7 +895,8 @@ class _MessageListPageState extends State<MessageListPage> {
 
   Widget _buildImageContent(Message message) {
     final imageUrl = message.mediaUrl ?? message.content;
-    final isGif = message.type == MessageType.gif ||
+    final isGif =
+        message.type == MessageType.gif ||
         imageUrl.toLowerCase().contains('.gif') ||
         imageUrl.contains('giphy.com');
     final useHtmlImageForGif = kIsWeb && isGif;
@@ -1150,7 +1151,9 @@ class _MessageListPageState extends State<MessageListPage> {
                         final offset = sel.baseOffset.clamp(0, text.length);
                         _textController.value = TextEditingValue(
                           text: text.replaceRange(offset, offset, '\n'),
-                          selection: TextSelection.collapsed(offset: offset + 1),
+                          selection: TextSelection.collapsed(
+                            offset: offset + 1,
+                          ),
                         );
                         return KeyEventResult.handled;
                       }
@@ -1165,41 +1168,48 @@ class _MessageListPageState extends State<MessageListPage> {
                       textInputAction: TextInputAction.send,
                       textCapitalization: TextCapitalization.sentences,
                       decoration: InputDecoration(
-                      hintText: 'Message ${name}',
-                      filled: true,
-                      border: const OutlineInputBorder(
-                        borderRadius: BorderRadius.all(Radius.circular(30)),
-                        borderSide: BorderSide.none,
+                        hintText: 'Message ${name}',
+                        filled: true,
+                        border: const OutlineInputBorder(
+                          borderRadius: BorderRadius.all(Radius.circular(30)),
+                          borderSide: BorderSide.none,
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
+                        // Media buttons inside the text field on the right
+                        suffixIcon: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // GIF button
+                            IconButton(
+                              icon: const Icon(Icons.gif_box_outlined),
+                              onPressed: _isSendingMedia
+                                  ? null
+                                  : _pickAndSendGif,
+                              tooltip: 'Send GIF',
+                            ),
+                            // Photo button
+                            IconButton(
+                              icon: const Icon(Icons.photo_outlined),
+                              onPressed: _isSendingMedia
+                                  ? null
+                                  : _pickAndSendImage,
+                              tooltip: 'Send Photo',
+                            ),
+                          ],
+                        ),
                       ),
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 8,
-                      ),
-                      // Media buttons inside the text field on the right
-                      suffixIcon: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          // GIF button
-                          IconButton(
-                            icon: const Icon(Icons.gif_box_outlined),
-                            onPressed: _isSendingMedia ? null : _pickAndSendGif,
-                            tooltip: 'Send GIF',
-                          ),
-                          // Photo button
-                          IconButton(
-                            icon: const Icon(Icons.photo_outlined),
-                            onPressed: _isSendingMedia ? null : _pickAndSendImage,
-                            tooltip: 'Send Photo',
-                          ),
-                        ],
-                      ),
-                    ),
-                    onSubmitted: (_) => _sendMessage(),
+                      onSubmitted: (_) => _sendMessage(),
                     ),
                   ),
                 ),
                 // Send button
-                IconButton(icon: const Icon(Icons.send), onPressed: _sendMessage),
+                IconButton(
+                  icon: const Icon(Icons.send),
+                  onPressed: _sendMessage,
+                ),
               ],
             ),
           ),
@@ -1279,7 +1289,7 @@ class _MessageListPageState extends State<MessageListPage> {
             Expanded(
               child: Text(
                 weAreInCall
-                    ? "You're in a call with people here — tap to return"
+                    ? "You're in a active call here — tap to return"
                     : _conferenceParticipants.length == 1
                     ? '${_conferenceParticipants.first.username} is in a call'
                     : '${_conferenceParticipants.length} people in a call',
@@ -1304,12 +1314,14 @@ class _MessageListPageState extends State<MessageListPage> {
   Future<void> _startCall() async {
     final callService = CallService();
     final alreadyInCall = callService.currentState != CallState.idle;
-    final inDifferentCall = alreadyInCall &&
+    final inDifferentCall =
+        alreadyInCall &&
         callService.currentRoomId != null &&
         callService.currentRoomId != widget.conversation.id;
 
     if (inDifferentCall) {
-      final targetName = widget.conversation.displayTitle ??
+      final targetName =
+          widget.conversation.displayTitle ??
           widget.conversation.participants
               ?.firstWhere(
                 (p) => p.id != _myId,
