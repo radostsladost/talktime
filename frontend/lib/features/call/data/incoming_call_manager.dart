@@ -3,11 +3,16 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter_callkit_incoming/entities/android_params.dart';
+import 'package:flutter_callkit_incoming/entities/call_kit_params.dart';
+import 'package:flutter_callkit_incoming/entities/ios_params.dart';
+import 'package:flutter_callkit_incoming/entities/notification_params.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:logger/logger.dart';
+import 'package:talktime/core/config/environment.dart';
 import 'package:talktime/features/call/data/signaling_service.dart';
-import 'package:talktime/features/call/presentation/pages/incoming_call_page.dart';
 import 'package:talktime/features/call/presentation/pages/conference_page.dart';
+import 'package:talktime/features/call/presentation/pages/incoming_call_page.dart';
 
 /// Manages incoming calls and displays the incoming call UI from anywhere in the app.
 ///
@@ -87,19 +92,14 @@ class IncomingCallManager {
   /// [callType] - Type of call ('video' or 'audio')
   /// [roomId] - Optional room ID for the call
   /// [autoDeclineSeconds] - Automatically decline after this many seconds (default: 60)
-  void showIncomingCall({
+  Future<void> showIncomingCall({
     required String callId,
     required String callerName,
     String? callerAvatarUrl,
     required String callType,
     String? roomId,
     int autoDeclineSeconds = 60,
-  }) {
-    if (_navigatorKey?.currentState == null) {
-      _logger.e('Navigator key not initialized. Call initialize() first.');
-      return;
-    }
-
+  }) async {
     if (_isShowingIncomingCall) {
       _logger.w(
         'Already showing an incoming call. Ignoring new call from $callerName',
@@ -114,6 +114,66 @@ class IncomingCallManager {
       'Showing incoming call from $callerName (type: $callType, roomId: $roomId)',
     );
 
+    // Show native CallKit overlay so it appears when app is in background (Android full-screen intent, iOS CallKit).
+    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+      try {
+        final backUrl = Environment.webBaseUrl;
+        final params = CallKitParams(
+          id: callId,
+          nameCaller: callerName,
+          appName: Environment.appName,
+          type: 0,
+          textAccept: 'Accept',
+          textDecline: 'Decline',
+          missedCallNotification: NotificationParams(
+            showNotification: true,
+            isShowCallback: true,
+            subtitle: 'Missed call from $callerName',
+          ),
+          callingNotification: const NotificationParams(
+            showNotification: true,
+            isShowCallback: true,
+            subtitle: 'Calling...',
+          ),
+          duration: autoDeclineSeconds * 1000,
+          extra: <String, dynamic>{'roomId': roomId ?? ''},
+          headers: <String, dynamic>{},
+          android: AndroidParams(
+            isCustomNotification: true,
+            isShowLogo: false,
+            ringtonePath: 'system_ringtone_default',
+            backgroundColor: '#152545',
+            backgroundUrl: '$backUrl/icons/call_bg.jpg',
+            actionColor: '#6b80de',
+            textColor: '#ffffff',
+            incomingCallNotificationChannelName: 'Incoming Call',
+            missedCallNotificationChannelName: 'Missed Call',
+            isShowCallID: false,
+            isShowFullLockedScreen: true,
+          ),
+          ios: IOSParams(
+            handleType: 'generic',
+            supportsVideo: callType == 'video',
+            maximumCallGroups: 2,
+            maximumCallsPerCallGroup: 1,
+            audioSessionMode: 'default',
+            audioSessionActive: true,
+            audioSessionPreferredSampleRate: 44100.0,
+            audioSessionPreferredIOBufferDuration: 0.005,
+            supportsDTMF: true,
+            supportsHolding: true,
+            supportsGrouping: false,
+            supportsUngrouping: false,
+            ringtonePath: 'system_ringtone_default',
+          ),
+        );
+        await FlutterCallkitIncoming.showCallkitIncoming(params);
+        _logger.i('CallKit native incoming call UI shown');
+      } catch (e) {
+        _logger.w('Failed to show CallKit native overlay (non-fatal): $e');
+      }
+    }
+
     // Set auto-decline timer
     _autoDeclineTimer?.cancel();
     _autoDeclineTimer = Timer(Duration(seconds: autoDeclineSeconds), () {
@@ -121,28 +181,31 @@ class IncomingCallManager {
       _handleDecline(callId);
     });
 
-    // Push the incoming call page
-    _navigatorKey!.currentState!.push(
-      PageRouteBuilder(
-        opaque: false,
-        barrierDismissible: false,
-        pageBuilder: (context, animation, secondaryAnimation) {
-          return IncomingCallPage(
-            callId: callId,
-            callerName: callerName,
-            callerAvatarUrl: callerAvatarUrl,
-            callType: callType,
-            roomId: roomId,
-            onAccept: () => _handleAccept(callId, roomId),
-            onDecline: () => _handleDecline(callId),
-          );
-        },
-        transitionsBuilder: (context, animation, secondaryAnimation, child) {
-          return FadeTransition(opacity: animation, child: child);
-        },
-        transitionDuration: const Duration(milliseconds: 300),
-      ),
-    );
+    // Push the Flutter incoming call page only when we have a navigator (app in foreground).
+    // When app is in background we only show the native CallKit overlay above.
+    if (_navigatorKey?.currentState != null) {
+      _navigatorKey!.currentState!.push(
+        PageRouteBuilder(
+          opaque: false,
+          barrierDismissible: false,
+          pageBuilder: (context, animation, secondaryAnimation) {
+            return IncomingCallPage(
+              callId: callId,
+              callerName: callerName,
+              callerAvatarUrl: callerAvatarUrl,
+              callType: callType,
+              roomId: roomId,
+              onAccept: () => _handleAccept(callId, roomId),
+              onDecline: () => _handleDecline(callId),
+            );
+          },
+          transitionsBuilder: (context, animation, secondaryAnimation, child) {
+            return FadeTransition(opacity: animation, child: child);
+          },
+          transitionDuration: const Duration(milliseconds: 300),
+        ),
+      );
+    }
   }
 
   /// Handle accepting the call

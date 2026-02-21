@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:talktime/features/call/webrtc/types.dart';
 import 'package:talktime/features/call/webrtc/webrtc_platform.dart';
 
 class RemoteParticipantTile extends StatefulWidget {
@@ -10,6 +11,9 @@ class RemoteParticipantTile extends StatefulWidget {
   final IMediaStream stream;
   final Function(String, bool)? onParticipantTap;
   final bool? fitInRect;
+
+  /// Override for video fit (cover/contain). If null, uses fitInRect (true => contain, false => cover).
+  final VideoObjectFit? objectFit;
 
   /// Output device for this participant's audio (desktop/web only).
   final String? speakerDeviceId;
@@ -21,6 +25,7 @@ class RemoteParticipantTile extends StatefulWidget {
     required this.stream,
     this.onParticipantTap,
     this.fitInRect,
+    this.objectFit,
     this.speakerDeviceId,
   });
 
@@ -199,9 +204,10 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
               // 1. Video Layer
               if (_isRendererReady && hasVideo)
                 _renderer.buildView(
-                  objectFit: widget.fitInRect == true
-                      ? VideoObjectFit.contain
-                      : VideoObjectFit.cover,
+                  objectFit: widget.objectFit ??
+                      (widget.fitInRect == true
+                          ? VideoObjectFit.contain
+                          : VideoObjectFit.cover),
                   mirror: false,
                 )
               else

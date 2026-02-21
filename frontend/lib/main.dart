@@ -285,11 +285,15 @@ Future<void> initFirebaseServices() async {
 
     Logger().i("CallKit is initialized");
 
-    if (!await FlutterCallkitIncoming.canUseFullScreenIntent()) {
-      await FlutterCallkitIncoming.requestFullIntentPermission();
-      Logger().i("CallKit, canUseFullScreenIntent = true");
-    } else {
-      Logger().i("CallKit, canUseFullScreenIntent = false");
+    // Request full-screen intent permission on Android so incoming call can show when app is in background.
+    if (!kIsWeb && Platform.isAndroid) {
+      final canUse = await FlutterCallkitIncoming.canUseFullScreenIntent();
+      if (!canUse) {
+        await FlutterCallkitIncoming.requestFullIntentPermission();
+        Logger().i("CallKit, requested full-screen intent permission");
+      } else {
+        Logger().i("CallKit, full-screen intent permission already granted");
+      }
     }
   } catch (e) {
     Logger().e("CallKit: $e", error: e);
@@ -350,15 +354,15 @@ Future<void> handleCall(Map<String, dynamic> data) async {
         android: AndroidParams(
           isCustomNotification: true,
           isShowLogo: false,
-          // logoUrl: 'https://i.pravatar.cc/100',
           ringtonePath: 'system_ringtone_default',
           backgroundColor: '#152545',
           backgroundUrl: '$backUrl/icons/call_bg.jpg',
           actionColor: '#6b80de',
           textColor: '#ffffff',
-          incomingCallNotificationChannelName: "Incoming Call",
-          missedCallNotificationChannelName: "Missed Call",
+          incomingCallNotificationChannelName: 'Incoming Call',
+          missedCallNotificationChannelName: 'Missed Call',
           isShowCallID: false,
+          isShowFullLockedScreen: true,
         ),
         ios: IOSParams(
           // iconName: 'CallKitLogo',

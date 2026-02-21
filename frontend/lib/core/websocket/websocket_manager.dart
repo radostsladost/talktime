@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:logger/logger.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:signalr_netcore/default_reconnect_policy.dart';
 import 'package:talktime/core/constants/api_constants.dart';
 import 'package:talktime/core/network/api_client.dart';
 import 'package:talktime/features/call/data/call_service.dart';
@@ -20,9 +21,11 @@ class WebSocketManager {
   static const int _maxReconnectAttempts = 5;
   static const Duration _reconnectDelay = Duration(seconds: 5);
   static const Duration _healthCheckInterval = Duration(seconds: 30);
+
   /// If the periodic timer hasn't updated _lastActiveAt in this window,
   /// the connection is considered stale after app resume.
   static const Duration _staleThreshold = Duration(seconds: 45);
+
   /// If we were away longer than this, force-reconnect even if SignalR
   /// still reports Connected (the underlying transport is likely dead).
   static const Duration _forceReconnectThreshold = Duration(minutes: 2);
@@ -44,11 +47,13 @@ class WebSocketManager {
   final List<Function(String, bool)> _onTypingIndicatorCallbacks = [];
   final List<Function(String, ConferenceParticipant, String)>
   _onConferenceParticipantCallbacks = [];
-  final List<Function(String, String, ReactionUpdate)> _onReactionCallbacks = [];
+  final List<Function(String, String, ReactionUpdate)> _onReactionCallbacks =
+      [];
   final List<Function(DeviceConnectedEvent)> _onDeviceConnectedCallbacks = [];
   final List<Function(DeviceSyncRequest)> _onDeviceSyncRequestCallbacks = [];
   final List<Function(DeviceSyncChunk)> _onDeviceSyncDataCallbacks = [];
-  final List<Function(OtherDevicesAvailableEvent)> _onOtherDevicesAvailableCallbacks = [];
+  final List<Function(OtherDevicesAvailableEvent)>
+  _onOtherDevicesAvailableCallbacks = [];
   final List<String> _cachedConversations = [];
   final Map<String, bool> _onlineStates = {};
   final Map<String, List<ConferenceParticipant>> _conferenceParticipants = {};
@@ -69,31 +74,35 @@ class WebSocketManager {
   /// The device ID is persisted so it remains the same across app restarts
   Future<String> _getOrCreateDeviceId() async {
     if (_deviceId != null) return _deviceId!;
-    
+
     try {
       // Try to get stored device ID
       final prefs = await SharedPreferences.getInstance();
       final storedId = prefs.getString(_deviceIdKey);
-      
+
       if (storedId != null && storedId.isNotEmpty) {
         _deviceId = storedId;
         _logger.i('Using stored device ID: $_deviceId');
         return _deviceId!;
       }
-      
+
       // Generate a new unique device ID
       final random = Random.secure();
-      final randomPart = List.generate(8, (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0')).join();
+      final randomPart = List.generate(
+        8,
+        (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0'),
+      ).join();
       _deviceId = 'device_${DateTime.now().millisecondsSinceEpoch}_$randomPart';
-      
+
       // Persist the device ID
       await prefs.setString(_deviceIdKey, _deviceId!);
       _logger.i('Generated and stored new device ID: $_deviceId');
-      
+
       return _deviceId!;
     } catch (e) {
       // Fallback if SharedPreferences fails
-      _deviceId = 'device_${DateTime.now().millisecondsSinceEpoch}_${DateTime.now().microsecond}';
+      _deviceId =
+          'device_${DateTime.now().millisecondsSinceEpoch}_${DateTime.now().microsecond}';
       _logger.w('Failed to persist device ID, using temporary: $_deviceId');
       return _deviceId!;
     }
@@ -115,7 +124,8 @@ class WebSocketManager {
 
     try {
       final deviceId = await _getOrCreateDeviceId();
-      final connectionUrl = '${ApiConstants.getSignalingUrlWithNoToken()}?deviceId=$deviceId';
+      final connectionUrl =
+          '${ApiConstants.getSignalingUrlWithNoToken()}?deviceId=$deviceId';
 
       _logger.i('SignalR connection URL: $connectionUrl (deviceId: $deviceId)');
 
@@ -127,7 +137,9 @@ class WebSocketManager {
 
       if (_hubConnection != null &&
           (_hubConnection!.state != HubConnectionState.Connected)) {
-        try { _hubConnection!.stop(); } catch (_) {}
+        try {
+          _hubConnection!.stop();
+        } catch (_) {}
       }
 
       _hubConnection = HubConnectionBuilder()
@@ -140,8 +152,36 @@ class WebSocketManager {
               },
             ),
           )
-          .withAutomaticReconnect()
+          .withAutomaticReconnect(
+            retryDelays: [
+              100,
+              100,
+              100,
+              500,
+              500,
+              500,
+              500,
+              500,
+              500,
+              500,
+              1500,
+              1500,
+              2500,
+              2500,
+              3000,
+              5000,
+              10000,
+              20000,
+            ],
+          )
           .build();
+
+      _hubConnection?.onclose(({Exception? error}) {
+        _logger.e('SignalR connection closed callback: $error');
+        _isConnected = false;
+        _isConnecting = true;
+        _lastActiveAt = DateTime.now();
+      });
 
       _setupConnectionHandlers();
       await _connect();
@@ -202,27 +242,36 @@ class WebSocketManager {
     // Short inactivity — simple state check is enough
     if (inactiveDuration < _staleThreshold) {
       if (_hubConnection!.state == HubConnectionState.Disconnected) {
-        _logger.i('ensureConnected: disconnected after short inactivity, reconnecting');
+        _logger.i(
+          'ensureConnected: disconnected after short inactivity, reconnecting',
+        );
         _reconnectAttempts = 0;
         await _connect();
       }
       return;
     }
 
-    _logger.i('ensureConnected: resuming after ${inactiveDuration.inSeconds}s inactivity');
+    _logger.i(
+      'ensureConnected: resuming after ${inactiveDuration.inSeconds}s inactivity',
+    );
 
     // Give SignalR ~1s to detect the dead socket before we check state
     await Future.delayed(const Duration(seconds: 1));
 
     final state = _hubConnection!.state;
 
-    if (state == HubConnectionState.Connected && inactiveDuration < _forceReconnectThreshold) {
-      _logger.i('ensureConnected: still connected after moderate inactivity — OK');
+    if (state == HubConnectionState.Connected &&
+        inactiveDuration < _forceReconnectThreshold) {
+      _logger.i(
+        'ensureConnected: still connected after moderate inactivity — OK',
+      );
       return;
     }
 
     // Either disconnected/reconnecting, or connected after very long inactivity
-    _logger.i('ensureConnected: state=$state after ${inactiveDuration.inSeconds}s — force reconnecting');
+    _logger.i(
+      'ensureConnected: state=$state after ${inactiveDuration.inSeconds}s — force reconnecting',
+    );
     await _forceReconnect();
   }
 
@@ -255,7 +304,9 @@ class WebSocketManager {
 
   void _notifyConnectionRestored() {
     for (final cb in List.of(_onConnectionRestoredCallbacks)) {
-      try { cb(); } catch (e) {
+      try {
+        cb();
+      } catch (e) {
         _logger.e('Connection-restored callback error: $e');
       }
     }
@@ -475,7 +526,10 @@ class WebSocketManager {
 
         if (participantsData != null) {
           final participants = participantsData
-              .map((p) => ConferenceParticipant.fromJson(p as Map<String, dynamic>))
+              .map(
+                (p) =>
+                    ConferenceParticipant.fromJson(p as Map<String, dynamic>),
+              )
               .toList();
 
           _conferenceParticipants[roomId] = participants;
@@ -486,7 +540,9 @@ class WebSocketManager {
               callback(roomId, participant, 'existing');
             }
           }
-          _logger.i('Received ${participants.length} participants for room $roomId');
+          _logger.i(
+            'Received ${participants.length} participants for room $roomId',
+          );
         }
       }
     });
@@ -500,7 +556,9 @@ class WebSocketManager {
         for (var callback in _onDeviceConnectedCallbacks) {
           callback(event);
         }
-        _logger.i('New device connected: ${event.deviceId}, total devices: ${event.totalDevices}');
+        _logger.i(
+          'New device connected: ${event.deviceId}, total devices: ${event.totalDevices}',
+        );
       }
     });
 
@@ -526,13 +584,17 @@ class WebSocketManager {
     // Handle device sync data (receiving messages from another device)
     _hubConnection!.on('DeviceSyncData', (args) {
       final data = args?.first as Map<String, dynamic>?;
-      _logger.i('Device sync data received: chunk ${data?['chunkIndex']}/${data?['totalChunks']}');
+      _logger.i(
+        'Device sync data received: chunk ${data?['chunkIndex']}/${data?['totalChunks']}',
+      );
       if (data != null) {
         final chunk = DeviceSyncChunk.fromJson(data);
         for (var callback in _onDeviceSyncDataCallbacks) {
           callback(chunk);
         }
-        _logger.i('Received sync chunk ${chunk.chunkIndex}/${chunk.totalChunks} with ${chunk.messages.length} messages');
+        _logger.i(
+          'Received sync chunk ${chunk.chunkIndex}/${chunk.totalChunks} with ${chunk.messages.length} messages',
+        );
       }
     });
 
@@ -552,7 +614,9 @@ class WebSocketManager {
         for (var callback in _onOtherDevicesAvailableCallbacks) {
           callback(event);
         }
-        _logger.i('${event.otherDeviceCount} other device(s) available for sync');
+        _logger.i(
+          '${event.otherDeviceCount} other device(s) available for sync',
+        );
       }
     });
   }
@@ -761,7 +825,9 @@ class WebSocketManager {
   }
 
   /// Remove callback for reaction updates
-  void removeReactionCallback(Function(String, String, ReactionUpdate) callback) {
+  void removeReactionCallback(
+    Function(String, String, ReactionUpdate) callback,
+  ) {
     _onReactionCallbacks.remove(callback);
   }
 
@@ -791,7 +857,9 @@ class WebSocketManager {
   }) async {
     if (!_isConnected || _hubConnection == null) return;
 
-    _logger.i('Requesting device sync: conversationId=$conversationId, since=$sinceTimestamp');
+    _logger.i(
+      'Requesting device sync: conversationId=$conversationId, since=$sinceTimestamp',
+    );
 
     try {
       // SignalR requires non-null args, so we pass empty string/0 for null values
@@ -799,11 +867,7 @@ class WebSocketManager {
       // and 0 as "sync all" for sinceTimestamp
       await _hubConnection!.invoke(
         'RequestDeviceSync',
-        args: <Object>[
-          conversationId ?? '',
-          sinceTimestamp ?? 0,
-          chunkSize,
-        ],
+        args: <Object>[conversationId ?? '', sinceTimestamp ?? 0, chunkSize],
       );
     } catch (e) {
       _logger.e('Failed to request device sync: $e');
@@ -822,7 +886,9 @@ class WebSocketManager {
   }) async {
     if (!_isConnected || _hubConnection == null) return;
 
-    _logger.i('Sending sync data to device $toDeviceId: chunk $chunkIndex/$totalChunks');
+    _logger.i(
+      'Sending sync data to device $toDeviceId: chunk $chunkIndex/$totalChunks',
+    );
 
     try {
       final messagesList = messages.map((m) => m.toJson()).toList();
@@ -891,7 +957,9 @@ class WebSocketManager {
   }
 
   /// Remove callback for other devices available event
-  void removeOtherDevicesAvailableCallback(Function(OtherDevicesAvailableEvent) callback) {
+  void removeOtherDevicesAvailableCallback(
+    Function(OtherDevicesAvailableEvent) callback,
+  ) {
     _onOtherDevicesAvailableCallbacks.remove(callback);
   }
 
@@ -1045,10 +1113,12 @@ class DeviceSyncChunk {
   });
 
   factory DeviceSyncChunk.fromJson(Map<String, dynamic> json) {
-    final messagesList = (json['messages'] as List?)
-        ?.map((m) => SyncMessageDto.fromJson(m as Map<String, dynamic>))
-        .toList() ?? [];
-    
+    final messagesList =
+        (json['messages'] as List?)
+            ?.map((m) => SyncMessageDto.fromJson(m as Map<String, dynamic>))
+            .toList() ??
+        [];
+
     return DeviceSyncChunk(
       fromDeviceId: json['fromDeviceId'] as String,
       toDeviceId: json['toDeviceId'] as String,
@@ -1138,9 +1208,9 @@ class OtherDevicesAvailableEvent {
     return OtherDevicesAvailableEvent(
       otherDeviceCount: json['otherDeviceCount'] as int,
       totalDevices: json['totalDevices'] as int,
-      otherDeviceIds: (json['otherDeviceIds'] as List?)
-          ?.map((e) => e as String)
-          .toList() ?? [],
+      otherDeviceIds:
+          (json['otherDeviceIds'] as List?)?.map((e) => e as String).toList() ??
+          [],
     );
   }
 }

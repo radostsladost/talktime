@@ -307,7 +307,8 @@ class _ConferencePageState extends State<ConferencePage> {
               right: 20,
               bottom: 100,
               child: GestureDetector(
-                onTap: () => setState(() => _showLocalOverlay = !_showLocalOverlay),
+                onTap: () =>
+                    setState(() => _showLocalOverlay = !_showLocalOverlay),
                 child: SizedBox(
                   width: 120,
                   height: 170,
@@ -329,7 +330,8 @@ class _ConferencePageState extends State<ConferencePage> {
                               }
                               return SizedBox.expand(
                                 child: _localRenderer.buildView(
-                                    mirror: !_screenShare),
+                                  mirror: !_screenShare,
+                                ),
                               );
                             }
 
@@ -344,12 +346,14 @@ class _ConferencePageState extends State<ConferencePage> {
                               color: Colors.black38,
                               child: Center(
                                 child: IconButton(
-                                  icon: const Icon(Icons.switch_camera,
-                                      color: Colors.white, size: 32),
+                                  icon: const Icon(
+                                    Icons.switch_camera,
+                                    color: Colors.white,
+                                    size: 32,
+                                  ),
                                   onPressed: () {
                                     _callService.changeCameraDevice();
-                                    setState(
-                                        () => _showLocalOverlay = false);
+                                    setState(() => _showLocalOverlay = false);
                                   },
                                 ),
                               ),

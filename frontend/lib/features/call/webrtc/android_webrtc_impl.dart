@@ -427,7 +427,20 @@ class _AndroidVideoRenderer implements IVideoRenderer {
     if (_textureId == null) {
       return const SizedBox.expand(child: ColoredBox(color: Colors.black));
     }
-    return Texture(textureId: _textureId!);
+    final boxFit = objectFit == VideoObjectFit.contain
+        ? BoxFit.contain
+        : BoxFit.cover;
+    return SizedBox.expand(
+      child: FittedBox(
+        fit: boxFit,
+        alignment: Alignment.center,
+        child: SizedBox(
+          width: 16,
+          height: 9,
+          child: Texture(textureId: _textureId!),
+        ),
+      ),
+    );
   }
 }
 
