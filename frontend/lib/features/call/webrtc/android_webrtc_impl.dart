@@ -423,6 +423,7 @@ class _AndroidVideoRenderer implements IVideoRenderer {
   Widget buildView({
     bool mirror = false,
     VideoObjectFit objectFit = VideoObjectFit.cover,
+    double? aspectRatio,
   }) {
     if (_textureId == null) {
       return const SizedBox.expand(child: ColoredBox(color: Colors.black));
@@ -430,13 +431,16 @@ class _AndroidVideoRenderer implements IVideoRenderer {
     final boxFit = objectFit == VideoObjectFit.contain
         ? BoxFit.contain
         : BoxFit.cover;
+    // Local camera on mobile is typically portrait (9:16); remote is often 16:9.
+    final double w = (aspectRatio != null && aspectRatio! < 1) ? 9 : 16;
+    final double h = (aspectRatio != null && aspectRatio! < 1) ? 16 : 9;
     return SizedBox.expand(
       child: FittedBox(
         fit: boxFit,
         alignment: Alignment.center,
         child: SizedBox(
-          width: 16,
-          height: 9,
+          width: w,
+          height: h,
           child: Texture(textureId: _textureId!),
         ),
       ),

@@ -331,6 +331,10 @@ class _ConferencePageState extends State<ConferencePage> {
                               return SizedBox.expand(
                                 child: _localRenderer.buildView(
                                   mirror: !_screenShare,
+                                  objectFit: VideoObjectFit.cover,
+                                  aspectRatio: (kIsWeb || !Platform.isAndroid)
+                                      ? null
+                                      : 9 / 16, // Android: local camera is portrait, cover the PIP
                                 ),
                               );
                             }

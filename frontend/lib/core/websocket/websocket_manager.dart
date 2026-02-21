@@ -519,7 +519,7 @@ class WebSocketManager {
     // Handle room participants response
     _hubConnection!.on('RoomParticipants', (args) {
       final data = args?.first as Map<String, dynamic>?;
-      _logger.d('Room participants event: $data');
+      // _logger.d('Room participants event: $data');
       if (data != null) {
         final roomId = data['roomId'] as String;
         final participantsData = data['participants'] as List?;
@@ -540,9 +540,9 @@ class WebSocketManager {
               callback(roomId, participant, 'existing');
             }
           }
-          _logger.i(
-            'Received ${participants.length} participants for room $roomId',
-          );
+          // _logger.i(
+          //   'Received ${participants.length} participants for room $roomId',
+          // );
         }
       }
     });
@@ -835,7 +835,7 @@ class WebSocketManager {
   Future<void> requestRoomParticipants(String roomId) async {
     if (!_isConnected || _hubConnection == null) return;
 
-    _logger.i('Requesting room participants for: $roomId');
+    // _logger.i('Requesting room participants for: $roomId');
 
     try {
       await _hubConnection!.invoke('GetRoomParticipants', args: [roomId]);
@@ -857,9 +857,9 @@ class WebSocketManager {
   }) async {
     if (!_isConnected || _hubConnection == null) return;
 
-    _logger.i(
-      'Requesting device sync: conversationId=$conversationId, since=$sinceTimestamp',
-    );
+    // _logger.i(
+    //   'Requesting device sync: conversationId=$conversationId, since=$sinceTimestamp',
+    // );
 
     try {
       // SignalR requires non-null args, so we pass empty string/0 for null values

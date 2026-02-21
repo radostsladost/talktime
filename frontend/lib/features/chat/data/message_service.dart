@@ -154,7 +154,7 @@ class MessageService {
         skip += _messagesPageSize;
       }
       if (totalSaved > 0) {
-        _logger.i('Synced $totalSaved messages for conversation $conversationId (paginated)');
+        // _logger.i('Synced $totalSaved messages for conversation $conversationId (paginated)');
       }
     } catch (e) {
       _logger.e('Error syncing messages for conversation $conversationId: $e');
@@ -219,9 +219,9 @@ class MessageService {
 
       await _saveMessagesAndUpdateLastMessageAt(messages);
 
-      _logger.i(
-        'Synced and saved ${messages.length} pending messages for conversation: $conversationId',
-      );
+      // _logger.i(
+      //   'Synced and saved ${messages.length} pending messages for conversation: $conversationId',
+      // );
     } catch (e) {
       _logger.e(
         'Error syncing pending messages for conversation $conversationId: $e',
@@ -265,7 +265,7 @@ class MessageService {
     String? mediaUrl,
   }) async {
     try {
-      _logger.i('Sending message to conversation: $conversationId');
+      // _logger.i('Sending message to conversation: $conversationId');
       final body = {
         'conversationId': conversationId,
         'content': content,
@@ -283,7 +283,7 @@ class MessageService {
       final message = Message.fromJson(
         response['data'] as Map<String, dynamic>,
       );
-      _logger.i('Message sent successfully: ${message.id}');
+      // _logger.i('Message sent successfully: ${message.id}');
 
       // Immediately save to local storage for optimistic UI update
       final dbMessage = DbModels.Message()
@@ -309,7 +309,7 @@ class MessageService {
   /// Get pending messages (messages received while offline)
   Future<List<Message>> getPendingMessages() async {
     try {
-      _logger.i('Fetching pending messages');
+      // _logger.i('Fetching pending messages');
       final response = await _apiClient.get(ApiConstants.pendingMessages);
 
       final List messagesJson = response['data'] as List;
@@ -328,9 +328,9 @@ class MessageService {
   /// Mark a message as delivered
   Future<void> markAsDelivered(String messageId) async {
     try {
-      _logger.i('Marking message as delivered: $messageId');
+      // _logger.i('Marking message as delivered: $messageId');
       await _apiClient.post(ApiConstants.markMessageDelivered(messageId));
-      _logger.i('Message marked as delivered');
+      // _logger.i('Message marked as delivered');
     } catch (e) {
       _logger.e('Error marking message as delivered: $e');
       // Don't rethrow to prevent sync from failing
@@ -340,13 +340,13 @@ class MessageService {
   /// Delete a message (only sender can delete)
   Future<void> deleteMessage(String messageId) async {
     try {
-      _logger.i('Deleting message: $messageId');
+      // _logger.i('Deleting message: $messageId');
       await _apiClient.delete(ApiConstants.deleteMessage(messageId));
 
       // Also delete from local storage
       await _localStorage.deleteMessage(messageId);
 
-      _logger.i('Message deleted successfully');
+      // _logger.i('Message deleted successfully');
     } catch (e) {
       _logger.e('Error deleting message: $e');
       rethrow;
@@ -380,7 +380,7 @@ class MessageService {
     int limit = 500,
   }) async {
     try {
-      _logger.i('Exporting messages for sync: conversationId=$conversationId, since=$sinceTimestamp, limit=$limit');
+      // _logger.i('Exporting messages for sync: conversationId=$conversationId, since=$sinceTimestamp, limit=$limit');
       
       List<DbModels.Message> messages;
       
@@ -404,10 +404,10 @@ class MessageService {
         );
       }
       
-      _logger.i('Found ${messages.length} messages to export for sync');
+      // _logger.i('Found ${messages.length} messages to export for sync');
       
       if (messages.isEmpty) {
-        _logger.i('No messages to export');
+        // _logger.i('No messages to export');
         return [];
       }
       
@@ -426,7 +426,7 @@ class MessageService {
         readAtTimestamp: m.readAt,
       )).toList();
       
-      _logger.i('Exporting ${syncMessages.length} messages for sync');
+      // _logger.i('Exporting ${syncMessages.length} messages for sync');
       return syncMessages;
     } catch (e) {
       _logger.e('Error exporting messages for sync: $e');
@@ -440,7 +440,7 @@ class MessageService {
     if (syncMessages.isEmpty) return;
     
     try {
-      _logger.i('Importing ${syncMessages.length} messages from sync');
+      // _logger.i('Importing ${syncMessages.length} messages from sync');
       
       final messages = syncMessages.map((m) => DbModels.Message()
         ..externalId = m.id
@@ -455,7 +455,7 @@ class MessageService {
       
       await _saveMessagesAndUpdateLastMessageAt(messages);
 
-      _logger.i('Successfully imported ${syncMessages.length} messages from sync');
+      // _logger.i('Successfully imported ${syncMessages.length} messages from sync');
     } catch (e) {
       _logger.e('Error importing messages from sync: $e');
     }
@@ -465,15 +465,15 @@ class MessageService {
   /// Exports messages and sends them back to the requesting device
   Future<void> handleDeviceSyncRequest(DeviceSyncRequest request) async {
     try {
-      _logger.i('=== HANDLING SYNC REQUEST ===');
-      _logger.i('From device: ${request.requestingDeviceId}');
-      _logger.i('ConversationId: ${request.conversationId}');
-      _logger.i('SinceTimestamp: ${request.sinceTimestamp}');
-      _logger.i('ChunkSize: ${request.chunkSize}');
+      // _logger.i('=== HANDLING SYNC REQUEST ===');
+      // _logger.i('From device: ${request.requestingDeviceId}');
+      // _logger.i('ConversationId: ${request.conversationId}');
+      // _logger.i('SinceTimestamp: ${request.sinceTimestamp}');
+      // _logger.i('ChunkSize: ${request.chunkSize}');
       
       // Check how many messages we have locally
       final totalLocalMessages = await _localStorage.getMessageCount();
-      _logger.i('Total messages in local storage: $totalLocalMessages');
+      // _logger.i('Total messages in local storage: $totalLocalMessages');
       
       final messages = await exportMessagesForSync(
         conversationId: request.conversationId,
@@ -481,10 +481,10 @@ class MessageService {
         limit: request.chunkSize > 0 ? request.chunkSize : 500,
       );
       
-      _logger.i('Messages to send: ${messages.length}');
+      // _logger.i('Messages to send: ${messages.length}');
       
       if (messages.isEmpty) {
-        _logger.i('No messages to sync - sending empty response');
+        // _logger.i('No messages to sync - sending empty response');
         // Send empty response to let the other device know sync is complete
         await WebSocketManager().sendDeviceSyncData(
           toDeviceId: request.requestingDeviceId,
@@ -501,14 +501,14 @@ class MessageService {
       final chunkSize = request.chunkSize > 0 ? request.chunkSize : 100;
       final totalChunks = (messages.length / chunkSize).ceil();
       
-      _logger.i('Sending ${messages.length} messages in $totalChunks chunks (chunkSize: $chunkSize)');
+      // _logger.i('Sending ${messages.length} messages in $totalChunks chunks (chunkSize: $chunkSize)');
       
       for (var i = 0; i < totalChunks; i++) {
         final start = i * chunkSize;
         final end = (start + chunkSize > messages.length) ? messages.length : start + chunkSize;
         final chunk = messages.sublist(start, end);
         
-        _logger.i('Sending chunk ${i + 1}/$totalChunks with ${chunk.length} messages');
+        // _logger.i('Sending chunk ${i + 1}/$totalChunks with ${chunk.length} messages');
         
         await WebSocketManager().sendDeviceSyncData(
           toDeviceId: request.requestingDeviceId,
@@ -525,7 +525,7 @@ class MessageService {
         }
       }
       
-      _logger.i('=== SYNC COMPLETE: Sent ${messages.length} messages in $totalChunks chunks ===');
+      // _logger.i('=== SYNC COMPLETE: Sent ${messages.length} messages in $totalChunks chunks ===');
     } catch (e, stackTrace) {
       _logger.e('Error handling sync request: $e');
       _logger.e('Stack trace: $stackTrace');
@@ -535,14 +535,14 @@ class MessageService {
   /// Handle incoming sync data chunk
   Future<void> handleDeviceSyncData(DeviceSyncChunk chunk) async {
     try {
-      _logger.i('Handling sync data chunk ${chunk.chunkIndex}/${chunk.totalChunks}');
+      // _logger.i('Handling sync data chunk ${chunk.chunkIndex}/${chunk.totalChunks}');
       
       if (chunk.messages.isNotEmpty) {
         await importMessagesFromSync(chunk.messages);
       }
       
       if (chunk.isLastChunk) {
-        _logger.i('Device sync completed');
+        // _logger.i('Device sync completed');
       }
     } catch (e) {
       _logger.e('Error handling sync data: $e');

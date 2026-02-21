@@ -41,7 +41,7 @@ class DeviceSyncService {
     // Request sync after connection has had time to establish (doesn't rely on OtherDevicesAvailable)
     Future.delayed(const Duration(seconds: 3), () {
       if (!_isInitialized) return;
-      _logger.i('Requesting initial sync from other devices');
+      // _logger.i('Requesting initial sync from other devices');
       requestSyncFromOtherDevices();
     });
   }
@@ -96,7 +96,7 @@ class DeviceSyncService {
     String? conversationId,
     int? sinceTimestamp,
   }) async {
-    _logger.i('Requesting sync from other devices');
+    // _logger.i('Requesting sync from other devices');
     await WebSocketManager().requestDeviceSync(
       conversationId: conversationId,
       sinceTimestamp: sinceTimestamp,

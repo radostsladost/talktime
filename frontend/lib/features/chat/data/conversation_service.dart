@@ -47,7 +47,7 @@ class ConversationService {
 
       await AuthService().refreshTokenIfNeeded();
 
-      _logger.d('So Fetching conversations from API');
+      // _logger.d('So Fetching conversations from API');
       final response = await _apiClient.get(ApiConstants.conversations);
 
       final List conversationsJson = response['data'] as List;
@@ -58,7 +58,7 @@ class ConversationService {
       // Save to local storage
       await _localStorage.saveConversations(conversations);
 
-      _logger.d('Fetched ${conversations.length} conversations');
+      // _logger.d('Fetched ${conversations.length} conversations');
       return conversations;
     } catch (e) {
       _logger.e('Error fetching conversations: $e');
@@ -71,7 +71,7 @@ class ConversationService {
     try {
       await AuthService().refreshTokenIfNeeded();
 
-      _logger.d('Fetching conversations from API');
+      // _logger.d('Fetching conversations from API');
       final response = await _apiClient.get(ApiConstants.conversations);
 
       final List conversationsJson = response['data'] as List;
@@ -82,7 +82,7 @@ class ConversationService {
       // Save to local storage
       await _localStorage.saveConversations(conversations);
 
-      _logger.d('Fetched ${conversations.length} conversations');
+      // _logger.d('Fetched ${conversations.length} conversations');
       return conversations;
     } catch (e) {
       _logger.e('Error fetching conversations: $e');

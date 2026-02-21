@@ -113,7 +113,7 @@ class SignalingService {
   /// Guests don't have a WebSocketManager connection, so this creates its own.
   Future<void> connectAsGuest(String deviceId, String displayName) async {
     if (isConnected) {
-      _logger.w('Already connected to SignalR hub');
+      // _logger.w('Already connected to SignalR hub');
       return;
     }
 
@@ -134,7 +134,7 @@ class SignalingService {
       _ownsConnection = true;
       _registerHandlers();
       await _hubConnection!.start();
-      _logger.i('Successfully connected to SignalR hub as guest');
+      // _logger.i('Successfully connected to SignalR hub as guest');
     } catch (e) {
       _logger.e('Failed to connect to SignalR hub as guest: $e');
       rethrow;
@@ -173,7 +173,7 @@ class SignalingService {
     });
 
     _hubConnection!.on('ReceiveOffer', (arguments) {
-      _logger.d('Received ReceiveOffer: $arguments');
+      // _logger.d('Received ReceiveOffer: $arguments');
       if (arguments != null && arguments.isNotEmpty) {
         final data = arguments[0] as Map<String, dynamic>;
         final event = SignalingOfferEvent.fromJson(data);
@@ -182,7 +182,7 @@ class SignalingService {
     });
 
     _hubConnection!.on('ReceiveAnswer', (arguments) {
-      _logger.d('Received ReceiveAnswer: $arguments');
+      // _logger.d('Received ReceiveAnswer: $arguments');
       if (arguments != null && arguments.isNotEmpty) {
         final data = arguments[0] as Map<String, dynamic>;
         final event = SignalingAnswerEvent.fromJson(data);
@@ -253,7 +253,7 @@ class SignalingService {
   Future<void> sendAnswer(String toDeviceId, String sdp,
       {String? roomId}) async {
     if (!isConnected) throw Exception('Not connected to SignalR hub');
-    _logger.d('Sending answer to $toDeviceId');
+    // _logger.d('Sending answer to $toDeviceId');
     await _hubConnection!.invoke(
       'SendAnswer',
       args: [toDeviceId, sdp, roomId as Object],

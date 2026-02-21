@@ -168,7 +168,12 @@ abstract class IVideoRenderer {
   Future<void> audioOutput(String? deviceId);
 
   /// Build the widget to display the video (mirror for front camera, objectFit for layout).
-  Widget buildView({bool mirror = false, VideoObjectFit objectFit = VideoObjectFit.cover});
+  /// [aspectRatio] optional width/height (e.g. 9/16 for portrait); used on Android for correct layout.
+  Widget buildView({
+    bool mirror = false,
+    VideoObjectFit objectFit = VideoObjectFit.cover,
+    double? aspectRatio,
+  });
 }
 
 // ============== Platform ==============

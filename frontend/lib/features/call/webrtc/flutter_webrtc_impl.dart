@@ -337,6 +337,7 @@ class VideoRendererWrapper implements IVideoRenderer {
   Widget buildView({
     bool mirror = false,
     VideoObjectFit objectFit = VideoObjectFit.cover,
+    double? aspectRatio,
   }) {
     return webrtc.RTCVideoView(
       _renderer,

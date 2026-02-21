@@ -413,7 +413,7 @@ class CallService {
       }
 
       if ((_isCameraOff && !_isScreenSharing) || forceStop == true) {
-        _logger.i('_replaceVideoTrackInPeerConnections to null');
+        // _logger.i('_replaceVideoTrackInPeerConnections to null');
         _camStateController.add(!_isCameraOff);
         _isScreenSharingController.sink.add(_isScreenSharing);
         await _replaceVideoTrackInPeerConnections(null);
@@ -497,10 +497,10 @@ class CallService {
   Future<void> _replaceVideoTrackInPeerConnections(
     IMediaStreamTrack? newTrack,
   ) async {
-    _logger.i(
-      'Replacing video track in ${_peerConnections.length} peer connections, '
-      'newTrack: ${newTrack?.label ?? "null"}',
-    );
+    // _logger.i(
+    //   'Replacing video track in ${_peerConnections.length} peer connections, '
+    //   'newTrack: ${newTrack?.label ?? "null"}',
+    // );
 
     if (_peerConnections.isEmpty) {
       _logger.w('No peer connections to update video track');
@@ -648,7 +648,7 @@ class CallService {
       _isCameraOff = !_isCameraOff;
     }
 
-    _logger.i("Toggle camera: $previousCameraState => $_isCameraOff");
+    // _logger.i("Toggle camera: $previousCameraState => $_isCameraOff");
 
     if (!_isScreenSharing) {
       if (_isCameraOff) {
@@ -1268,7 +1268,7 @@ class CallService {
         roomId: _currentRoomId!,
       );
 
-      _logger.i('_handleOffer sendAnswer to ${event.fromDeviceId}');
+      // _logger.i('_handleOffer sendAnswer to ${event.fromDeviceId}');
     } catch (e) {
       _logger.e('Error handling offer from ${event.fromDeviceId}: $e');
     }
