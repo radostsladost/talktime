@@ -347,7 +347,7 @@ class _ChatListPageState extends State<ChatListPage>
   }
 
   static const double _inCallAvatarSize = 18;
-  static const double _inCallAvatarOverlap = -5;
+  static const double _inCallAvatarOverlapPx = 5;
 
   Widget _buildInCallAvatars(
     BuildContext context,
@@ -359,31 +359,49 @@ class _ChatListPageState extends State<ChatListPage>
         ? participants.length - maxAvatars
         : 0;
     final theme = Theme.of(context);
+    final step = _inCallAvatarSize - _inCallAvatarOverlapPx;
+    final stackWidth = show.isEmpty
+        ? 0.0
+        : (show.length - 1) * step + _inCallAvatarSize;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        for (var i = 0; i < show.length; i++)
-          Container(
-            margin: EdgeInsets.only(left: i == 0 ? 0 : _inCallAvatarOverlap),
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(color: theme.colorScheme.surface, width: 1.2),
-            ),
-            child: CircleAvatar(
-              radius: _inCallAvatarSize / 2,
-              backgroundColor: theme.colorScheme.primaryContainer,
-              foregroundColor: theme.colorScheme.onPrimaryContainer,
-              child: Text(
-                (show[i].username.isNotEmpty
-                    ? show[i].username[0].toUpperCase()
-                    : '?'),
-                style: theme.textTheme.labelSmall?.copyWith(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 10,
+        SizedBox(
+          width: stackWidth,
+          height: _inCallAvatarSize,
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              for (var i = 0; i < show.length; i++)
+                Positioned(
+                  left: i * step,
+                  child: Container(
+                    width: _inCallAvatarSize,
+                    height: _inCallAvatarSize,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                          color: theme.colorScheme.surface, width: 1.2),
+                    ),
+                    child: CircleAvatar(
+                      radius: _inCallAvatarSize / 2,
+                      backgroundColor: theme.colorScheme.primaryContainer,
+                      foregroundColor: theme.colorScheme.onPrimaryContainer,
+                      child: Text(
+                        (show[i].username.isNotEmpty
+                            ? show[i].username[0].toUpperCase()
+                            : '?'),
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
-              ),
-            ),
+            ],
           ),
+        ),
         if (extra > 0)
           Padding(
             padding: const EdgeInsets.only(left: 4),

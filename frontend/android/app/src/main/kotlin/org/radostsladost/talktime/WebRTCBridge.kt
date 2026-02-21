@@ -640,13 +640,18 @@ class WebRTCBridge(
         val pc = peerConnections[pcId]
             ?: run { result.success(emptyList<Map<String, Any>>()); return }
         val list = pc.transceivers.map { t ->
+            val kind = when (t.mediaType) {
+                MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO -> "audio"
+                MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO -> "video"
+                else -> t.sender.track()?.kind() ?: t.receiver.track()?.kind() ?: "video"
+            }
             mapOf(
                 "senderId" to t.sender.id(),
                 "senderTrackId" to (t.sender.track()?.id()),
                 "senderTrackKind" to (t.sender.track()?.kind()),
                 "receiverTrackId" to (t.receiver.track()?.id()),
                 "receiverTrackKind" to (t.receiver.track()?.kind()),
-                "kind" to (t.mediaType?.toString()?.lowercase() ?: "video")
+                "kind" to kind
             )
         }
         result.success(list)
@@ -667,23 +672,34 @@ class WebRTCBridge(
         val senderId = call.argument<String>("senderId") ?: ""
         val trackId = call.argument<String>("trackId")
 
+        Log.i(TAG, "senderReplaceTrack: pcId=$pcId, senderId=$senderId, trackId=$trackId")
+
         val pc = peerConnections[pcId]
             ?: run { result.error("NO_PC", null, null); return }
+
+        val senderIds = pc.senders.map { "${it.id()}(track=${it.track()?.id()})" }
+        Log.i(TAG, "senderReplaceTrack: available senders=$senderIds")
+
+        fun findTrackById(id: String?): MediaStreamTrack? {
+            if (id == null) return null
+            for (s in localStreams.values) {
+                val t = s.audioTracks.find { it.id() == id }
+                    ?: s.videoTracks.find { it.id() == id }
+                if (t != null) return t
+            }
+            return allVideoTracks[id]
+        }
 
         val sender = pc.senders.find { it.id() == senderId }
         if (sender == null) {
             Log.w(TAG, "senderReplaceTrack: sender $senderId not found, trying by track kind")
-            val track: MediaStreamTrack? = if (trackId != null) {
-                localStreams.values.asSequence().flatMap { s ->
-                    (s.audioTracks.asSequence() + s.videoTracks.asSequence())
-                }.find { it.id() == trackId }
-            } else null
-
+            val track = findTrackById(trackId)
             val targetKind = track?.kind() ?: "video"
             val fallbackSender = pc.senders.find { s ->
                 s.track()?.kind() == targetKind || (s.track() == null && targetKind == "video")
             }
             if (fallbackSender != null) {
+                Log.i(TAG, "senderReplaceTrack: using fallback sender ${fallbackSender.id()}, track=${track?.id()}")
                 fallbackSender.setTrack(track, false)
                 result.success(null)
             } else {
@@ -692,11 +708,11 @@ class WebRTCBridge(
             return
         }
 
-        val track: MediaStreamTrack? = if (trackId != null) {
-            localStreams.values.asSequence().flatMap { s ->
-                (s.audioTracks.asSequence() + s.videoTracks.asSequence())
-            }.find { it.id() == trackId }
-        } else null
+        val track = findTrackById(trackId)
+        Log.i(TAG, "senderReplaceTrack: found sender ${sender.id()}, resolved track=${track?.id()} (requested=$trackId)")
+        if (trackId != null && track == null) {
+            Log.e(TAG, "senderReplaceTrack: track $trackId NOT FOUND in localStreams(${localStreams.keys}) or allVideoTracks(${allVideoTracks.keys})")
+        }
 
         sender.setTrack(track, false)
         result.success(null)

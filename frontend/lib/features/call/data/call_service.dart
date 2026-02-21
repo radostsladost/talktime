@@ -514,15 +514,19 @@ class CallService {
       try {
         final transceivers = await pc.getTransceivers();
         _logger.i(
-          'Peer $participantId has ${transceivers.length} transceivers',
+          'Peer $participantId has ${transceivers.length} transceivers '
+          '(kinds: ${transceivers.map((t) => t.kind).toList()})',
         );
 
         var replaced = false;
+        var wasNull = false;
         for (final transceiver in transceivers) {
           if (transceiver.kind == 'video') {
+            wasNull = transceiver.sender.track == null;
             await transceiver.sender.replaceTrack(newTrack);
             _logger.i(
-              'Replaced video track on existing transceiver for peer $participantId',
+              'Replaced video track on existing transceiver for peer '
+              '$participantId (wasNull=$wasNull, newTrack=${newTrack != null})',
             );
             replaced = true;
             break;
@@ -531,9 +535,15 @@ class CallService {
 
         if (!replaced && newTrack != null && _localStream != null) {
           _logger.i(
-            'No video transceiver found for peer $participantId, adding track (will renegotiate)',
+            'No video transceiver found for peer $participantId, adding track',
           );
           await pc.addTrack(newTrack, _localStream!);
+        }
+
+        if (newTrack != null) {
+          _logger.i(
+            'Renegotiating after video track change for peer $participantId',
+          );
           await _createAndSendOffers(
             onlyParticipantId: participantId,
             forceRenegotiation: true,
@@ -766,7 +776,8 @@ class CallService {
   }
 
   Future _setAudioMode(int mode) async {
-    if (!kIsWeb && !Platform.isAndroid) return;
+    if (kIsWeb) return;
+    if (!Platform.isAndroid) return;
 
     try {
       await _audioChannel.invokeMethod('setAudioMode', {'mode': mode});
@@ -1063,8 +1074,7 @@ class CallService {
 
   /// Creates and sends offers to participants.
   /// [onlyParticipantId] - if set, only send to this participant
-  /// [forceRenegotiation] - if true, send offers regardless of polite/impolite rules
-  ///                       (used for mid-call renegotiation like adding video tracks)
+  /// [forceRenegotiation] - passed through for logging only
   Future<void> _createAndSendOffers({
     String? onlyParticipantId,
     bool forceRenegotiation = false,
@@ -1074,13 +1084,8 @@ class CallService {
           (onlyParticipantId != null && id != onlyParticipantId)) {
         continue;
       }
-
-      // Only send offers if we are the impolite peer (higher ID)
-      // Exception: forceRenegotiation bypasses this for mid-call track additions
-      if (!forceRenegotiation && _isPolite(id)) {
-        _logger.i('Skipping offer to $id - we are polite');
-        continue;
-      }
+      // Only the polite peer sends offers; impolite peer waits and answers in _handleOffer.
+      if (!_isPolite(id)) continue;
 
       var pc = _peerConnections[id];
       if (pc == null) {
@@ -1212,6 +1217,7 @@ class CallService {
     }
   }
 
+  /// Only the polite peer (smaller deviceId) sends offers; the impolite peer only answers to avoid offer collision.
   bool _isPolite(String otherId) {
     return localId.compareTo(otherId) < 0;
   }
@@ -1369,8 +1375,13 @@ class CallService {
 
     _logger.i('Participant joined: $participantId');
 
+    // Only the polite peer sends offers; impolite peer waits and answers in _handleOffer.
     if (!_isPolite(participantId)) {
-      _logger.i('We are impolite, sending offer to $participantId');
+      _logger.i('Not polite toward $participantId, waiting for their offer');
+      return;
+    }
+    _logger.i('Sending offer to $participantId (polite=true)');
+    try {
       final pc = _peerConnections[participantId]!;
       final offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
@@ -1379,9 +1390,9 @@ class CallService {
         offer.sdp ?? '',
         roomId: _currentRoomId,
       );
-      _logger.i('Participant offer sent: $participantId');
-    } else {
-      _logger.i('We are polite, waiting for offer from $participantId');
+      _logger.i('Offer sent to $participantId');
+    } catch (e) {
+      _logger.e('Error sending offer to $participantId: $e');
     }
   }
 

@@ -3,6 +3,7 @@ import 'package:logger/logger.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:talktime/core/constants/api_constants.dart';
 import 'package:talktime/core/network/api_client.dart';
+import 'package:talktime/features/call/data/call_service.dart';
 import 'package:talktime/features/call/data/incoming_call_manager.dart';
 import 'package:talktime/shared/models/message.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
@@ -680,6 +681,17 @@ class WebSocketManager {
   /// When a call is initiated
   void onCallInitiated(String roomId, ConferenceParticipant participant) {
     _logger.i('onCallInitiated: $roomId from ${participant?.username}');
+
+    // Don't show incoming call if we're already in this room
+    final callService = CallService();
+    if (callService.currentRoomId == roomId &&
+        callService.currentState != CallState.idle) {
+      _logger.i(
+        'Suppressing incoming call notification — already in room $roomId',
+      );
+      return;
+    }
+
     IncomingCallManager().showIncomingCall(
       callId: roomId,
       roomId: roomId,
