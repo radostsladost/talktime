@@ -19,12 +19,12 @@ class CallUrlHelper {
   /// so the user can copy it directly.
   static void pushCallUrl(String inviteKey) {
     if (!kIsWeb) return;
-    pushBrowserUrl('?key=$inviteKey', 'TalkTime Call');
+    pushBrowserUrl('?key=$inviteKey', '${Environment.appName} Call');
   }
 
   /// Restore the browser URL to the root when leaving the call.
   static void restoreUrl() {
     if (!kIsWeb) return;
-    pushBrowserUrl('/', 'TalkTime');
+    pushBrowserUrl('/', Environment.appName);
   }
 }

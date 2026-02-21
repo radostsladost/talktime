@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:logger/logger.dart';
+import 'package:talktime/core/config/environment.dart';
 import 'package:talktime/core/websocket/websocket_manager.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/features/auth/presentation/pages/register_page.dart';
@@ -96,14 +97,14 @@ class _LoginPageState extends State<LoginPage> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     // Logo or App Name
-                    Icon(
-                      Icons.chat_bubble_outline,
-                      size: 80,
-                      color: Theme.of(context).colorScheme.primary,
+                    Image(
+                      image: AssetImage('assets/app_icon.png'),
+                      height: 80,
+                      // color: Theme.of(context).colorScheme.primary,
                     ),
                     const SizedBox(height: 16),
                     Text(
-                      'TalkTime',
+                      Environment.appName,
                       textAlign: TextAlign.center,
                       style: Theme.of(context).textTheme.headlineLarge
                           ?.copyWith(

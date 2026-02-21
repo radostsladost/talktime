@@ -3,6 +3,8 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 /// Environment configuration for the application
 /// This allows easy switching between development and production settings
 class Environment {
+  static const String appName = "RTalk";
+
   static const String _currentEnv = String.fromEnvironment(
     'ENV_PROF',
     defaultValue: 'development',

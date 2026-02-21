@@ -2,6 +2,7 @@ package org.radostsldost.talktime
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.content.Intent
 import android.os.Build
 import android.media.AudioManager
 import android.media.AudioDeviceInfo
@@ -21,6 +22,15 @@ class MainActivity : FlutterActivity() {
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         super.onCreate(savedInstanceState)
         createNotificationChannels()
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode == WebRTCBridge.SCREEN_CAPTURE_REQUEST) {
+            webrtcBridge?.onScreenCaptureResult(resultCode, data)
+            return
+        }
+        super.onActivityResult(requestCode, resultCode, data)
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {

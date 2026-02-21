@@ -2,6 +2,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:talktime/core/config/environment.dart';
 import 'package:talktime/core/global_key.dart';
 import 'package:talktime/core/websocket/websocket_manager.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
@@ -83,7 +84,7 @@ class _MyAppState extends State<MyApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'TalkTime',
+      title: Environment.appName,
       navigatorKey: navigatorKey, // Use global navigator key for incoming calls
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
@@ -155,10 +156,13 @@ class _SplashScreenState extends State<SplashScreen> {
         // Authenticated user flow
         try {
           if (!kIsWeb) {
-            final notificationsEnabled = await _settingsService.getNotificationsEnabled();
+            final notificationsEnabled = await _settingsService
+                .getNotificationsEnabled();
             if (notificationsEnabled) {
               final messagePreview = await _settingsService.getMessagePreview();
-              await _authService.registerFirebaseToken(messagePreview: messagePreview);
+              await _authService.registerFirebaseToken(
+                messagePreview: messagePreview,
+              );
             }
           }
 
@@ -200,9 +204,9 @@ class _SplashScreenState extends State<SplashScreen> {
           ),
         );
       } else {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const LoginPage()),
-        );
+        Navigator.of(
+          context,
+        ).pushReplacement(MaterialPageRoute(builder: (_) => const LoginPage()));
       }
     }
   }
@@ -214,14 +218,14 @@ class _SplashScreenState extends State<SplashScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              Icons.chat_bubble_outline,
-              size: 100,
-              color: Theme.of(context).colorScheme.primary,
+            Image(
+              image: AssetImage('assets/app_icon.png'),
+              height: 100,
+              // color: Theme.of(context).colorScheme.primary,
             ),
             const SizedBox(height: 24),
             Text(
-              'TalkTime',
+              Environment.appName,
               style: Theme.of(context).textTheme.headlineLarge?.copyWith(
                 fontWeight: FontWeight.bold,
                 color: Theme.of(context).colorScheme.primary,

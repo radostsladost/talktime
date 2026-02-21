@@ -11,6 +11,7 @@ import 'package:logger/logger.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:flutter_callkit_incoming/entities/call_kit_params.dart';
 import 'package:pip/pip.dart';
+import 'package:talktime/core/config/environment.dart';
 import 'package:talktime/features/call/audio/desktop_noise_cancellation_pipeline.dart';
 import 'package:talktime/features/call/data/signaling_service.dart';
 import 'package:talktime/features/call/webrtc/webrtc_platform.dart';
@@ -96,13 +97,18 @@ class CallService {
   bool _isScreenSharing = false;
   bool _isSpeakerMuted = false;
   String? _speakerDeviceId;
+
   /// On mobile (Android/iOS) default to earpiece (false); on desktop/web default to speaker (true).
-  bool _speakerOn = !kIsWeb && (Platform.isAndroid || Platform.isIOS) ? false : true;
+  bool _speakerOn = !kIsWeb && (Platform.isAndroid || Platform.isIOS)
+      ? false
+      : true;
   Timer? _timer;
   User? _currentUser;
+  void Function()? _wsRestoredCallback;
   bool _noiseCancellationEnabled = true;
   String? _currentMicDeviceId;
-  final DesktopNoiseCancellationPipeline _ncPipeline = DesktopNoiseCancellationPipeline();
+  final DesktopNoiseCancellationPipeline _ncPipeline =
+      DesktopNoiseCancellationPipeline();
 
   bool _isGuest = false;
   String? _guestDisplayName;
@@ -117,7 +123,8 @@ class CallService {
   /// Used to build shareable links that allow guests to join.
   String? get inviteKey => _inviteKey;
 
-  bool get _isDesktop => !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
+  bool get _isDesktop =>
+      !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
 
   // =========================================================
   // INITIALIZATION & CONNECTION
@@ -131,7 +138,9 @@ class CallService {
     // Already initialized with an active signaling connection - skip re-init.
     // This prevents ConferencePage from overwriting a prior guest setup.
     if (_signalingService != null && _signalingService!.isConnected) {
-      _logger.i('CallService already initialized with active signaling, skipping re-init');
+      _logger.i(
+        'CallService already initialized with active signaling, skipping re-init',
+      );
       return;
     }
 
@@ -153,7 +162,10 @@ class CallService {
       _localDeviceId = guestDeviceId!;
 
       _signalingService = SignalingService();
-      await _signalingService!.connectAsGuest(_localDeviceId!, _guestDisplayName!);
+      await _signalingService!.connectAsGuest(
+        _localDeviceId!,
+        _guestDisplayName!,
+      );
       await _setupSignalingListeners();
       _logger.i('CallService initialized for guest');
       return;
@@ -177,7 +189,9 @@ class CallService {
     }
 
     if (_signalingService == null || !_signalingService!.isConnected) {
-      _logger.i('Setting up signaling service (reusing WebSocketManager connection)...');
+      _logger.i(
+        'Setting up signaling service (reusing WebSocketManager connection)...',
+      );
       _signalingService = SignalingService();
       await _signalingService!.connect();
       await _setupSignalingListeners();
@@ -214,7 +228,27 @@ class CallService {
 
     try {
       await _getUserMedia();
-      await _startBackgroundService(roomId);
+
+      _startBackgroundService(roomId).catchError((e) {
+        _logger.w('Background service failed (non-fatal): $e');
+      });
+
+      // Ensure signaling is connected before proceeding
+      if (_signalingService == null || !_signalingService!.isConnected) {
+        _logger.w(
+          'Signaling not connected before startCall, re-initializing...',
+        );
+        _signalingService = SignalingService();
+        if (_isGuest) {
+          await _signalingService!.connectAsGuest(
+            _localDeviceId!,
+            _guestDisplayName!,
+          );
+        } else {
+          await _signalingService!.connect();
+        }
+        await _setupSignalingListeners();
+      }
 
       final selfId = localId;
       for (var user in initialParticipants) {
@@ -246,6 +280,8 @@ class CallService {
         _timer!.cancel();
         _timer = null;
       }
+
+      _registerConnectionRestoredHandler();
     } catch (e, stackTrace) {
       _logger.e("Start call failed: $e", error: e, stackTrace: stackTrace);
       endCall();
@@ -263,17 +299,21 @@ class CallService {
       return;
     }
 
+    _unregisterConnectionRestoredHandler();
+
     disablePip();
 
     // CallKit: End call before cleanup
     _callKitEndCall();
 
+    for (var sub in _subscriptions) {
+      sub.cancel();
+    }
     _subscriptions.clear();
     try {
       if (_currentRoomId != null) {
         await _signalingService?.leaveRoom(_currentRoomId!);
-        await _signalingService
-            ?.disconnect(); // Critical fix: Properly disconnect signaling
+        await _signalingService?.disconnect();
         _logger.i("Left room and disconnected signaling for: $_currentRoomId");
       }
     } catch (e) {
@@ -332,7 +372,10 @@ class CallService {
   // =========================================================
 
   Future<void> toggleScreenShare({DesktopCapturerSourceDto? source}) async {
-    await activateCameraOrScreenShare(newScreenShareValue: !_isScreenSharing, source: source);
+    await activateCameraOrScreenShare(
+      newScreenShareValue: !_isScreenSharing,
+      source: source,
+    );
   }
 
   Future<void> activateCameraOrScreenShare({
@@ -401,7 +444,9 @@ class CallService {
         return;
       }
 
-      newVideoTrack = cachedVideoStream.getVideoTracks().isNotEmpty ? cachedVideoStream.getVideoTracks().first : null;
+      newVideoTrack = cachedVideoStream.getVideoTracks().isNotEmpty
+          ? cachedVideoStream.getVideoTracks().first
+          : null;
 
       if (newVideoTrack == null) {
         _logger.e('Failed to get media stream (track)');
@@ -462,8 +507,6 @@ class CallService {
       return;
     }
 
-    bool needsRenegotiation = false;
-
     for (final entry in _peerConnections.entries) {
       final participantId = entry.key;
       final pc = entry.value;
@@ -474,39 +517,30 @@ class CallService {
           'Peer $participantId has ${transceivers.length} transceivers',
         );
 
-        var success = false;
+        var replaced = false;
         for (final transceiver in transceivers) {
-          final senderTrackKind = transceiver.sender.track?.kind;
-          final receiverTrackKind = transceiver.receiverTrack?.kind;
-          final isVideoTransceiver =
-              senderTrackKind == 'video' || receiverTrackKind == 'video';
-
-          if (isVideoTransceiver) {
+          if (transceiver.kind == 'video') {
             await transceiver.sender.replaceTrack(newTrack);
-            _logger.i('Replaced video track for peer $participantId');
-            success = true;
-            needsRenegotiation = true;
+            _logger.i(
+              'Replaced video track on existing transceiver for peer $participantId',
+            );
+            replaced = true;
+            break;
           }
         }
 
-        if (!success && newTrack != null && _localStream != null) {
+        if (!replaced && newTrack != null && _localStream != null) {
           _logger.i(
-            'No video transceiver found for peer $participantId, adding track instead',
+            'No video transceiver found for peer $participantId, adding track (will renegotiate)',
           );
           await pc.addTrack(newTrack, _localStream!);
-          needsRenegotiation = true;
+          await _createAndSendOffers(
+            onlyParticipantId: participantId,
+            forceRenegotiation: true,
+          );
         }
       } catch (e) {
         _logger.e('Error replacing video track for peer $participantId: $e');
-      }
-
-      // If we added new tracks (not just replaced), we need to renegotiate
-      if (needsRenegotiation) {
-        _logger.i('New tracks added, triggering renegotiation');
-        await _createAndSendOffers(
-          onlyParticipantId: participantId,
-          forceRenegotiation: true,
-        );
       }
     }
   }
@@ -774,8 +808,9 @@ class CallService {
       for (final pc in _peerConnections.values) {
         final transceivers = await pc.getTransceivers();
         for (final transceiver in transceivers) {
-          if (transceiver.sender.track?.kind == 'audio') {
+          if (transceiver.kind == 'audio') {
             await transceiver.sender.replaceTrack(newAudioTrack);
+            break;
           }
         }
       }
@@ -793,9 +828,7 @@ class CallService {
     if (_state == CallState.idle) return;
     if (_ncPipeline.isRunning) await _ncPipeline.stop();
     try {
-      final audioOpts = <String, dynamic>{
-        ..._audioConstraintsForCall(),
-      };
+      final audioOpts = <String, dynamic>{..._audioConstraintsForCall()};
       if (_currentMicDeviceId != null) {
         audioOpts['deviceId'] = _currentMicDeviceId;
       }
@@ -815,8 +848,9 @@ class CallService {
       for (final pc in _peerConnections.values) {
         final transceivers = await pc.getTransceivers();
         for (final transceiver in transceivers) {
-          if (transceiver.sender.track?.kind == 'audio') {
+          if (transceiver.kind == 'audio') {
             await transceiver.sender.replaceTrack(newAudioTrack);
+            break;
           }
         }
       }
@@ -907,7 +941,9 @@ class CallService {
         final tracks = _localStream!.getAudioTracks();
         if (tracks.isNotEmpty) {
           tracks[0].enabled = !_isMuted;
-          _logger.i("Audio track ${tracks[0].enabled ? 'enabled' : 'disabled'} (applied initial mute state)");
+          _logger.i(
+            "Audio track ${tracks[0].enabled ? 'enabled' : 'disabled'} (applied initial mute state)",
+          );
         }
         _micStateController.add(!_isMuted);
         return;
@@ -1056,7 +1092,11 @@ class CallService {
       if (state == RTCSignalingStateDto.stable) {
         final offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
-        _signalingService?.sendOffer(id, offer.sdp ?? '', roomId: _currentRoomId);
+        _signalingService?.sendOffer(
+          id,
+          offer.sdp ?? '',
+          roomId: _currentRoomId,
+        );
         _logger.i(
           'Offer sent to $id${forceRenegotiation ? " (renegotiation)" : ""}',
         );
@@ -1064,6 +1104,57 @@ class CallService {
         _logger.w('Skipping offer to $id - not in stable state: $state');
       }
     }
+  }
+
+  // =========================================================
+  // WEBSOCKET LIVENESS – re-join room after reconnect
+  // =========================================================
+
+  void _registerConnectionRestoredHandler() {
+    _unregisterConnectionRestoredHandler();
+    if (_isGuest) return; // guests use their own connection
+
+    _wsRestoredCallback = _onWebSocketConnectionRestored;
+    WebSocketManager().onConnectionRestored(_wsRestoredCallback!);
+    _logger.i(
+      'Registered WebSocket connection-restored handler for active call',
+    );
+  }
+
+  void _unregisterConnectionRestoredHandler() {
+    if (_wsRestoredCallback != null) {
+      WebSocketManager().removeConnectionRestoredCallback(_wsRestoredCallback!);
+      _wsRestoredCallback = null;
+    }
+  }
+
+  void _onWebSocketConnectionRestored() {
+    if (_state != CallState.connected && _state != CallState.connecting) {
+      _logger.i('Connection restored but no active call — ignoring');
+      return;
+    }
+
+    _logger.i(
+      'WebSocket connection restored during active call — re-joining room',
+    );
+
+    () async {
+      try {
+        await _setupSignalingListeners();
+
+        if (_currentRoomId != null) {
+          await _signalingService?.createRoom(_currentRoomId!);
+          _logger.i('Re-joined room $_currentRoomId after reconnect');
+        }
+
+        if (_participantIds.isNotEmpty) {
+          await _createAndSendOffers(forceRenegotiation: true);
+          _logger.i('Re-sent offers to ${_participantIds.length} participants');
+        }
+      } catch (e) {
+        _logger.e('Failed to recover call after reconnect: $e');
+      }
+    }();
   }
 
   final List<StreamSubscription> _subscriptions = [];
@@ -1077,7 +1168,8 @@ class CallService {
       return;
     }
 
-    if (!_isGuest && (_signalingService == null || !_signalingService!.isConnected)) {
+    if (!_isGuest &&
+        (_signalingService == null || !_signalingService!.isConnected)) {
       _logger.i('Re-attaching signaling service to shared connection...');
       _signalingService = SignalingService();
       await _signalingService!.connect();
@@ -1091,27 +1183,29 @@ class CallService {
       ..add(
         _signalingService!.onParticipantJoined.listen(_handleParticipantJoined),
       )
+      ..add(_signalingService!.onParticipantLeft.listen(_handleParticipantLeft))
       ..add(
-        _signalingService!.onParticipantLeft.listen(_handleParticipantLeft),
+        _signalingService!.onRoomCreated.listen((event) {
+          if (event.inviteKey != null) {
+            _inviteKey = event.inviteKey;
+            _logger.i('Invite key received from RoomCreated');
+          }
+        }),
       )
-      ..add(_signalingService!.onRoomCreated.listen((event) {
-        if (event.inviteKey != null) {
-          _inviteKey = event.inviteKey;
-          _logger.i('Invite key received from RoomCreated');
-        }
-      }))
-      ..add(_signalingService!.onRoomJoined.listen((event) {
-        if (event.inviteKey != null) {
-          _inviteKey = event.inviteKey;
-          _logger.i('Invite key received from RoomJoined');
-        }
-        // For guests, the real roomId is only known after the backend resolves
-        // the invite key. Update _currentRoomId so signaling targets the correct room.
-        if (_isGuest && event.roomId.isNotEmpty) {
-          _currentRoomId = event.roomId;
-          _logger.i('Guest room ID resolved to: ${event.roomId}');
-        }
-      }));
+      ..add(
+        _signalingService!.onRoomJoined.listen((event) {
+          if (event.inviteKey != null) {
+            _inviteKey = event.inviteKey;
+            _logger.i('Invite key received from RoomJoined');
+          }
+          // For guests, the real roomId is only known after the backend resolves
+          // the invite key. Update _currentRoomId so signaling targets the correct room.
+          if (_isGuest && event.roomId.isNotEmpty) {
+            _currentRoomId = event.roomId;
+            _logger.i('Guest room ID resolved to: ${event.roomId}');
+          }
+        }),
+      );
 
     if (_currentRoomId != null && !_isGuest) {
       _signalingService!.createRoom(_currentRoomId!);
@@ -1150,7 +1244,9 @@ class CallService {
           _logger.i(
             "Collision detected. Polite peer rolling back for ${event.fromDeviceId}",
           );
-          await pc.setLocalDescription(RTCSessionDescriptionDto(null, 'rollback'));
+          await pc.setLocalDescription(
+            RTCSessionDescriptionDto(null, 'rollback'),
+          );
         }
       }
 
@@ -1173,10 +1269,14 @@ class CallService {
   }
 
   Future<void> _handleAnswer(SignalingAnswerEvent event) async {
-    _logger.i('_handleAnswer from ${event.fromDeviceId} to ${event.toDeviceId}');
+    _logger.i(
+      '_handleAnswer from ${event.fromDeviceId} to ${event.toDeviceId}',
+    );
 
     if (event.toDeviceId != localId) {
-      _logger.i('Ignoring answer not intended for us (to: ${event.toDeviceId})');
+      _logger.i(
+        'Ignoring answer not intended for us (to: ${event.toDeviceId})',
+      );
       return;
     }
 
@@ -1186,20 +1286,16 @@ class CallService {
       return;
     }
 
-    await Future.delayed(const Duration(seconds: 1), () {});
-
-    final state = await pc.getSignalingState();
-    if (state == RTCSignalingStateDto.stable) {
-      _logger.w(
-        "Ignored answer from ${event.fromDeviceId} because connection is already stable.",
-      );
-      return;
-    }
-
     try {
-      final currentState = await pc.getSignalingState();
-      if (currentState != RTCSignalingStateDto.haveRemoteOffer &&
-          currentState != RTCSignalingStateDto.stable) {
+      final state = await pc.getSignalingState();
+      if (state == RTCSignalingStateDto.stable) {
+        _logger.w(
+          "Ignored answer from ${event.fromDeviceId} because connection is already stable.",
+        );
+        return;
+      }
+
+      if (state == RTCSignalingStateDto.haveLocalOffer) {
         final answer = RTCSessionDescriptionDto(event.sdp, 'answer');
         await pc.setRemoteDescription(answer);
       }
@@ -1266,7 +1362,6 @@ class CallService {
     if (localId == participantId) {
       return;
     }
-    await Future.delayed(const Duration(seconds: 1), () {});
 
     _participantIds.add(participantId);
     _participantInfo[participantId] = event.user;
@@ -1440,12 +1535,12 @@ class CallService {
 
     final callerName = participantNames.isNotEmpty
         ? participantNames
-        : 'TalkTime Call';
+        : '${Environment.appName} Call';
 
     return CallKitParams(
       id: _currentRoomId!,
       nameCaller: callerName,
-      appName: 'TalkTime',
+      appName: Environment.appName,
       type: 0, // Audio call (1 would be video, but we'll keep it as 0 for now)
     );
   }

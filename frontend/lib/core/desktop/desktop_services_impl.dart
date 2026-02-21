@@ -6,6 +6,7 @@ import 'package:hotkey_manager/hotkey_manager.dart';
 import 'package:logger/logger.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:system_tray/system_tray.dart';
+import 'package:talktime/core/config/environment.dart';
 import 'package:talktime/features/call/data/call_service.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -81,15 +82,15 @@ Future<void> _initSystemTray() async {
   final SystemTray systemTray = SystemTray();
 
   await systemTray.initSystemTray(
-    title: 'TalkTime',
+    title: Environment.appName,
     iconPath: iconPath,
-    toolTip: 'TalkTime',
+    toolTip: Environment.appName,
   );
 
   final Menu menu = Menu();
   await menu.buildFrom([
     MenuItemLabel(
-      label: 'Show TalkTime',
+      label: 'Show ${Environment.appName}',
       onClicked: (_) async {
         try {
           await windowManager.show();

@@ -328,7 +328,7 @@ Future<void> handleCall(Map<String, dynamic> data) async {
       CallKitParams callKitParams = CallKitParams(
         id: data['call_id'] as String,
         nameCaller: data['caller_name'] as String,
-        appName: 'TalkTime',
+        appName: Environment.appName,
         // avatar: 'https://i.pravatar.cc/100',
         // handle: '0123456789',
         type: 0,

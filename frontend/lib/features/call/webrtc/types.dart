@@ -96,7 +96,8 @@ abstract class IRTPSender {
 /// Transceiver (sender + receiver) for video track replacement.
 abstract class IRTPTransceiver {
   IRTPSender get sender;
-  IMediaStreamTrack? get receiverTrack; // receiver.track
+  IMediaStreamTrack? get receiverTrack;
+  String get kind; // 'audio' or 'video' – stable even when tracks are null
 }
 
 /// Signaling state.

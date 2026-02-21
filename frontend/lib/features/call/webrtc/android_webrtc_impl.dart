@@ -223,17 +223,22 @@ class _AndroidRTPSender implements IRTPSender {
 }
 
 class _AndroidRTPTransceiver implements IRTPTransceiver {
-  _AndroidRTPTransceiver(this._pcId, this._senderId, this._track);
+  _AndroidRTPTransceiver(this._pcId, this._senderId, this._kind, this._senderTrack, this._receiverTrack);
 
   final String _pcId;
   final String _senderId;
-  final IMediaStreamTrack? _track;
+  final String _kind;
+  final IMediaStreamTrack? _senderTrack;
+  final IMediaStreamTrack? _receiverTrack;
 
   @override
-  IRTPSender get sender => _AndroidRTPSender(_pcId, _senderId, _track);
+  IRTPSender get sender => _AndroidRTPSender(_pcId, _senderId, _senderTrack);
 
   @override
-  IMediaStreamTrack? get receiverTrack => _track;
+  IMediaStreamTrack? get receiverTrack => _receiverTrack;
+
+  @override
+  String get kind => _kind;
 }
 
 // ============== Android peer connection (handle) ==============
@@ -318,10 +323,21 @@ class _PeerConnectionWrapper implements IPeerConnection {
     return list.map<IRTPTransceiver>((t) {
       final m = t as Map;
       final senderId = m['senderId'] as String? ?? '';
-      final trackId = m['trackId'] as String?;
       final kind = m['kind'] as String? ?? 'video';
-      final track = trackId != null ? _AndroidMediaStreamTrack(trackId, kind) : null;
-      return _AndroidRTPTransceiver(pcId, senderId, track);
+
+      final senderTrackId = m['senderTrackId'] as String?;
+      final senderTrackKind = m['senderTrackKind'] as String? ?? kind;
+      final senderTrack = senderTrackId != null
+          ? _AndroidMediaStreamTrack(senderTrackId, senderTrackKind)
+          : null;
+
+      final receiverTrackId = m['receiverTrackId'] as String?;
+      final receiverTrackKind = m['receiverTrackKind'] as String? ?? kind;
+      final receiverTrack = receiverTrackId != null
+          ? _AndroidMediaStreamTrack(receiverTrackId, receiverTrackKind)
+          : null;
+
+      return _AndroidRTPTransceiver(pcId, senderId, kind, senderTrack, receiverTrack);
     }).toList();
   }
 
@@ -356,6 +372,10 @@ class _AndroidVideoRenderer implements IVideoRenderer {
     if (_textureId != null) return;
     final id = await _methodChannel.invokeMethod<int>('createVideoRenderer');
     _textureId = id;
+    // Replay pending srcObject that was set before texture was ready
+    if (_srcObject is _AndroidMediaStream) {
+      _attachStream(_srcObject as _AndroidMediaStream);
+    }
   }
 
   @override
@@ -367,17 +387,24 @@ class _AndroidVideoRenderer implements IVideoRenderer {
     }
   }
 
+  void _attachStream(_AndroidMediaStream stream) {
+    if (_textureId == null || _disposed) return;
+    _methodChannel.invokeMethod('videoRendererSetStream', {
+      'textureId': _textureId,
+      'streamId': stream.streamId,
+    }).catchError((e) {
+      debugPrint('[AndroidVideoRenderer] setStream error (ignored): $e');
+    });
+  }
+
   @override
   IMediaStream? get srcObject => _srcObject;
 
   @override
   set srcObject(IMediaStream? value) {
     _srcObject = value;
-    if (value is _AndroidMediaStream && _textureId != null) {
-      _methodChannel.invokeMethod('videoRendererSetStream', {
-        'textureId': _textureId,
-        'streamId': value.streamId,
-      });
+    if (value is _AndroidMediaStream) {
+      _attachStream(value);
     }
   }
 
@@ -417,6 +444,10 @@ class AndroidGoogleWebRTCPlatform implements IWebRTCPlatform {
   Future<IMediaStream?> getUserMedia(Map<String, dynamic> constraints) async {
     final result = await _methodChannel.invokeMethod<Map<dynamic, dynamic>>('getUserMedia', {'constraints': constraints});
     if (result == null) return null;
+    final videoError = result['videoError'] as String?;
+    if (videoError != null) {
+      debugPrint('[AndroidWebRTC] getUserMedia native video error: $videoError');
+    }
     final streamId = result['streamId'] as String?;
     if (streamId == null) return null;
     final tracks = result['tracks'] as List<dynamic>?;
@@ -426,6 +457,9 @@ class AndroidGoogleWebRTCPlatform implements IWebRTCPlatform {
         final m = t as Map;
         list.add(_AndroidMediaStreamTrack(m['trackId'] as String, m['kind'] as String? ?? 'audio'));
       }
+    }
+    if (list.isEmpty && videoError != null) {
+      debugPrint('[AndroidWebRTC] getUserMedia returned 0 tracks. Native error: $videoError');
     }
     return _AndroidMediaStream(streamId, initialTracks: list);
   }

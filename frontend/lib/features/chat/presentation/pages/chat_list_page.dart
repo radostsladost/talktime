@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:logger/logger.dart';
+import 'package:talktime/core/config/environment.dart';
 import 'package:talktime/core/navigation_manager.dart';
 import 'package:talktime/core/websocket/websocket_manager.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
@@ -114,7 +115,7 @@ class _ChatListPageState extends State<ChatListPage>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Talktime'),
+        title: const Text(Environment.appName),
         actions: [
           IconButton(
             icon: const Icon(Icons.settings),

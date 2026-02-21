@@ -163,6 +163,12 @@ class RTPTransceiverWrapper implements IRTPTransceiver {
     final t = _transceiver.receiver.track;
     return t == null ? null : MediaStreamWrapper._wrapTrack(t);
   }
+
+  @override
+  String get kind =>
+      _transceiver.sender.track?.kind ??
+      _transceiver.receiver.track?.kind ??
+      'video';
 }
 
 // ============== State mapping ==============

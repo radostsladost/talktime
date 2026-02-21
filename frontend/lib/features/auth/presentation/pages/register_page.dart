@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:talktime/core/config/environment.dart';
 import 'package:talktime/core/websocket/websocket_manager.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/features/chat/data/device_sync_service.dart';
@@ -49,7 +50,7 @@ class _RegisterPageState extends State<RegisterPage> {
       );
 
       await WebSocketManager().initialize();
-      
+
       // Initialize device sync service for cross-device message synchronization
       DeviceSyncService().initialize();
 
@@ -92,14 +93,14 @@ class _RegisterPageState extends State<RegisterPage> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   // Logo or App Name
-                  Icon(
-                    Icons.person_add_outlined,
-                    size: 80,
-                    color: Theme.of(context).colorScheme.primary,
+                  Image(
+                    image: AssetImage('assets/app_icon.png'),
+                    height: 80,
+                    // color: Theme.of(context).colorScheme.primary,
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    'Join TalkTime',
+                    'Join ${Environment.appName}',
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.headlineLarge?.copyWith(
                       fontWeight: FontWeight.bold,

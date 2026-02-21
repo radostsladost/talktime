@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:logger/logger.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:talktime/core/config/environment.dart';
 import 'package:talktime/core/navigation_manager.dart';
 import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/features/call/data/call_service.dart';
@@ -55,7 +56,8 @@ class _ChatSplitViewState extends State<ChatSplitView>
   // When user accepts an incoming call on wide screen, open chat+call panel instead of full-screen
   String? _pendingAcceptedCallRoomId;
   // Conference participant updates (to refresh in-call avatars on chat list)
-  void Function(String, ConferenceParticipant, String)? _conferenceParticipantCallback;
+  void Function(String, ConferenceParticipant, String)?
+  _conferenceParticipantCallback;
 
   void _startCallInPanel(Conversation conversation) {
     setState(() {
@@ -145,13 +147,14 @@ class _ChatSplitViewState extends State<ChatSplitView>
 
   Future<void> _maybeShowNotificationPermissionDialog() async {
     if (kIsWeb || !Platform.isIOS || !mounted) return;
-    final shouldPrompt =
-        await AuthService().shouldPromptForNotificationPermission();
+    final shouldPrompt = await AuthService()
+        .shouldPromptForNotificationPermission();
     if (!shouldPrompt || !mounted) return;
     final status = await AuthService().getNotificationPermissionStatus();
     if (status == null || !mounted) return;
     if (status != AuthorizationStatus.denied &&
-        status != AuthorizationStatus.notDetermined) return;
+        status != AuthorizationStatus.notDetermined)
+      return;
 
     if (!mounted) return;
     final isDenied = status == AuthorizationStatus.denied;
@@ -166,8 +169,8 @@ class _ChatSplitViewState extends State<ChatSplitView>
         ),
         content: Text(
           isDenied
-              ? 'To receive calls and messages when the app is in the background, open Settings and allow notifications for TalkTime.'
-              : 'Allow TalkTime to send you notifications for calls and new messages.',
+              ? 'To receive calls and messages when the app is in the background, open Settings and allow notifications for ${Environment.appName}.'
+              : 'Allow ${Environment.appName} to send you notifications for calls and new messages.',
         ),
         actions: [
           TextButton(
@@ -247,15 +250,10 @@ class _ChatSplitViewState extends State<ChatSplitView>
       children: [
         for (var i = 0; i < show.length; i++)
           Container(
-            margin: EdgeInsets.only(
-              left: i == 0 ? 0 : _inCallAvatarOverlap,
-            ),
+            margin: EdgeInsets.only(left: i == 0 ? 0 : _inCallAvatarOverlap),
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              border: Border.all(
-                color: theme.colorScheme.surface,
-                width: 1.2,
-              ),
+              border: Border.all(color: theme.colorScheme.surface, width: 1.2),
             ),
             child: CircleAvatar(
               radius: _inCallAvatarSize / 2,
@@ -284,11 +282,7 @@ class _ChatSplitViewState extends State<ChatSplitView>
             ),
           ),
         const SizedBox(width: 6),
-        Icon(
-          Icons.mic,
-          size: 14,
-          color: theme.colorScheme.primary,
-        ),
+        Icon(Icons.mic, size: 14, color: theme.colorScheme.primary),
         const SizedBox(width: 2),
         Text(
           'In call',
@@ -307,12 +301,14 @@ class _ChatSplitViewState extends State<ChatSplitView>
     setState(() {
       _conversationsFuture = ConversationService().getConversations();
     });
-    _conversationsFuture.then((_) async {
-      await _fetchLastMessages();
-      if (mounted) setState(() {});
-    }).catchError((e) {
-      _logger.e('Error refreshing conversation list: $e');
-    });
+    _conversationsFuture
+        .then((_) async {
+          await _fetchLastMessages();
+          if (mounted) setState(() {});
+        })
+        .catchError((e) {
+          _logger.e('Error refreshing conversation list: $e');
+        });
   }
 
   bool get _isWideScreen => MediaQuery.of(context).size.width >= 768;
@@ -325,14 +321,17 @@ class _ChatSplitViewState extends State<ChatSplitView>
       _pendingAcceptedCallRoomId = null; // clear so we only schedule once
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        ConversationService().getConversationById(roomId).then((conv) {
-          if (!mounted) return;
-          setState(() => _startCallInPanel(conv));
-        }).catchError((e) {
-          _logger.e('Failed to load conversation for accepted call: $e');
-          if (!mounted) return;
-          setState(() {});
-        });
+        ConversationService()
+            .getConversationById(roomId)
+            .then((conv) {
+              if (!mounted) return;
+              setState(() => _startCallInPanel(conv));
+            })
+            .catchError((e) {
+              _logger.e('Failed to load conversation for accepted call: $e');
+              if (!mounted) return;
+              setState(() {});
+            });
       });
     }
 
@@ -361,7 +360,7 @@ class _ChatSplitViewState extends State<ChatSplitView>
   Widget _buildMobileView() {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Talktime'),
+        title: const Text(Environment.appName),
         actions: [
           IconButton(
             icon: const Icon(Icons.settings),
@@ -385,7 +384,7 @@ class _ChatSplitViewState extends State<ChatSplitView>
   Widget _buildChatListPanel() {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Talktime'),
+        title: const Text(Environment.appName),
         actions: [
           IconButton(
             icon: const Icon(Icons.settings),
@@ -565,8 +564,8 @@ class _ChatSplitViewState extends State<ChatSplitView>
 
             final isSelected = _selectedConversation?.id == convo.id;
             final unreadCount = _unreadCountMap[convo.id] ?? 0;
-            final inCallParticipants =
-                WebSocketManager().getConferenceParticipants(convo.id);
+            final inCallParticipants = WebSocketManager()
+                .getConferenceParticipants(convo.id);
 
             return Card(
               margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -615,7 +614,7 @@ class _ChatSplitViewState extends State<ChatSplitView>
                             horizontal: 6,
                             vertical: 2,
                           ),
-                            decoration: BoxDecoration(
+                          decoration: BoxDecoration(
                             color: Theme.of(context).colorScheme.error,
                             shape: BoxShape.circle,
                             border: Border.all(
@@ -661,9 +660,7 @@ class _ChatSplitViewState extends State<ChatSplitView>
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Theme.of(context)
-                            .colorScheme
-                            .onSurfaceVariant,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     ),
                   ],
@@ -857,7 +854,9 @@ class _ChatSplitViewState extends State<ChatSplitView>
   @override
   void dispose() {
     if (_conferenceParticipantCallback != null) {
-      WebSocketManager().removeConferenceParticipantCallback(_conferenceParticipantCallback!);
+      WebSocketManager().removeConferenceParticipantCallback(
+        _conferenceParticipantCallback!,
+      );
     }
     _callPanelTabController?.dispose();
     _callStateSubscription?.cancel();

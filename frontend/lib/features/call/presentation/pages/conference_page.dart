@@ -48,6 +48,7 @@ class _ConferencePageState extends State<ConferencePage> {
   String? _focusedParticipantId; // Optional: manually select who to focus
   bool _cam = false;
   bool _screenShare = false;
+  bool _showLocalOverlay = false;
 
   // Stream Subscriptions for dynamic updates
   StreamSubscription? _stateSubscription;
@@ -64,42 +65,8 @@ class _ConferencePageState extends State<ConferencePage> {
   void initState() {
     super.initState();
     _localRenderer = getWebRTCPlatform().createVideoRenderer();
-    _initRenderers();
 
-    _callService
-        .initService()
-        .catchError((error) {
-          _logger.e("Error initializing call service: $error");
-        })
-        .then((_) async {
-          // Apply desktop noise cancellation setting before starting media
-          if (_isDesktop) {
-            final nc = await SettingsService().getCallNoiseCancellation();
-            _callService.setNoiseCancellation(nc);
-          }
-          // Check if we are already in this call, if not, start it
-          if (_callService.currentState == CallState.idle) {
-            await _callService
-                .startCall(
-                  widget.roomId,
-                  widget.initialParticipants,
-                  inviteKey: widget.inviteKey,
-                )
-                .catchError((error) {
-                  _logger.e("Error starting call: $error");
-                });
-          }
-
-          // Push the invite-key URL once it's available
-          final key = _callService.inviteKey;
-          if (key != null) {
-            CallUrlHelper.pushCallUrl(key);
-          }
-
-          // Setup listeners and attach existing streams immediately after service is set up/call started
-          _setupListeners();
-          _attachExistingStreams();
-        });
+    _initCall();
 
     // Timer.periodic(Duration(seconds: 5), (timer) {
     //   if (_callService.remoteStreams.values.any(
@@ -114,6 +81,45 @@ class _ConferencePageState extends State<ConferencePage> {
     //     setState(() {});
     //   }
     // });
+  }
+
+  Future<void> _initCall() async {
+    try {
+      await _callService.initService();
+    } catch (error) {
+      _logger.e("Error initializing call service: $error");
+      _setupListeners();
+      _attachExistingStreams();
+      return;
+    }
+
+    // Initialize renderer AFTER initService so the native EGL context exists
+    await _initRenderers();
+
+    if (_isDesktop) {
+      final nc = await SettingsService().getCallNoiseCancellation();
+      _callService.setNoiseCancellation(nc);
+    }
+
+    if (_callService.currentState == CallState.idle) {
+      try {
+        await _callService.startCall(
+          widget.roomId,
+          widget.initialParticipants,
+          inviteKey: widget.inviteKey,
+        );
+      } catch (error) {
+        _logger.e("Error starting call: $error");
+      }
+    }
+
+    final key = _callService.inviteKey;
+    if (key != null) {
+      CallUrlHelper.pushCallUrl(key);
+    }
+
+    _setupListeners();
+    _attachExistingStreams();
   }
 
   Future<void> _initRenderers() async {
@@ -228,9 +234,11 @@ class _ConferencePageState extends State<ConferencePage> {
         });
         _remoteRenderers[id] = newRenderer;
       } else {
-        // Always re-assign srcObject on non-web to ensure new tracks
-        // (e.g. video added mid-call via renegotiation) are picked up.
-        if (!kIsWeb) _remoteRenderers[id]!.srcObject = streams[id];
+        final renderer = _remoteRenderers[id]!;
+        final newStream = streams[id];
+        if (!kIsWeb && renderer.srcObject != newStream) {
+          renderer.srcObject = newStream;
+        }
       }
     }
 
@@ -293,30 +301,63 @@ class _ConferencePageState extends State<ConferencePage> {
             },
           ),
 
-          // LOCAL VIDEO (PIP)
+          // LOCAL VIDEO (PIP) with switch-camera overlay on tap
           if (_cam || _screenShare)
             Positioned(
               right: 20,
               bottom: 100,
-              child: SizedBox(
-                width: 100,
-                height: 150,
-                child: StreamBuilder<IMediaStream?>(
-                  stream: _callService.cachedVideoStreamStream,
-                  initialData: _callService.cachedVideoStream,
-                  builder: (context, snapshot) {
-                    final stream = snapshot.data;
+              child: GestureDetector(
+                onTap: () => setState(() => _showLocalOverlay = !_showLocalOverlay),
+                child: SizedBox(
+                  width: 120,
+                  height: 170,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Stack(
+                      children: [
+                        StreamBuilder<IMediaStream?>(
+                          stream: _callService.cachedVideoStreamStream,
+                          initialData: _callService.cachedVideoStream,
+                          builder: (context, snapshot) {
+                            final stream = snapshot.data;
 
-                    if (stream != null && stream.getVideoTracks().isNotEmpty) {
-                      if (_localRenderer.srcObject != stream) {
-                        _localRenderer.srcObject = stream;
-                        _localRenderer.muted = true;
-                      }
-                      return _localRenderer.buildView(mirror: _screenShare);
-                    }
+                            if (stream != null &&
+                                stream.getVideoTracks().isNotEmpty) {
+                              if (_localRenderer.srcObject != stream) {
+                                _localRenderer.srcObject = stream;
+                                _localRenderer.muted = true;
+                              }
+                              return SizedBox.expand(
+                                child: _localRenderer.buildView(
+                                    mirror: !_screenShare),
+                              );
+                            }
 
-                    return Container(color: Colors.transparent);
-                  },
+                            return Container(color: Colors.grey[900]);
+                          },
+                        ),
+                        if (_showLocalOverlay &&
+                            !_screenShare &&
+                            (kIsWeb || Platform.isAndroid || Platform.isIOS))
+                          Positioned.fill(
+                            child: Container(
+                              color: Colors.black38,
+                              child: Center(
+                                child: IconButton(
+                                  icon: const Icon(Icons.switch_camera,
+                                      color: Colors.white, size: 32),
+                                  onPressed: () {
+                                    _callService.changeCameraDevice();
+                                    setState(
+                                        () => _showLocalOverlay = false);
+                                  },
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -625,12 +666,6 @@ class _ConferencePageState extends State<ConferencePage> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
-          if (kIsWeb || Platform.isAndroid || Platform.isIOS)
-            IconButton(
-              icon: const Icon(Icons.switch_camera),
-              color: Colors.white,
-              onPressed: () => _callService.changeCameraDevice(),
-            ),
           StreamBuilder<bool>(
             stream: _callService.camStateStream,
             initialData: false,
