@@ -239,6 +239,11 @@ class _AndroidRTPTransceiver implements IRTPTransceiver {
 
   @override
   String get kind => _kind;
+
+  @override
+  Future<void> setDirectionToSendRecv() async {
+    // No-op: Android bridge does not expose transceiver direction; replaceTrack is enough for native.
+  }
 }
 
 // ============== Android peer connection (handle) ==============

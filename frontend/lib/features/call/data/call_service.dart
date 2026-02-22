@@ -494,14 +494,13 @@ class CallService {
     }
   }
 
+  /// Replaces the video track in all peer connections and renegotiates.
+  /// Debug (web): If video sometimes fails after camera on/off or track change, check console for
+  /// JavaScriptError in SkwasmRenderer.createImageFromTextureSource / RTCVideoViewState.capture.
+  /// That can happen when the video view's frame callback runs before the new track is attached.
   Future<void> _replaceVideoTrackInPeerConnections(
     IMediaStreamTrack? newTrack,
   ) async {
-    // _logger.i(
-    //   'Replacing video track in ${_peerConnections.length} peer connections, '
-    //   'newTrack: ${newTrack?.label ?? "null"}',
-    // );
-
     if (_peerConnections.isEmpty) {
       _logger.w('No peer connections to update video track');
       return;
@@ -528,6 +527,10 @@ class CallService {
               'Replaced video track on existing transceiver for peer '
               '$participantId (wasNull=$wasNull, newTrack=${newTrack != null})',
             );
+            // So the next offer has a=sendrecv for video (not recvonly). Otherwise the remote never sees our video.
+            if (newTrack != null) {
+              await transceiver.setDirectionToSendRecv();
+            }
             replaced = true;
             break;
           }
@@ -544,6 +547,11 @@ class CallService {
           _logger.i(
             'Renegotiating after video track change for peer $participantId',
           );
+          // On web, a short delay can reduce race with RTCVideoView frame callback
+          // (createImageFromTextureSource may throw if capture runs during track swap).
+          if (kIsWeb) {
+            await Future<void>.delayed(const Duration(milliseconds: 80));
+          }
           await _createAndSendOffers(
             onlyParticipantId: participantId,
             forceRenegotiation: true,
@@ -1012,11 +1020,39 @@ class CallService {
 
     pc.onTrack = (RTCTrackEventDto event) {
       if (event.streams.isNotEmpty) {
-        _logger.i('Received remote stream ${event.streams.first.id}');
         final stream = event.streams.first;
+        final track = event.track;
+        _logger.i(
+          'Received remote stream ${stream.id} track=${track.kind} '
+          '(stream tracks: ${stream.getTracks().length})',
+        );
+        final existing = _remoteStreams[participantId];
+        // When the remote adds a track via renegotiation (e.g. turns on camera), the event often
+        // carries a stream with only the new track. Merge into existing stream so we keep audio
+        // and show the new video; otherwise replacing would lose the other track.
+        if (existing != null &&
+            stream.getTracks().length == 1 &&
+            (track.kind == 'video' && existing.getVideoTracks().isEmpty ||
+                track.kind == 'audio' && existing.getAudioTracks().isEmpty)) {
+          _logger.i('Merging new ${track.kind} track into existing stream for $participantId');
+          existing.addTrack(track).then((_) {
+            final current = _remoteStreams[participantId];
+            if (current != null) {
+              for (final t in current.getAudioTracks()) {
+                t.enabled = !_isSpeakerMuted;
+              }
+              if (!kIsWeb && Platform.isAndroid) {
+                _setAudioMode(3);
+              }
+              _remoteStreamsController.add(Map.from(_remoteStreams));
+            }
+          });
+          return;
+        }
         _remoteStreams[participantId] = stream;
-        for (final track in stream.getAudioTracks()) {
-          track.enabled = !_isSpeakerMuted;
+        final current = _remoteStreams[participantId]!;
+        for (final t in current.getAudioTracks()) {
+          t.enabled = !_isSpeakerMuted;
         }
         if (!kIsWeb && Platform.isAndroid) {
           _setAudioMode(3);
@@ -1044,14 +1080,12 @@ class CallService {
     pc.onIceConnectionState = (state) {
       _logger.i('ICE connection state for $participantId: $state');
 
-      final isDisconnectedOrFailed =
-          state == RTCIceConnectionStateDto.disconnected ||
-          state == RTCIceConnectionStateDto.failed;
-
-      if (isDisconnectedOrFailed &&
+      // Only reconnect on 'failed'. 'disconnected' is often temporary during renegotiation
+      // (e.g. web turns on camera); tearing down the PC then causes black video for the receiver.
+      if (state == RTCIceConnectionStateDto.failed &&
           _peerConnections.containsKey(participantId)) {
         _logger.w(
-          'Peer $participantId disconnected/failed, attempting reconnection',
+          'Peer $participantId ICE failed, attempting reconnection',
         );
         _removePeerConnection(participantId).then(
           (_) => Future.delayed(Duration(seconds: 1), () async {
@@ -1074,7 +1108,7 @@ class CallService {
 
   /// Creates and sends offers to participants.
   /// [onlyParticipantId] - if set, only send to this participant
-  /// [forceRenegotiation] - passed through for logging only
+  /// [forceRenegotiation] - when true, we initiated a track change so we must send the offer even if impolite
   Future<void> _createAndSendOffers({
     String? onlyParticipantId,
     bool forceRenegotiation = false,
@@ -1084,8 +1118,9 @@ class CallService {
           (onlyParticipantId != null && id != onlyParticipantId)) {
         continue;
       }
-      // Only the polite peer sends offers; impolite peer waits and answers in _handleOffer.
-      if (!_isPolite(id)) continue;
+      // Only the polite peer sends initial offers to avoid collision. When we're renegotiating
+      // after a local track change (e.g. camera on), we must send the offer so the other peer can answer.
+      if (!forceRenegotiation && !_isPolite(id)) continue;
 
       var pc = _peerConnections[id];
       if (pc == null) {

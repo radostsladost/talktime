@@ -169,6 +169,11 @@ class RTPTransceiverWrapper implements IRTPTransceiver {
       _transceiver.sender.track?.kind ??
       _transceiver.receiver.track?.kind ??
       'video';
+
+  @override
+  Future<void> setDirectionToSendRecv() async {
+    await _transceiver.setDirection(webrtc.TransceiverDirection.SendRecv);
+  }
 }
 
 // ============== State mapping ==============

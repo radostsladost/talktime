@@ -69,7 +69,9 @@ class IncomingCallManager {
 
   /// Set callback for when a call is accepted.
   /// Return true to handle navigation yourself (e.g. open chat+call panel on wide screen); false to use default full-screen conference.
-  void setOnCallAccepted(bool Function(String callId, String? roomId) callback) {
+  void setOnCallAccepted(
+    bool Function(String callId, String? roomId) callback,
+  ) {
     _onCallAccepted = callback;
   }
 
@@ -181,9 +183,11 @@ class IncomingCallManager {
       _handleDecline(callId);
     });
 
-    // Push the Flutter incoming call page only when we have a navigator (app in foreground).
-    // When app is in background we only show the native CallKit overlay above.
-    if (_navigatorKey?.currentState != null) {
+    // On Android we use CallKit only; do not push the Flutter incoming call page.
+    // On iOS/web or when navigator is missing, we only show CallKit (no Flutter page).
+    final showFlutterPage =
+        _navigatorKey?.currentState != null && (kIsWeb || !Platform.isAndroid);
+    if (showFlutterPage) {
       _navigatorKey!.currentState!.push(
         PageRouteBuilder(
           opaque: false,

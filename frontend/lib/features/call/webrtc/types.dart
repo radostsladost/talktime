@@ -98,6 +98,10 @@ abstract class IRTPTransceiver {
   IRTPSender get sender;
   IMediaStreamTrack? get receiverTrack;
   String get kind; // 'audio' or 'video' – stable even when tracks are null
+
+  /// Set direction to sendrecv so the next offer will include sending (e.g. after replaceTrack with non-null video).
+  /// No-op on platforms that don't support it (e.g. Android bridge).
+  Future<void> setDirectionToSendRecv() async {}
 }
 
 /// Signaling state.
