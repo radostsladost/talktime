@@ -168,7 +168,7 @@ class RTPTransceiverWrapper implements IRTPTransceiver {
   String get kind =>
       _transceiver.sender.track?.kind ??
       _transceiver.receiver.track?.kind ??
-      'video';
+      '';
 
   @override
   Future<void> setDirectionToSendRecv() async {
@@ -381,12 +381,14 @@ class FlutterWebRTCPlatform implements IWebRTCPlatform {
 
     pc.onTrack = (webrtc.RTCTrackEvent event) {
       final streams = event.streams;
-      if (streams != null && streams.isNotEmpty) {
-        final streamList = streams.map((s) => MediaStreamWrapper.wrap(s)).toList();
-        final track = event.track;
-        if (track != null) {
-          wrapper.onTrack?.call(RTCTrackEventDto(streamList, MediaStreamWrapper._wrapTrack(track)));
-        }
+      final streamList = (streams ?? <webrtc.MediaStream>[])
+          .map((s) => MediaStreamWrapper.wrap(s))
+          .toList();
+      final track = event.track;
+      if (track != null) {
+        wrapper.onTrack?.call(
+          RTCTrackEventDto(streamList, MediaStreamWrapper._wrapTrack(track)),
+        );
       }
     };
 

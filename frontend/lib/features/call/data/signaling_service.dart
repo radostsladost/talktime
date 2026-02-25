@@ -11,6 +11,7 @@ import 'package:signalr_netcore/http_connection_options.dart';
 class SignalingService {
   HubConnection? _hubConnection;
   bool _ownsConnection = false;
+  HubConnection? _handlersRegisteredOn;
   final Logger _logger = Logger(output: ConsoleOutput());
   void Function()? _connectionRestoredCb;
 
@@ -143,6 +144,10 @@ class SignalingService {
 
   void _registerHandlers() {
     if (_hubConnection == null) return;
+    if (_handlersRegisteredOn == _hubConnection) {
+      _logger.i('Signaling handlers already registered on this connection');
+      return;
+    }
 
     _hubConnection!.on('RoomCreated', (arguments) {
       if (arguments != null && arguments.isNotEmpty) {
@@ -212,6 +217,8 @@ class SignalingService {
     _hubConnection!.on('Error', (arguments) {
       _logger.e('SignalR error: $arguments');
     });
+
+    _handlersRegisteredOn = _hubConnection;
   }
 
   Future<void> initiateCall(String calleeId, String callType) async {
@@ -336,6 +343,7 @@ class SignalingService {
         _logger.i('Detaching from shared SignalR hub connection');
       }
       _hubConnection = null;
+      _handlersRegisteredOn = null;
       _ownsConnection = false;
     } catch (e) {
       _logger.e('Error disconnecting: $e');

@@ -114,6 +114,9 @@ class CallService {
   String? _guestDisplayName;
   String? _localDeviceId;
   String? _inviteKey;
+  final Set<String> _offersInProgressByPeer = <String>{};
+  final Set<String> _offersInProgress = <String>{};
+  final Map<String, String> _lastHandledOfferSdpByPeer = <String, String>{};
 
   /// The local identity used for signaling (deviceId for both auth and guest)
   String get localId => _localDeviceId ?? _currentUser?.id ?? '';
@@ -309,6 +312,12 @@ class CallService {
     for (var sub in _subscriptions) {
       sub.cancel();
     }
+    for (final sub in _subscriptions) {
+      await sub.cancel();
+    }
+    for (final sub in _subscriptions) {
+      await sub.cancel();
+    }
     _subscriptions.clear();
     try {
       if (_currentRoomId != null) {
@@ -350,6 +359,9 @@ class CallService {
     _peerConnections.clear();
     _remoteStreams.clear();
     _participantIds.clear();
+    _offersInProgressByPeer.clear();
+    _offersInProgress.clear();
+    _lastHandledOfferSdpByPeer.clear();
 
     _currentRoomId = null;
     _inviteKey = null;
@@ -466,6 +478,10 @@ class CallService {
         _isCameraOff = false;
         _camStateController.add(true);
       }
+      _logger.i(
+        '[diag] local new video track: enabled=${newVideoTrack.enabled} '
+        'muted=${newVideoTrack.muted} label=${newVideoTrack.label}',
+      );
       // Replace video track in local stream
       if (_localStream != null) {
         // Add new video track
@@ -511,21 +527,38 @@ class CallService {
       final pc = entry.value;
 
       try {
+        final localAudioTracks = _localStream?.getAudioTracks().length ?? 0;
+        final localVideoTracks = _localStream?.getVideoTracks().length ?? 0;
+        _logger.i(
+          '[diag] video change for $participantId: newTrack=${newTrack != null}, '
+          'localTracks(a=$localAudioTracks,v=$localVideoTracks)',
+        );
         final transceivers = await pc.getTransceivers();
         _logger.i(
           'Peer $participantId has ${transceivers.length} transceivers '
           '(kinds: ${transceivers.map((t) => t.kind).toList()})',
         );
+        _logger.i(
+          '[diag] pre-replace transceivers for $participantId: '
+          '${transceivers.map((t) => '${t.kind}(sender=${t.sender.track?.kind ?? "null"},receiver=${t.receiverTrack?.kind ?? "null"})').toList()}',
+        );
 
         var replaced = false;
         var wasNull = false;
         for (final transceiver in transceivers) {
-          if (transceiver.kind == 'video') {
+          final senderKind = transceiver.sender.track?.kind;
+          final receiverKind = transceiver.receiverTrack?.kind;
+          final isVideoTransceiver =
+              transceiver.kind == 'video' ||
+              senderKind == 'video' ||
+              receiverKind == 'video';
+          if (isVideoTransceiver) {
             wasNull = transceiver.sender.track == null;
             await transceiver.sender.replaceTrack(newTrack);
             _logger.i(
               'Replaced video track on existing transceiver for peer '
-              '$participantId (wasNull=$wasNull, newTrack=${newTrack != null})',
+              '$participantId (kind=${transceiver.kind}, sender=$senderKind, '
+              'receiver=$receiverKind, wasNull=$wasNull, newTrack=${newTrack != null})',
             );
             // So the next offer has a=sendrecv for video (not recvonly). Otherwise the remote never sees our video.
             if (newTrack != null) {
@@ -541,6 +574,36 @@ class CallService {
             'No video transceiver found for peer $participantId, adding track',
           );
           await pc.addTrack(newTrack, _localStream!);
+        }
+
+        final transceiversAfter = await pc.getTransceivers();
+        final hasVideoSenderAfter = transceiversAfter.any(
+          (t) => t.sender.track?.kind == 'video',
+        );
+        _logger.i(
+          '[diag] post-replace transceivers for $participantId: '
+          '${transceiversAfter.map((t) => '${t.kind}(sender=${t.sender.track?.kind ?? "null"},receiver=${t.receiverTrack?.kind ?? "null"})').toList()}',
+        );
+
+        // Some web peers expose a video transceiver but replaceTrack does not
+        // actually attach the sender track (sender stays null). Force-add track
+        // so the outgoing video sender definitely exists.
+        if (newTrack != null && _localStream != null && !hasVideoSenderAfter) {
+          // that is actually might be incorrect
+          _logger.w(
+            '[diag] no active video sender after replace for $participantId; forcing addTrack fallback',
+          );
+          try {
+            await pc.addTrack(newTrack, _localStream!);
+          } catch (e) {
+            _logger.e('[diag] failed to add track for $participantId: $e');
+          }
+
+          final transceiversFinal = await pc.getTransceivers();
+          _logger.i(
+            '[diag] post-fallback transceivers for $participantId: '
+            '${transceiversFinal.map((t) => '${t.kind}(sender=${t.sender.track?.kind ?? "null"},receiver=${t.receiverTrack?.kind ?? "null"})').toList()}',
+          );
         }
 
         if (newTrack != null) {
@@ -1019,12 +1082,13 @@ class CallService {
     }
 
     pc.onTrack = (RTCTrackEventDto event) {
+      final track = event.track;
       if (event.streams.isNotEmpty) {
         final stream = event.streams.first;
-        final track = event.track;
         _logger.i(
           'Received remote stream ${stream.id} track=${track.kind} '
-          '(stream tracks: ${stream.getTracks().length})',
+          '(stream tracks: ${stream.getTracks().length}, '
+          'trackEnabled=${track.enabled}, trackMuted=${track.muted})',
         );
         final existing = _remoteStreams[participantId];
         // When the remote adds a track via renegotiation (e.g. turns on camera), the event often
@@ -1034,7 +1098,9 @@ class CallService {
             stream.getTracks().length == 1 &&
             (track.kind == 'video' && existing.getVideoTracks().isEmpty ||
                 track.kind == 'audio' && existing.getAudioTracks().isEmpty)) {
-          _logger.i('Merging new ${track.kind} track into existing stream for $participantId');
+          _logger.i(
+            'Merging new ${track.kind} track into existing stream for $participantId',
+          );
           existing.addTrack(track).then((_) {
             final current = _remoteStreams[participantId];
             if (current != null) {
@@ -1059,11 +1125,49 @@ class CallService {
         }
         _remoteStreamsController.add(Map.from(_remoteStreams));
       } else {
-        _logger.i('Received remote stream {empty}');
-        if (_remoteStreams.containsKey(participantId)) {
-          _remoteStreams.remove(participantId);
+        _logger.i(
+          'Received remote stream {empty} track=${track.kind} '
+          '(trackEnabled=${track.enabled}, trackMuted=${track.muted})',
+        );
+        final existing = _remoteStreams[participantId];
+        if (existing != null) {
+          // Web can fire onTrack with empty streams during renegotiation.
+          // Keep existing participant stream and merge the track into it.
+          final hasKindAlready = track.kind == 'video'
+              ? existing.getVideoTracks().isNotEmpty
+              : existing.getAudioTracks().isNotEmpty;
+          if (!hasKindAlready) {
+            existing
+                .addTrack(track)
+                .then((_) {
+                  _logger.i(
+                    '[diag] merged ${track.kind} into existing stream for $participantId '
+                    '(now a=${existing.getAudioTracks().length}, v=${existing.getVideoTracks().length})',
+                  );
+                  final current = _remoteStreams[participantId];
+                  if (current != null) {
+                    for (final t in current.getAudioTracks()) {
+                      t.enabled = !_isSpeakerMuted;
+                    }
+                    _remoteStreamsController.add(Map.from(_remoteStreams));
+                  }
+                })
+                .catchError((e) {
+                  _logger.e(
+                    '[diag] failed merging ${track.kind} into existing stream for $participantId: $e',
+                  );
+                });
+          } else {
+            _remoteStreamsController.add(Map.from(_remoteStreams));
+          }
+          return;
         }
-        _remoteStreamsController.add(Map.from(_remoteStreams));
+
+        // No known stream for this participant yet: ignore empty-stream event.
+        // It is not a "participant left" signal and should not clear UI state.
+        _logger.w(
+          'Ignoring empty onTrack for $participantId with no existing stream',
+        );
       }
     };
 
@@ -1084,9 +1188,7 @@ class CallService {
       // (e.g. web turns on camera); tearing down the PC then causes black video for the receiver.
       if (state == RTCIceConnectionStateDto.failed &&
           _peerConnections.containsKey(participantId)) {
-        _logger.w(
-          'Peer $participantId ICE failed, attempting reconnection',
-        );
+        _logger.w('Peer $participantId ICE failed, attempting reconnection');
         _removePeerConnection(participantId).then(
           (_) => Future.delayed(Duration(seconds: 1), () async {
             if (_state != CallState.idle) {
@@ -1131,6 +1233,7 @@ class CallService {
       final state = await pc!.getSignalingState();
       if (state == RTCSignalingStateDto.stable) {
         final offer = await pc.createOffer();
+        _logger.i('[diag] local offer to $id: ${_summarizeSdp(offer.sdp)}');
         await pc.setLocalDescription(offer);
         _signalingService?.sendOffer(
           id,
@@ -1257,8 +1360,33 @@ class CallService {
     return localId.compareTo(otherId) < 0;
   }
 
+  String _summarizeSdp(String? sdp) {
+    if (sdp == null || sdp.isEmpty) return 'empty-sdp';
+    final mAudio = RegExp(r'^m=audio', multiLine: true).allMatches(sdp).length;
+    final mVideo = RegExp(r'^m=video', multiLine: true).allMatches(sdp).length;
+    final sendrecv = RegExp(
+      r'^a=sendrecv',
+      multiLine: true,
+    ).allMatches(sdp).length;
+    final sendonly = RegExp(
+      r'^a=sendonly',
+      multiLine: true,
+    ).allMatches(sdp).length;
+    final recvonly = RegExp(
+      r'^a=recvonly',
+      multiLine: true,
+    ).allMatches(sdp).length;
+    final inactive = RegExp(
+      r'^a=inactive',
+      multiLine: true,
+    ).allMatches(sdp).length;
+    return 'len=${sdp.length} mAudio=$mAudio mVideo=$mVideo '
+        'sendrecv=$sendrecv sendonly=$sendonly recvonly=$recvonly inactive=$inactive';
+  }
+
   Future<void> _handleOffer(SignalingOfferEvent event) async {
     _logger.i('_handleOffer from ${event.fromDeviceId} to ${event.toDeviceId}');
+    _logger.i('[diag] incoming offer summary: ${_summarizeSdp(event.sdp)}');
 
     if (event.toDeviceId != localId) {
       _logger.i('Ignoring offer not intended for us (to: ${event.toDeviceId})');
@@ -1270,21 +1398,40 @@ class CallService {
       await _createPeerConnection(event.fromDeviceId);
     }
 
+    final peerId = event.fromDeviceId;
+    if (_offersInProgressByPeer.contains(peerId)) {
+      _logger.w(
+        'Offer handling already in progress for $peerId; ignoring concurrent offer',
+      );
+      return;
+    }
+    final offerKey = '${peerId}|${event.sdp.hashCode}';
+    if (_offersInProgress.contains(offerKey)) {
+      _logger.w(
+        'Offer already being processed from $peerId; ignoring duplicate',
+      );
+      return;
+    }
+    if (_lastHandledOfferSdpByPeer[peerId] == event.sdp) {
+      _logger.w('Duplicate offer SDP from $peerId; ignoring');
+      return;
+    }
+    _offersInProgressByPeer.add(peerId);
+    _offersInProgress.add(offerKey);
+
     try {
-      final pc = _peerConnections[event.fromDeviceId]!;
+      final pc = _peerConnections[peerId]!;
       final state = await pc.getSignalingState();
-      final polite = _isPolite(event.fromDeviceId);
+      final polite = _isPolite(peerId);
 
       if (state == RTCSignalingStateDto.haveLocalOffer) {
         if (!polite) {
           _logger.w(
-            "Collision detected. Impolite peer ignoring offer from ${event.fromDeviceId}",
+            "Collision detected. Impolite peer ignoring offer from $peerId",
           );
           return;
         } else {
-          _logger.i(
-            "Collision detected. Polite peer rolling back for ${event.fromDeviceId}",
-          );
+          _logger.i("Collision detected. Polite peer rolling back for $peerId");
           await pc.setLocalDescription(
             RTCSessionDescriptionDto(null, 'rollback'),
           );
@@ -1293,19 +1440,32 @@ class CallService {
 
       final offer = RTCSessionDescriptionDto(event.sdp, 'offer');
       await pc.setRemoteDescription(offer);
+      final stateAfterRemote = await pc.getSignalingState();
+      if (stateAfterRemote != RTCSignalingStateDto.haveRemoteOffer &&
+          stateAfterRemote != RTCSignalingStateDto.haveLocalPranswer) {
+        _logger.w(
+          'Skipping createAnswer for $peerId due to unexpected signaling state: $stateAfterRemote',
+        );
+        return;
+      }
 
       final answer = await pc.createAnswer();
+      _logger.i('[diag] local answer to $peerId: ${_summarizeSdp(answer.sdp)}');
       await pc.setLocalDescription(answer);
 
       await _signalingService!.sendAnswer(
-        event.fromDeviceId,
+        peerId,
         answer.sdp ?? '',
         roomId: _currentRoomId!,
       );
+      _lastHandledOfferSdpByPeer[peerId] = event.sdp;
 
       // _logger.i('_handleOffer sendAnswer to ${event.fromDeviceId}');
     } catch (e) {
-      _logger.e('Error handling offer from ${event.fromDeviceId}: $e');
+      _logger.e('Error handling offer from $peerId: $e');
+    } finally {
+      _offersInProgress.remove(offerKey);
+      _offersInProgressByPeer.remove(peerId);
     }
   }
 
@@ -1328,6 +1488,7 @@ class CallService {
     }
 
     try {
+      _logger.i('[diag] incoming answer summary: ${_summarizeSdp(event.sdp)}');
       final state = await pc.getSignalingState();
       if (state == RTCSignalingStateDto.stable) {
         _logger.w(

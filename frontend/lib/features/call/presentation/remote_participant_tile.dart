@@ -34,12 +34,17 @@ class RemoteParticipantTile extends StatefulWidget {
 }
 
 class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
-  late final IVideoRenderer _renderer;
+  IVideoRenderer? _renderer;
   bool _isRendererReady = false;
   bool _hasActiveVideo = false;
   bool _hasActiveAudio = true;
+  bool _allVideoTracksMuted = false;
   Timer? _trackPollTimer;
   int _videoTrackCount = 0;
+  DateTime? _lastWebReattachAt;
+  bool _rendererRecreateInProgress = false;
+  /// One-time reattach after first layout so the <video> element has size and displays (web).
+  bool _didPostFrameReattach = false;
 
   @override
   void initState() {
@@ -56,12 +61,14 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
   }
 
   Future<void> _initRenderer() async {
-    await _renderer.initialize();
-    _renderer.srcObject = widget.stream;
+    final renderer = _renderer;
+    if (renderer == null) return;
+    await renderer.initialize();
+    renderer.srcObject = widget.stream;
     if (widget.speakerDeviceId != null) {
       try {
         if ((kIsWeb || !Platform.isAndroid) && widget.speakerDeviceId != null) {
-          await _renderer.audioOutput(widget.speakerDeviceId!);
+          await renderer.audioOutput(widget.speakerDeviceId!);
         }
       } catch (_) {}
     }
@@ -77,9 +84,15 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
     widget.stream.onAddTrack = (_, track) {
       _setupTrackListeners(track);
       _checkAndUpdateTrackStates();
-      // Force re-assign srcObject so the renderer picks up the new track
+      // Force re-assign srcObject so the renderer picks up the new track.
+      // On web, a null->stream bounce is more reliable after renegotiation.
       if (_isRendererReady) {
-        _renderer.srcObject = widget.stream;
+        final renderer = _renderer;
+        if (renderer == null) return;
+        if (kIsWeb) {
+          renderer.srcObject = null;
+        }
+        renderer.srcObject = widget.stream;
       }
     };
 
@@ -94,10 +107,18 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
 
   void _setupTrackListeners(IMediaStreamTrack track) {
     track.onMute = () {
+      debugPrint(
+        '[diag-tile] ${widget.participantId} ${track.kind} onMute '
+        'enabled=${track.enabled} muted=${track.muted}',
+      );
       if (mounted) _checkAndUpdateTrackStates();
     };
 
     track.onUnMute = () {
+      debugPrint(
+        '[diag-tile] ${widget.participantId} ${track.kind} onUnMute '
+        'enabled=${track.enabled} muted=${track.muted}',
+      );
       if (mounted) _checkAndUpdateTrackStates();
     };
 
@@ -111,17 +132,78 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
     final oldVideo = _hasActiveVideo;
     final oldAudio = _hasActiveAudio;
     final oldCount = _videoTrackCount;
+    final oldMuted = _allVideoTracksMuted;
     _updateTrackStatesInternal();
 
-    if (oldVideo != _hasActiveVideo ||
+    final trackConfigChanged = oldVideo != _hasActiveVideo ||
         oldAudio != _hasActiveAudio ||
-        oldCount != _videoTrackCount) {
-      // Track configuration changed — re-assign srcObject to ensure renderer
-      // picks up new tracks (especially important after renegotiation).
-      if (_isRendererReady && _hasActiveVideo) {
-        _renderer.srcObject = widget.stream;
+        oldCount != _videoTrackCount;
+    if (trackConfigChanged || oldMuted != _allVideoTracksMuted) {
+      debugPrint(
+        '[diag-tile] ${widget.participantId} state changed: '
+        'video=$_hasActiveVideo audio=$_hasActiveAudio videoCount=$_videoTrackCount',
+      );
+      // Re-assign srcObject only when track configuration actually changed (new
+      // track or count). Do NOT bounce srcObject when only muted state changes:
+      // the <video> element can show frames while the track is still "muted"
+      // until media flows; bouncing or recreating the renderer can freeze the
+      // image on the receiver.
+      if (_isRendererReady && _hasActiveVideo && trackConfigChanged) {
+        final renderer = _renderer;
+        if (renderer != null) {
+          if (kIsWeb) {
+            renderer.srcObject = null;
+          }
+          renderer.srcObject = widget.stream;
+        }
       }
       if (mounted) setState(() {});
+    }
+
+    // Web workaround: only if video never appeared after a long time, try
+    // recreating the renderer once. Do NOT recreate every 2s when muted — that
+    // disposes the renderer that showed the first frame and freezes the image.
+    if (kIsWeb &&
+        _isRendererReady &&
+        _hasActiveVideo &&
+        _allVideoTracksMuted &&
+        _videoTrackCount > 0) {
+      final now = DateTime.now();
+      final canReattach = _lastWebReattachAt == null ||
+          now.difference(_lastWebReattachAt!) > const Duration(seconds: 8);
+      if (canReattach) {
+        _lastWebReattachAt = now;
+        debugPrint(
+          '[diag-tile] ${widget.participantId} web muted-video renderer recreate (delayed fallback)',
+        );
+        unawaited(_recreateRenderer());
+      }
+    }
+  }
+
+  Future<void> _recreateRenderer() async {
+    if (_rendererRecreateInProgress || !mounted) return;
+    _rendererRecreateInProgress = true;
+    final oldRenderer = _renderer;
+    final newRenderer = getWebRTCPlatform().createVideoRenderer();
+    try {
+      await newRenderer.initialize();
+      newRenderer.srcObject = widget.stream;
+      if ((kIsWeb || !Platform.isAndroid) && widget.speakerDeviceId != null) {
+        await newRenderer.audioOutput(widget.speakerDeviceId!);
+      }
+      if (!mounted) {
+        newRenderer.dispose();
+        return;
+      }
+      _renderer = newRenderer;
+      _isRendererReady = true;
+      setState(() {});
+      oldRenderer?.dispose();
+    } catch (_) {
+      newRenderer.dispose();
+    } finally {
+      _rendererRecreateInProgress = false;
     }
   }
 
@@ -144,6 +226,9 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
         videoTracks.isNotEmpty &&
         videoTracks.any((track) => track.enabled);
 
+    _allVideoTracksMuted =
+        videoTracks.isNotEmpty && videoTracks.every((track) => track.muted);
+
     _hasActiveAudio =
         audioTracks.isEmpty ||
         audioTracks.any((track) => track.enabled);
@@ -164,13 +249,14 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.speakerDeviceId != widget.speakerDeviceId &&
         widget.speakerDeviceId != null) {
-      _renderer.audioOutput(widget.speakerDeviceId!).catchError((_) {});
+      _renderer?.audioOutput(widget.speakerDeviceId!).catchError((_) {});
     }
     if (oldWidget.stream.id != widget.stream.id) {
       _disposeStreamListeners();
-      _renderer.srcObject = widget.stream;
+      _renderer?.srcObject = widget.stream;
       _setupStreamListeners();
       _updateTrackStates();
+      _didPostFrameReattach = false; // re-run post-frame reattach for new stream
     } else {
       // Same stream — re-check tracks (new tracks may have been added via
       // renegotiation without changing the stream object).
@@ -182,13 +268,29 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
   void dispose() {
     _trackPollTimer?.cancel();
     _disposeStreamListeners();
-    _renderer.dispose();
+    _renderer?.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final hasVideo = _hasActiveVideo;
+
+    // Web: after first layout the <video> element has real size; reattach stream
+    // once so it actually displays (otherwise it can stay black until layout is
+    // recreated e.g. on window resize).
+    if (kIsWeb &&
+        _isRendererReady &&
+        hasVideo &&
+        _renderer != null &&
+        !_didPostFrameReattach) {
+      _didPostFrameReattach = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || _renderer == null) return;
+        _renderer!.srcObject = null;
+        _renderer!.srcObject = widget.stream;
+      });
+    }
 
     return Material(
       child: InkWell(
@@ -202,8 +304,8 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
             alignment: Alignment.center,
             children: [
               // 1. Video Layer
-              if (_isRendererReady && hasVideo)
-                _renderer.buildView(
+              if (_isRendererReady && hasVideo && _renderer != null)
+                _renderer!.buildView(
                   objectFit: widget.objectFit ??
                       (widget.fitInRect == true
                           ? VideoObjectFit.contain
