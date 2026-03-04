@@ -1075,14 +1075,12 @@ class CallService {
 
     final pc = await _platform.createPeerConnection(config);
 
-    if (_localStream != null) {
-      for (var track in _localStream!.getTracks()) {
-        await pc.addTrack(track, _localStream!);
-      }
-    }
-
     pc.onTrack = (RTCTrackEventDto event) {
       final track = event.track;
+      _logger.i(
+        'Received onTrack stream ${track.label} - ${event.streams.isNotEmpty}',
+      );
+
       if (event.streams.isNotEmpty) {
         final stream = event.streams.first;
         _logger.i(
@@ -1115,6 +1113,7 @@ class CallService {
           });
           return;
         }
+
         _remoteStreams[participantId] = stream;
         final current = _remoteStreams[participantId]!;
         for (final t in current.getAudioTracks()) {
@@ -1124,51 +1123,53 @@ class CallService {
           _setAudioMode(3);
         }
         _remoteStreamsController.add(Map.from(_remoteStreams));
-      } else {
-        _logger.i(
-          'Received remote stream {empty} track=${track.kind} '
-          '(trackEnabled=${track.enabled}, trackMuted=${track.muted})',
-        );
-        final existing = _remoteStreams[participantId];
-        if (existing != null) {
-          // Web can fire onTrack with empty streams during renegotiation.
-          // Keep existing participant stream and merge the track into it.
-          final hasKindAlready = track.kind == 'video'
-              ? existing.getVideoTracks().isNotEmpty
-              : existing.getAudioTracks().isNotEmpty;
-          if (!hasKindAlready) {
-            existing
-                .addTrack(track)
-                .then((_) {
-                  _logger.i(
-                    '[diag] merged ${track.kind} into existing stream for $participantId '
-                    '(now a=${existing.getAudioTracks().length}, v=${existing.getVideoTracks().length})',
-                  );
-                  final current = _remoteStreams[participantId];
-                  if (current != null) {
-                    for (final t in current.getAudioTracks()) {
-                      t.enabled = !_isSpeakerMuted;
-                    }
-                    _remoteStreamsController.add(Map.from(_remoteStreams));
-                  }
-                })
-                .catchError((e) {
-                  _logger.e(
-                    '[diag] failed merging ${track.kind} into existing stream for $participantId: $e',
-                  );
-                });
-          } else {
-            _remoteStreamsController.add(Map.from(_remoteStreams));
-          }
-          return;
-        }
+        return;
+      }
 
+      _logger.i(
+        'Received remote stream {empty} track=${track.kind} '
+        '(trackEnabled=${track.enabled}, trackMuted=${track.muted})',
+      );
+      final existing = _remoteStreams[participantId];
+      if (existing == null) {
         // No known stream for this participant yet: ignore empty-stream event.
         // It is not a "participant left" signal and should not clear UI state.
         _logger.w(
           'Ignoring empty onTrack for $participantId with no existing stream',
         );
+        return;
       }
+
+      // Web can fire onTrack with empty streams during renegotiation.
+      // Keep existing participant stream and merge the track into it.
+      final hasKindAlready = track.kind == 'video'
+          ? existing.getVideoTracks().isNotEmpty
+          : existing.getAudioTracks().isNotEmpty;
+      if (hasKindAlready) {
+        _remoteStreamsController.add(Map.from(_remoteStreams));
+        return;
+      }
+
+      existing
+          .addTrack(track)
+          .then((_) {
+            _logger.i(
+              '[diag] merged ${track.kind} into existing stream for $participantId '
+              '(now a=${existing.getAudioTracks().length}, v=${existing.getVideoTracks().length})',
+            );
+            final current = _remoteStreams[participantId];
+            if (current != null) {
+              for (final t in current.getAudioTracks()) {
+                t.enabled = !_isSpeakerMuted;
+              }
+              _remoteStreamsController.add(Map.from(_remoteStreams));
+            }
+          })
+          .catchError((e) {
+            _logger.e(
+              '[diag] failed merging ${track.kind} into existing stream for $participantId: $e',
+            );
+          });
     };
 
     pc.onIceCandidate = (candidate) {
@@ -1204,6 +1205,16 @@ class CallService {
     };
 
     _peerConnections[participantId] = pc;
+
+    if (_localStream != null) {
+      for (var track in _localStream!.getTracks()) {
+        try {
+          await pc.addTrack(track, _localStream!);
+        } catch (e) {
+          _logger.e('Failed to add track: $e');
+        }
+      }
+    }
   }
 
   // ... (Include _handleOffer, _handleAnswer, _handleIceCandidate logic here essentially copied from your original file but removing setState calls)
@@ -1612,7 +1623,7 @@ class CallService {
     await pc?.close();
 
     _remoteStreams.remove(participantId);
-    _remoteStreamsController.sink.add(_remoteStreams);
+    _remoteStreamsController.add(_remoteStreams);
   }
 
   Future<void> _startBackgroundService(String roomName) async {

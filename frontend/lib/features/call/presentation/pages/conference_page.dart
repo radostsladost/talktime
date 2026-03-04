@@ -45,6 +45,10 @@ class _ConferencePageState extends State<ConferencePage> {
   late final IVideoRenderer _localRenderer;
   final Map<String, IVideoRenderer> _remoteRenderers = {};
   bool _isPresentationMode = false;
+
+  /// Bumped once after first layout when we have remote streams so remote tiles
+  /// are recreated and video displays (web: same effect as reopening split view).
+  int _remoteTilesKey = 0;
   String? _focusedParticipantId; // Optional: manually select who to focus
   bool _cam = false;
   bool _screenShare = false;
@@ -217,6 +221,7 @@ class _ConferencePageState extends State<ConferencePage> {
   }
 
   void _handleRemoteStreamsUpdate(Map<String, IMediaStream> streams) {
+    _logger.i('_handleRemoteStreamsUpdate');
     final activeIds = streams.keys.toSet();
     final currentIds = _remoteRenderers.keys.toSet();
 
@@ -226,6 +231,18 @@ class _ConferencePageState extends State<ConferencePage> {
     }
 
     for (final id in activeIds) {
+      try {
+        if (_remoteRenderers.containsKey(id)) {
+          final renderer = _remoteRenderers[id]!;
+          final newStream = streams[id];
+          renderer.srcObject = newStream;
+          return;
+        }
+      } catch (e) {
+        _logger.e('Error updating stream for $id: $e');
+        _remoteRenderers.remove(id);
+      }
+
       if (!_remoteRenderers.containsKey(id)) {
         final newRenderer = getWebRTCPlatform().createVideoRenderer();
         newRenderer.initialize().then((_) {
@@ -233,12 +250,6 @@ class _ConferencePageState extends State<ConferencePage> {
           if (mounted) setState(() {});
         });
         _remoteRenderers[id] = newRenderer;
-      } else {
-        final renderer = _remoteRenderers[id]!;
-        final newStream = streams[id];
-        if (!kIsWeb && renderer.srcObject != newStream) {
-          renderer.srcObject = newStream;
-        }
       }
     }
 
@@ -297,6 +308,16 @@ class _ConferencePageState extends State<ConferencePage> {
             initialData: _callService.remoteStreams,
             builder: (context, snapshot) {
               final streams = snapshot.data ?? {};
+              // Web: after first layout with remote streams, bump key so tiles
+              // are recreated (new renderers + stream). Replicates the "resize
+              // back / reopen split view" fix where video then appears.
+              if (kIsWeb && streams.isNotEmpty && _remoteTilesKey == 0) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted && _remoteTilesKey == 0) {
+                    setState(() => _remoteTilesKey = 1);
+                  }
+                });
+              }
               return _buildGrid(streams);
             },
           ),
@@ -404,7 +425,7 @@ class _ConferencePageState extends State<ConferencePage> {
 
       return Center(
         child: RemoteParticipantTile(
-          key: ValueKey(id),
+          key: ValueKey('${id}_$_remoteTilesKey'),
           participantId: id,
           stream: stream,
           username: user?.username ?? '???',
@@ -431,7 +452,7 @@ class _ConferencePageState extends State<ConferencePage> {
       final mainTile = Center(
         child: SizedBox.expand(
           child: RemoteParticipantTile(
-            key: ValueKey(focusedId),
+            key: ValueKey('${focusedId}_$_remoteTilesKey'),
             participantId: focusedId,
             stream: streams[focusedId]!,
             username: userInfoMap[focusedId]?.username ?? '???',
@@ -456,7 +477,7 @@ class _ConferencePageState extends State<ConferencePage> {
                   width: 80,
                   height: 100,
                   child: RemoteParticipantTile(
-                    key: ValueKey(id),
+                    key: ValueKey('${id}_$_remoteTilesKey'),
                     participantId: id,
                     stream: streams[id]!,
                     username: userInfoMap[id]?.username ?? '???',
@@ -502,7 +523,7 @@ class _ConferencePageState extends State<ConferencePage> {
                 child: AspectRatio(
                   aspectRatio: 1.0,
                   child: RemoteParticipantTile(
-                    key: ValueKey(id),
+                    key: ValueKey('${id}_$_remoteTilesKey'),
                     participantId: id,
                     stream: stream,
                     username: user?.username ?? '???',
