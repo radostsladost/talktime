@@ -309,12 +309,6 @@ class CallService {
     // CallKit: End call before cleanup
     _callKitEndCall();
 
-    for (var sub in _subscriptions) {
-      sub.cancel();
-    }
-    for (final sub in _subscriptions) {
-      await sub.cancel();
-    }
     for (final sub in _subscriptions) {
       await sub.cancel();
     }
@@ -402,75 +396,29 @@ class CallService {
       _isScreenSharing = newScreenShareValue ?? false;
       _isScreenSharingController.sink.add(_isScreenSharing);
 
-      IMediaStreamTrack? newVideoTrack;
-      IMediaStream? cachedVideoStream;
+      await _removeExistingVideoTracks();
+      _disposeCachedVideoStream();
 
-      if (_localStream != null) {
-        // Remove old video tracks
-        final oldVideoTracks = [..._localStream!.getVideoTracks()];
-        for (var track in oldVideoTracks) {
-          try {
-            await _localStream!.removeTrack(track);
-          } catch (_) {}
-          try {
-            track.stop();
-          } catch (_) {}
-        }
-      }
-
-      if (_cachedVideoStream != null) {
-        _cachedVideoStream?.dispose();
-        _cachedVideoStream = null;
-        _cachedVideoStreamController.sink.add(null);
-      }
-
-      if ((_isCameraOff && !_isScreenSharing) || forceStop == true) {
-        // _logger.i('_replaceVideoTrackInPeerConnections to null');
+      final turnOffVideo =
+          (_isCameraOff && !_isScreenSharing) || forceStop == true;
+      if (turnOffVideo) {
         _camStateController.add(!_isCameraOff);
         _isScreenSharingController.sink.add(_isScreenSharing);
         await _replaceVideoTrackInPeerConnections(null);
         return;
       }
 
-      if (_isScreenSharing) {
-        cachedVideoStream = await _getScreenStream(source?.id);
-      }
-      if (!_isScreenSharing || cachedVideoStream == null) {
-        _logger.i('no cachedVideoStream');
-        _isScreenSharing = false;
-        // Get camera stream and extract video track
-        cachedVideoStream = await _getCameraStream();
-      }
-
+      final cachedVideoStream = await _obtainVideoSource(source?.id);
       if (cachedVideoStream == null) {
-        _logger.e('Failed to get media stream');
-        ScaffoldMessenger.of(navigatorKey.currentContext!).showSnackBar(
-          const SnackBar(content: Text('Failed to get video device')),
-        );
-        if (!_isScreenSharing) {
-          _isCameraOff = true;
-          _camStateController.add(!_isCameraOff);
-          _isScreenSharingController.sink.add(_isScreenSharing);
-        }
-        await _replaceVideoTrackInPeerConnections(null);
+        await _onVideoSourceFailed();
         return;
       }
 
-      newVideoTrack = cachedVideoStream.getVideoTracks().isNotEmpty
+      final newVideoTrack = cachedVideoStream.getVideoTracks().isNotEmpty
           ? cachedVideoStream.getVideoTracks().first
           : null;
-
       if (newVideoTrack == null) {
-        _logger.e('Failed to get media stream (track)');
-        ScaffoldMessenger.of(navigatorKey.currentContext!).showSnackBar(
-          const SnackBar(content: Text('Failed to get video device (track)')),
-        );
-        if (!_isScreenSharing) {
-          _isCameraOff = true;
-          _isScreenSharingController.sink.add(_isScreenSharing);
-          _camStateController.add(!_isCameraOff);
-        }
-        await _replaceVideoTrackInPeerConnections(null);
+        await _onVideoTrackFailed();
         return;
       }
 
@@ -482,19 +430,15 @@ class CallService {
         '[diag] local new video track: enabled=${newVideoTrack.enabled} '
         'muted=${newVideoTrack.muted} label=${newVideoTrack.label}',
       );
-      // Replace video track in local stream
+
       if (_localStream != null) {
-        // Add new video track
         await _localStream!.addTrack(newVideoTrack);
-
-        // Replace track in all peer connections
         await _replaceVideoTrackInPeerConnections(newVideoTrack);
-
-        _logger.i('camera activated successfully');
         _cachedVideoStream = cachedVideoStream;
         _localStreamController.sink.add(_localStream);
         _cachedVideoStreamController.sink.add(_cachedVideoStream);
         _isScreenSharingController.sink.add(_isScreenSharing);
+        _logger.i('camera activated successfully');
       } else {
         _logger.e('_localStream is null');
         await _replaceVideoTrackInPeerConnections(null);
@@ -510,10 +454,64 @@ class CallService {
     }
   }
 
-  /// Replaces the video track in all peer connections and renegotiates.
-  /// Debug (web): If video sometimes fails after camera on/off or track change, check console for
-  /// JavaScriptError in SkwasmRenderer.createImageFromTextureSource / RTCVideoViewState.capture.
-  /// That can happen when the video view's frame callback runs before the new track is attached.
+  Future<void> _removeExistingVideoTracks() async {
+    if (_localStream == null) return;
+    for (final track in [..._localStream!.getVideoTracks()]) {
+      try {
+        await _localStream!.removeTrack(track);
+      } catch (_) {}
+      try {
+        track.stop();
+      } catch (_) {}
+    }
+  }
+
+  void _disposeCachedVideoStream() {
+    _cachedVideoStream?.dispose();
+    _cachedVideoStream = null;
+    _cachedVideoStreamController.sink.add(null);
+  }
+
+  Future<IMediaStream?> _obtainVideoSource(String? screenSourceId) async {
+    if (_isScreenSharing) {
+      final screenStream = await _getScreenStream(screenSourceId);
+      if (screenStream != null) return screenStream;
+    }
+    _logger.i('no cachedVideoStream');
+    _isScreenSharing = false;
+    return _getCameraStream();
+  }
+
+  Future<void> _onVideoSourceFailed() async {
+    _logger.e('Failed to get media stream');
+    ScaffoldMessenger.of(
+      navigatorKey.currentContext!,
+    ).showSnackBar(const SnackBar(content: Text('Failed to get video device')));
+    if (!_isScreenSharing) {
+      _isCameraOff = true;
+      _camStateController.add(!_isCameraOff);
+      _isScreenSharingController.sink.add(_isScreenSharing);
+    }
+    await _replaceVideoTrackInPeerConnections(null);
+  }
+
+  Future<void> _onVideoTrackFailed() async {
+    _logger.e('Failed to get media stream (track)');
+    ScaffoldMessenger.of(navigatorKey.currentContext!).showSnackBar(
+      const SnackBar(content: Text('Failed to get video device (track)')),
+    );
+    if (!_isScreenSharing) {
+      _isCameraOff = true;
+      _isScreenSharingController.sink.add(_isScreenSharing);
+      _camStateController.add(!_isCameraOff);
+    }
+    await _replaceVideoTrackInPeerConnections(null);
+  }
+
+  /// Replaces the video track in all peer connections, then runs a single
+  /// renegotiation (one offer per peer). Matches the pattern from flutter-webrtc
+  /// loopback_sample_unified_tracks: update all senders first, then negotiate once.
+  /// See: https://github.com/flutter-webrtc/flutter-webrtc/blob/main/example/lib/src/loopback_sample_unified_tracks.dart
   Future<void> _replaceVideoTrackInPeerConnections(
     IMediaStreamTrack? newTrack,
   ) async {
@@ -522,107 +520,51 @@ class CallService {
       return;
     }
 
+    // 1. Update track on every peer (replace or add); no offer yet.
     for (final entry in _peerConnections.entries) {
-      final participantId = entry.key;
-      final pc = entry.value;
-
       try {
-        final localAudioTracks = _localStream?.getAudioTracks().length ?? 0;
-        final localVideoTracks = _localStream?.getVideoTracks().length ?? 0;
-        _logger.i(
-          '[diag] video change for $participantId: newTrack=${newTrack != null}, '
-          'localTracks(a=$localAudioTracks,v=$localVideoTracks)',
-        );
-        final transceivers = await pc.getTransceivers();
-        _logger.i(
-          'Peer $participantId has ${transceivers.length} transceivers '
-          '(kinds: ${transceivers.map((t) => t.kind).toList()})',
-        );
-        _logger.i(
-          '[diag] pre-replace transceivers for $participantId: '
-          '${transceivers.map((t) => '${t.kind}(sender=${t.sender.track?.kind ?? "null"},receiver=${t.receiverTrack?.kind ?? "null"})').toList()}',
-        );
-
-        var replaced = false;
-        var wasNull = false;
-        for (final transceiver in transceivers) {
-          final senderKind = transceiver.sender.track?.kind;
-          final receiverKind = transceiver.receiverTrack?.kind;
-          final isVideoTransceiver =
-              transceiver.kind == 'video' ||
-              senderKind == 'video' ||
-              receiverKind == 'video';
-          if (isVideoTransceiver) {
-            wasNull = transceiver.sender.track == null;
-            await transceiver.sender.replaceTrack(newTrack);
-            _logger.i(
-              'Replaced video track on existing transceiver for peer '
-              '$participantId (kind=${transceiver.kind}, sender=$senderKind, '
-              'receiver=$receiverKind, wasNull=$wasNull, newTrack=${newTrack != null})',
-            );
-            // So the next offer has a=sendrecv for video (not recvonly). Otherwise the remote never sees our video.
-            if (newTrack != null) {
-              await transceiver.setDirectionToSendRecv();
-            }
-            replaced = true;
-            break;
-          }
-        }
-
-        if (!replaced && newTrack != null && _localStream != null) {
-          _logger.i(
-            'No video transceiver found for peer $participantId, adding track',
-          );
-          await pc.addTrack(newTrack, _localStream!);
-        }
-
-        final transceiversAfter = await pc.getTransceivers();
-        final hasVideoSenderAfter = transceiversAfter.any(
-          (t) => t.sender.track?.kind == 'video',
-        );
-        _logger.i(
-          '[diag] post-replace transceivers for $participantId: '
-          '${transceiversAfter.map((t) => '${t.kind}(sender=${t.sender.track?.kind ?? "null"},receiver=${t.receiverTrack?.kind ?? "null"})').toList()}',
-        );
-
-        // Some web peers expose a video transceiver but replaceTrack does not
-        // actually attach the sender track (sender stays null). Force-add track
-        // so the outgoing video sender definitely exists.
-        if (newTrack != null && _localStream != null && !hasVideoSenderAfter) {
-          // that is actually might be incorrect
-          _logger.w(
-            '[diag] no active video sender after replace for $participantId; forcing addTrack fallback',
-          );
-          try {
-            await pc.addTrack(newTrack, _localStream!);
-          } catch (e) {
-            _logger.e('[diag] failed to add track for $participantId: $e');
-          }
-
-          final transceiversFinal = await pc.getTransceivers();
-          _logger.i(
-            '[diag] post-fallback transceivers for $participantId: '
-            '${transceiversFinal.map((t) => '${t.kind}(sender=${t.sender.track?.kind ?? "null"},receiver=${t.receiverTrack?.kind ?? "null"})').toList()}',
-          );
-        }
-
-        if (newTrack != null) {
-          _logger.i(
-            'Renegotiating after video track change for peer $participantId',
-          );
-          // On web, a short delay can reduce race with RTCVideoView frame callback
-          // (createImageFromTextureSource may throw if capture runs during track swap).
-          if (kIsWeb) {
-            await Future<void>.delayed(const Duration(milliseconds: 80));
-          }
-          await _createAndSendOffers(
-            onlyParticipantId: participantId,
-            forceRenegotiation: true,
-          );
-        }
+        await _setVideoTrackForPeer(entry.key, entry.value, newTrack);
       } catch (e) {
-        _logger.e('Error replacing video track for peer $participantId: $e');
+        _logger.e('Error setting video track for peer ${entry.key}: $e');
       }
+    }
+
+    // 2. Single renegotiation after all track changes (avoids races from per-peer offers).
+    if (newTrack != null && kIsWeb) {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+    await _createAndSendOffers(forceRenegotiation: true);
+  }
+
+  /// Sets the video sender for one peer: replace on existing transceiver or addTrack if none.
+  /// Does not create an offer; caller does one renegotiation after all peers are updated.
+  Future<void> _setVideoTrackForPeer(
+    String participantId,
+    IPeerConnection pc,
+    IMediaStreamTrack? newTrack,
+  ) async {
+    final transceivers = await pc.getTransceivers();
+    IRTPTransceiver? videoTransceiver;
+    for (final t in transceivers) {
+      if (t.kind == 'video' ||
+          t.sender.track?.kind == 'video' ||
+          t.receiverTrack?.kind == 'video') {
+        videoTransceiver = t;
+        break;
+      }
+    }
+
+    if (videoTransceiver != null) {
+      await videoTransceiver.sender.replaceTrack(newTrack);
+      if (newTrack != null) {
+        await videoTransceiver.setDirectionToSendRecv();
+      }
+      return;
+    }
+
+    if (newTrack != null && _localStream != null) {
+      _logger.i('No video transceiver for $participantId, adding track');
+      await pc.addTrack(newTrack, _localStream!);
     }
   }
 
@@ -709,8 +651,6 @@ class CallService {
   }
 
   void toggleCamera({bool? forceValue}) {
-    final previousCameraState = _isCameraOff;
-
     if (forceValue != null) {
       // Force to a specific state: if forceValue is true, we want camera ON (not off)
       _isCameraOff = !forceValue;
@@ -1048,27 +988,33 @@ class CallService {
     final config = {
       'iceServers': [
         {
-          'urls': ['stun:v776682.macloud.host:5349'],
+          'urls': ['stun:radost.dev:5349'],
           "username": "turnserver",
           "credential":
               "959212b0629ad5c3e7d8c3f9ccc20771e5c3596370847f1fd85feda871e11d56",
         },
         {
-          'urls': ['turns:v776682.macloud.host:5349'],
+          'urls': ['turns:radost.dev:5349'],
           "username": "turnserver",
           "credential":
               "959212b0629ad5c3e7d8c3f9ccc20771e5c3596370847f1fd85feda871e11d56",
         },
         {
-          'urls': ['stun:stun.l.google.com:19302'],
-          "username": "",
-          "credential": "",
-        },
-        {
-          'urls': ['stun:stun.rtc.yandex.net'],
-          "username": "",
-          "credential": "",
-        },
+          'urls': ['turn:radost.dev:5349'],
+          "username": "turnserver",
+          "credential":
+              "959212b0629ad5c3e7d8c3f9ccc20771e5c3596370847f1fd85feda871e11d56",
+        }, 
+        // {
+        //   'urls': ['stun:stun.l.google.com:19302'],
+        //   "username": "",
+        //   "credential": "",
+        // },
+        // {
+        //   'urls': ['stun:stun.rtc.yandex.net'],
+        //   "username": "",
+        //   "credential": "",
+        // },
       ],
       'sdpSemantics': 'unified-plan',
     };
@@ -1088,41 +1034,7 @@ class CallService {
           '(stream tracks: ${stream.getTracks().length}, '
           'trackEnabled=${track.enabled}, trackMuted=${track.muted})',
         );
-        final existing = _remoteStreams[participantId];
-        // When the remote adds a track via renegotiation (e.g. turns on camera), the event often
-        // carries a stream with only the new track. Merge into existing stream so we keep audio
-        // and show the new video; otherwise replacing would lose the other track.
-        if (existing != null &&
-            stream.getTracks().length == 1 &&
-            (track.kind == 'video' && existing.getVideoTracks().isEmpty ||
-                track.kind == 'audio' && existing.getAudioTracks().isEmpty)) {
-          _logger.i(
-            'Merging new ${track.kind} track into existing stream for $participantId',
-          );
-          existing.addTrack(track).then((_) {
-            final current = _remoteStreams[participantId];
-            if (current != null) {
-              for (final t in current.getAudioTracks()) {
-                t.enabled = !_isSpeakerMuted;
-              }
-              if (!kIsWeb && Platform.isAndroid) {
-                _setAudioMode(3);
-              }
-              _remoteStreamsController.add(Map.from(_remoteStreams));
-            }
-          });
-          return;
-        }
-
-        _remoteStreams[participantId] = stream;
-        final current = _remoteStreams[participantId]!;
-        for (final t in current.getAudioTracks()) {
-          t.enabled = !_isSpeakerMuted;
-        }
-        if (!kIsWeb && Platform.isAndroid) {
-          _setAudioMode(3);
-        }
-        _remoteStreamsController.add(Map.from(_remoteStreams));
+        _onRemoteTrackWithStream(participantId, track, stream);
         return;
       }
 
@@ -1130,46 +1042,7 @@ class CallService {
         'Received remote stream {empty} track=${track.kind} '
         '(trackEnabled=${track.enabled}, trackMuted=${track.muted})',
       );
-      final existing = _remoteStreams[participantId];
-      if (existing == null) {
-        // No known stream for this participant yet: ignore empty-stream event.
-        // It is not a "participant left" signal and should not clear UI state.
-        _logger.w(
-          'Ignoring empty onTrack for $participantId with no existing stream',
-        );
-        return;
-      }
-
-      // Web can fire onTrack with empty streams during renegotiation.
-      // Keep existing participant stream and merge the track into it.
-      final hasKindAlready = track.kind == 'video'
-          ? existing.getVideoTracks().isNotEmpty
-          : existing.getAudioTracks().isNotEmpty;
-      if (hasKindAlready) {
-        _remoteStreamsController.add(Map.from(_remoteStreams));
-        return;
-      }
-
-      existing
-          .addTrack(track)
-          .then((_) {
-            _logger.i(
-              '[diag] merged ${track.kind} into existing stream for $participantId '
-              '(now a=${existing.getAudioTracks().length}, v=${existing.getVideoTracks().length})',
-            );
-            final current = _remoteStreams[participantId];
-            if (current != null) {
-              for (final t in current.getAudioTracks()) {
-                t.enabled = !_isSpeakerMuted;
-              }
-              _remoteStreamsController.add(Map.from(_remoteStreams));
-            }
-          })
-          .catchError((e) {
-            _logger.e(
-              '[diag] failed merging ${track.kind} into existing stream for $participantId: $e',
-            );
-          });
+      _onRemoteTrackWithoutStream(participantId, track);
     };
 
     pc.onIceCandidate = (candidate) {
@@ -1217,7 +1090,80 @@ class CallService {
     }
   }
 
-  // ... (Include _handleOffer, _handleAnswer, _handleIceCandidate logic here essentially copied from your original file but removing setState calls)
+  void _onRemoteTrackWithStream(
+    String participantId,
+    IMediaStreamTrack track,
+    IMediaStream stream,
+  ) {
+    final existing = _remoteStreams[participantId];
+    final singleTrackStream = stream.getTracks().length == 1;
+    final shouldMerge =
+        existing != null &&
+        singleTrackStream &&
+        (track.kind == 'video' && existing.getVideoTracks().isEmpty ||
+            track.kind == 'audio' && existing.getAudioTracks().isEmpty);
+
+    if (shouldMerge) {
+      _logger.i(
+        'Merging new ${track.kind} track into existing stream for $participantId',
+      );
+      existing
+          .addTrack(track)
+          .then((_) => _notifyRemoteStreamsUpdated(participantId));
+      return;
+    }
+
+    _remoteStreams[participantId] = stream;
+    _notifyRemoteStreamsUpdated(participantId);
+  }
+
+  void _onRemoteTrackWithoutStream(
+    String participantId,
+    IMediaStreamTrack track,
+  ) {
+    final existing = _remoteStreams[participantId];
+    if (existing == null) {
+      _logger.w(
+        'Ignoring empty onTrack for $participantId with no existing stream',
+      );
+      return;
+    }
+
+    final hasKindAlready = track.kind == 'video'
+        ? existing.getVideoTracks().isNotEmpty
+        : existing.getAudioTracks().isNotEmpty;
+    if (hasKindAlready) {
+      _remoteStreamsController.add(Map.from(_remoteStreams));
+      return;
+    }
+
+    existing
+        .addTrack(track)
+        .then((_) {
+          _logger.i(
+            '[diag] merged ${track.kind} into existing stream for $participantId '
+            '(now a=${existing.getAudioTracks().length}, v=${existing.getVideoTracks().length})',
+          );
+          _notifyRemoteStreamsUpdated(participantId);
+        })
+        .catchError((e) {
+          _logger.e(
+            '[diag] failed merging ${track.kind} into existing stream for $participantId: $e',
+          );
+        });
+  }
+
+  void _notifyRemoteStreamsUpdated(String participantId) {
+    final current = _remoteStreams[participantId];
+    if (current == null) return;
+    for (final t in current.getAudioTracks()) {
+      t.enabled = !_isSpeakerMuted;
+    }
+    if (!kIsWeb && Platform.isAndroid) {
+      _setAudioMode(3);
+    }
+    _remoteStreamsController.add(Map.from(_remoteStreams));
+  }
 
   /// Creates and sends offers to participants.
   /// [onlyParticipantId] - if set, only send to this participant
@@ -1240,8 +1186,9 @@ class CallService {
         await _createPeerConnection(id);
         pc = _peerConnections[id];
       }
+      if (pc == null) continue;
 
-      final state = await pc!.getSignalingState();
+      final state = await pc.getSignalingState();
       if (state == RTCSignalingStateDto.stable) {
         final offer = await pc.createOffer();
         _logger.i('[diag] local offer to $id: ${_summarizeSdp(offer.sdp)}');
@@ -1410,53 +1357,23 @@ class CallService {
     }
 
     final peerId = event.fromDeviceId;
-    if (_offersInProgressByPeer.contains(peerId)) {
-      _logger.w(
-        'Offer handling already in progress for $peerId; ignoring concurrent offer',
-      );
-      return;
-    }
-    final offerKey = '${peerId}|${event.sdp.hashCode}';
-    if (_offersInProgress.contains(offerKey)) {
-      _logger.w(
-        'Offer already being processed from $peerId; ignoring duplicate',
-      );
-      return;
-    }
-    if (_lastHandledOfferSdpByPeer[peerId] == event.sdp) {
-      _logger.w('Duplicate offer SDP from $peerId; ignoring');
-      return;
-    }
-    _offersInProgressByPeer.add(peerId);
-    _offersInProgress.add(offerKey);
+    if (!_claimOfferProcessing(peerId, event.sdp)) return;
 
     try {
       final pc = _peerConnections[peerId]!;
-      final state = await pc.getSignalingState();
-      final polite = _isPolite(peerId);
-
-      if (state == RTCSignalingStateDto.haveLocalOffer) {
-        if (!polite) {
-          _logger.w(
-            "Collision detected. Impolite peer ignoring offer from $peerId",
-          );
-          return;
-        } else {
-          _logger.i("Collision detected. Polite peer rolling back for $peerId");
-          await pc.setLocalDescription(
-            RTCSessionDescriptionDto(null, 'rollback'),
-          );
-        }
-      }
-
+      await _applyOfferCollisionRollbackIfNeeded(pc, peerId);
       final offer = RTCSessionDescriptionDto(event.sdp, 'offer');
       await pc.setRemoteDescription(offer);
+
       final stateAfterRemote = await pc.getSignalingState();
-      if (stateAfterRemote != RTCSignalingStateDto.haveRemoteOffer &&
-          stateAfterRemote != RTCSignalingStateDto.haveLocalPranswer) {
+      final canAnswer =
+          stateAfterRemote == RTCSignalingStateDto.haveRemoteOffer ||
+          stateAfterRemote == RTCSignalingStateDto.haveLocalPranswer;
+      if (!canAnswer) {
         _logger.w(
           'Skipping createAnswer for $peerId due to unexpected signaling state: $stateAfterRemote',
         );
+        _releaseOfferProcessing(peerId, event.sdp);
         return;
       }
 
@@ -1470,14 +1387,57 @@ class CallService {
         roomId: _currentRoomId!,
       );
       _lastHandledOfferSdpByPeer[peerId] = event.sdp;
-
-      // _logger.i('_handleOffer sendAnswer to ${event.fromDeviceId}');
+      _releaseOfferProcessing(peerId, event.sdp);
     } catch (e) {
       _logger.e('Error handling offer from $peerId: $e');
-    } finally {
-      _offersInProgress.remove(offerKey);
-      _offersInProgressByPeer.remove(peerId);
+      _releaseOfferProcessing(peerId, event.sdp);
     }
+  }
+
+  /// Returns true if this call may proceed with processing the offer; false if duplicate/concurrent.
+  bool _claimOfferProcessing(String peerId, String sdp) {
+    if (_offersInProgressByPeer.contains(peerId)) {
+      _logger.w(
+        'Offer handling already in progress for $peerId; ignoring concurrent offer',
+      );
+      return false;
+    }
+    final offerKey = '$peerId|${sdp.hashCode}';
+    if (_offersInProgress.contains(offerKey)) {
+      _logger.w(
+        'Offer already being processed from $peerId; ignoring duplicate',
+      );
+      return false;
+    }
+    if (_lastHandledOfferSdpByPeer[peerId] == sdp) {
+      _logger.w('Duplicate offer SDP from $peerId; ignoring');
+      return false;
+    }
+    _offersInProgressByPeer.add(peerId);
+    _offersInProgress.add(offerKey);
+    return true;
+  }
+
+  void _releaseOfferProcessing(String peerId, String sdp) {
+    _offersInProgress.remove('$peerId|${sdp.hashCode}');
+    _offersInProgressByPeer.remove(peerId);
+  }
+
+  Future<void> _applyOfferCollisionRollbackIfNeeded(
+    IPeerConnection pc,
+    String peerId,
+  ) async {
+    final state = await pc.getSignalingState();
+    if (state != RTCSignalingStateDto.haveLocalOffer) return;
+    final polite = _isPolite(peerId);
+    if (!polite) {
+      _logger.w(
+        "Collision detected. Impolite peer ignoring offer from $peerId",
+      );
+      return;
+    }
+    _logger.i("Collision detected. Polite peer rolling back for $peerId");
+    await pc.setLocalDescription(RTCSessionDescriptionDto(null, 'rollback'));
   }
 
   Future<void> _handleAnswer(SignalingAnswerEvent event) async {
@@ -1507,11 +1467,10 @@ class CallService {
         );
         return;
       }
+      if (state != RTCSignalingStateDto.haveLocalOffer) return;
 
-      if (state == RTCSignalingStateDto.haveLocalOffer) {
-        final answer = RTCSessionDescriptionDto(event.sdp, 'answer');
-        await pc.setRemoteDescription(answer);
-      }
+      final answer = RTCSessionDescriptionDto(event.sdp, 'answer');
+      await pc.setRemoteDescription(answer);
 
       if (_state == CallState.connecting) {
         _state = CallState.connected;
@@ -1533,30 +1492,20 @@ class CallService {
       return;
     }
 
-    try {
-      final pc = _peerConnections[event.fromDeviceId];
-      if (pc == null) {
-        _logger.e(
-          '_handleIceCandidate _peerConnection is null: ${event.fromDeviceId}',
-        );
-        return;
-      }
+    final pc = _peerConnections[event.fromDeviceId];
+    if (pc == null) {
+      _logger.e(
+        '_handleIceCandidate _peerConnection is null: ${event.fromDeviceId}',
+      );
+      return;
+    }
 
-      var remoteDesc = await pc.getRemoteDescription();
-      if (remoteDesc == null) {
-        int retries = 0;
-        while (retries < 3 && remoteDesc == null) {
-          retries++;
-          await Future.delayed(Duration(seconds: 1 * retries));
-          remoteDesc = await pc.getRemoteDescription();
-        }
-        if (remoteDesc == null) {
-          _logger.i(
-            '_handleIceCandidate remoteDesc is null: ${event.fromDeviceId}',
-          );
-          return;
-        }
-      }
+    try {
+      final remoteDesc = await _waitForRemoteDescription(
+        pc,
+        event.fromDeviceId,
+      );
+      if (remoteDesc == null) return;
 
       final candidate = RTCIceCandidateDto(
         event.candidate,
@@ -1567,6 +1516,21 @@ class CallService {
     } catch (e) {
       _logger.e('Error adding ICE candidate: $e');
     }
+  }
+
+  Future<dynamic> _waitForRemoteDescription(
+    IPeerConnection pc,
+    String peerId,
+  ) async {
+    var remoteDesc = await pc.getRemoteDescription();
+    for (var retries = 0; retries < 3 && remoteDesc == null; retries++) {
+      await Future.delayed(Duration(seconds: 1 * (retries + 1)));
+      remoteDesc = await pc.getRemoteDescription();
+    }
+    if (remoteDesc == null) {
+      _logger.i('_handleIceCandidate remoteDesc is null: $peerId');
+    }
+    return remoteDesc;
   }
 
   Future<void> _handleParticipantJoined(RoomParticipantUpdate event) async {

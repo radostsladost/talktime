@@ -7,7 +7,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:logger/web.dart';
 import 'package:talktime/core/navigation_manager.dart';
-import 'package:talktime/core/platform_utils_stub.dart';
 import 'package:talktime/features/call/data/call_service.dart';
 import 'package:talktime/features/call/data/signaling_service.dart';
 import 'package:talktime/features/call/presentation/utils/call_url_helper.dart';
@@ -128,7 +127,8 @@ class _ConferencePageState extends State<ConferencePage> {
 
   Future<void> _initRenderers() async {
     await _localRenderer.initialize();
-    _localRenderer.muted = true;
+    // _localRenderer.muted = false;
+    // _localRenderer.muteAudio = true;
   }
 
   void _setupListeners() {
@@ -231,29 +231,35 @@ class _ConferencePageState extends State<ConferencePage> {
     }
 
     for (final id in activeIds) {
-      try {
-        if (_remoteRenderers.containsKey(id)) {
-          final renderer = _remoteRenderers[id]!;
-          final newStream = streams[id];
-          renderer.srcObject = newStream;
-          return;
+      final newStream = streams[id];
+      if (_remoteRenderers.containsKey(id)) {
+        try {
+          _remoteRenderers[id]!.srcObject = newStream;
+        } catch (e) {
+          _logger.e('Error updating stream for $id: $e');
+          _remoteRenderers.remove(id);
+          _createAndAttachRemoteRenderer(id, newStream);
         }
-      } catch (e) {
-        _logger.e('Error updating stream for $id: $e');
-        _remoteRenderers.remove(id);
+        continue;
       }
-
-      if (!_remoteRenderers.containsKey(id)) {
-        final newRenderer = getWebRTCPlatform().createVideoRenderer();
-        newRenderer.initialize().then((_) {
-          if (!kIsWeb) newRenderer.srcObject = streams[id];
-          if (mounted) setState(() {});
-        });
-        _remoteRenderers[id] = newRenderer;
-      }
+      _createAndAttachRemoteRenderer(id, newStream);
     }
 
     setState(() {});
+  }
+
+  void _createAndAttachRemoteRenderer(String id, IMediaStream? stream) {
+    final newRenderer = getWebRTCPlatform().createVideoRenderer();
+    newRenderer.initialize().then((_) {
+      try {
+        newRenderer.srcObject = stream;
+        _remoteRenderers[id] = newRenderer;
+        if (mounted) setState(() {});
+      } catch (e) {
+        _logger.e('Error setting srcObject for $id: $e');
+        newRenderer.dispose();
+      }
+    });
   }
 
   void _presentationMode(String id, bool hasVideo) {
@@ -287,12 +293,13 @@ class _ConferencePageState extends State<ConferencePage> {
     _screenShareSubscription?.cancel();
     _speakerStateSubscription?.cancel();
     _speakerDeviceIdSubscription?.cancel();
-
     // Restore the browser URL when leaving the call
     CallUrlHelper.restoreUrl();
 
     _localRenderer.dispose();
-    for (var r in _remoteRenderers.values) r.dispose();
+    for (var r in _remoteRenderers.values) {
+      r.dispose();
+    }
     super.dispose();
   }
 
@@ -308,9 +315,6 @@ class _ConferencePageState extends State<ConferencePage> {
             initialData: _callService.remoteStreams,
             builder: (context, snapshot) {
               final streams = snapshot.data ?? {};
-              // Web: after first layout with remote streams, bump key so tiles
-              // are recreated (new renderers + stream). Replicates the "resize
-              // back / reopen split view" fix where video then appears.
               if (kIsWeb && streams.isNotEmpty && _remoteTilesKey == 0) {
                 WidgetsBinding.instance.addPostFrameCallback((_) {
                   if (mounted && _remoteTilesKey == 0) {
@@ -399,14 +403,8 @@ class _ConferencePageState extends State<ConferencePage> {
   }
 
   Widget _buildGrid(Map<String, IMediaStream> streams) {
-    // 1. Prepare data
     final participants = streams.keys.toList();
-    // Use the service to get user info (names)
     final userInfoMap = _callService.participantInfo;
-
-    // 2. Calculate Grid Dimensions
-    // Note: We don't include local participant in this count if it's in a separate PiP view.
-    // If you want local user in the grid, add +1 to totalTiles.
     final totalTiles = participants.length;
 
     if (totalTiles == 0) {
@@ -418,93 +416,114 @@ class _ConferencePageState extends State<ConferencePage> {
       );
     }
 
-    if (totalTiles == 1 && streams.length == 1) {
-      final id = participants.first;
-      final stream = streams[id]!;
-      final user = userInfoMap[id];
-
-      return Center(
-        child: RemoteParticipantTile(
-          key: ValueKey('${id}_$_remoteTilesKey'),
-          participantId: id,
-          stream: stream,
-          username: user?.username ?? '???',
-          onParticipantTap: (id, hasVideo) => _presentationMode(id, hasVideo),
-          fitInRect: _isPresentationMode,
-          speakerDeviceId: _callService.speakerDeviceId,
-        ),
+    if (totalTiles == 1) {
+      return _buildSingleParticipantLayout(
+        participants.first,
+        streams[participants.first]!,
+        userInfoMap[participants.first]?.username ?? '???',
       );
     }
 
     if (_isPresentationMode) {
-      String? focusedId = _focusedParticipantId;
-
-      if (focusedId == null || !streams.containsKey(focusedId)) {
-        // Fallback: pick first participant
-        focusedId = participants.first;
-      }
-
-      final otherParticipants = participants
-          .where((id) => id != focusedId)
-          .toList();
-
-      // Main large tile
-      final mainTile = Center(
-        child: SizedBox.expand(
-          child: RemoteParticipantTile(
-            key: ValueKey('${focusedId}_$_remoteTilesKey'),
-            participantId: focusedId,
-            stream: streams[focusedId]!,
-            username: userInfoMap[focusedId]?.username ?? '???',
-            onParticipantTap: (id, hasVideo) => _presentationMode(id, hasVideo),
-            fitInRect: true,
-            speakerDeviceId: _callService.speakerDeviceId,
-          ),
-        ),
-      );
-
-      // Small vertical list on the RIGHT side
-      final smallThumbnails = Positioned(
-        right: 16,
-        top: 80, // Leave space for controls & avoid overlap
-        bottom: 80, // Avoid bottom controls
-        child: SingleChildScrollView(
-          child: Column(
-            children: otherParticipants.map((id) {
-              return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: SizedBox(
-                  width: 80,
-                  height: 100,
-                  child: RemoteParticipantTile(
-                    key: ValueKey('${id}_$_remoteTilesKey'),
-                    participantId: id,
-                    stream: streams[id]!,
-                    username: userInfoMap[id]?.username ?? '???',
-                    onParticipantTap: (id, hasVideo) =>
-                        _presentationMode(id, hasVideo),
-                    speakerDeviceId: _callService.speakerDeviceId,
-                  ),
-                ),
-              );
-            }).toList(),
-          ),
-        ),
-      );
-
-      return Stack(children: [mainTile, smallThumbnails]);
+      return _buildPresentationLayout(participants, streams, userInfoMap);
     }
 
-    final columns = totalTiles <= 2
-        ? 1
-        : 2; // Simple logic: 1 col for 1-2 people, 2 for more
+    return _buildMultiParticipantGrid(participants, streams, userInfoMap);
+  }
+
+  Widget _buildSingleParticipantLayout(
+    String id,
+    IMediaStream stream,
+    String username,
+  ) {
+    return Center(
+      child: RemoteParticipantTile(
+        key: ValueKey('${id}_$_remoteTilesKey'),
+        participantId: id,
+        stream: stream,
+        username: username,
+        onParticipantTap: (id, hasVideo) => _presentationMode(id, hasVideo),
+        fitInRect: _isPresentationMode,
+        speakerDeviceId: _callService.speakerDeviceId,
+        renderer: _remoteRenderers[id],
+      ),
+    );
+  }
+
+  Widget _buildPresentationLayout(
+    List<String> participants,
+    Map<String, IMediaStream> streams,
+    Map<String, UserInfo> userInfoMap,
+  ) {
+    var focusedId = _focusedParticipantId;
+    if (focusedId == null || !streams.containsKey(focusedId)) {
+      focusedId = participants.first;
+    }
+    final otherParticipants = participants
+        .where((id) => id != focusedId)
+        .toList();
+
+    final mainTile = Center(
+      child: SizedBox.expand(
+        child: RemoteParticipantTile(
+          key: ValueKey('${focusedId}_$_remoteTilesKey'),
+          participantId: focusedId,
+          stream: streams[focusedId]!,
+          username: userInfoMap[focusedId]?.username ?? '???',
+          onParticipantTap: (id, hasVideo) => _presentationMode(id, hasVideo),
+          fitInRect: true,
+          speakerDeviceId: _callService.speakerDeviceId,
+          renderer: _remoteRenderers[focusedId],
+        ),
+      ),
+    );
+
+    final smallThumbnails = Positioned(
+      right: 16,
+      top: 80,
+      bottom: 80,
+      child: SingleChildScrollView(
+        child: Column(
+          children: otherParticipants
+              .map(
+                (id) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: SizedBox(
+                    width: 80,
+                    height: 100,
+                    child: RemoteParticipantTile(
+                      key: ValueKey('${id}_$_remoteTilesKey'),
+                      participantId: id,
+                      stream: streams[id]!,
+                      username: userInfoMap[id]?.username ?? '???',
+                      onParticipantTap: (id, hasVideo) =>
+                          _presentationMode(id, hasVideo),
+                      speakerDeviceId: _callService.speakerDeviceId,
+                      renderer: _remoteRenderers[id],
+                    ),
+                  ),
+                ),
+              )
+              .toList(),
+        ),
+      ),
+    );
+
+    return Stack(children: [mainTile, smallThumbnails]);
+  }
+
+  Widget _buildMultiParticipantGrid(
+    List<String> participants,
+    Map<String, IMediaStream> streams,
+    Map<String, UserInfo> userInfoMap,
+  ) {
+    const spacing = 8.0;
+    final columns = participants.length <= 2 ? 1 : 2;
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final spacing = 8.0;
-        // Max width available for tiles
         final maxWidth = constraints.maxWidth - (columns + 1) * spacing;
-        final tileWidth = min(maxWidth / columns, 400.0); // max 300px wide
+        final tileWidth = min(maxWidth / columns, 400.0);
 
         return Center(
           child: Wrap(
@@ -512,59 +531,47 @@ class _ConferencePageState extends State<ConferencePage> {
             crossAxisAlignment: WrapCrossAlignment.center,
             spacing: spacing,
             runSpacing: spacing,
-            children: participants.map((id) {
-              final stream = streams[id]!;
-              final user = userInfoMap[id];
-
-              return SizedBox(
-                width: tileWidth,
-                // We use a Key to ensure Flutter doesn't destroy/recreate
-                // the renderer unnecessarily when the list order changes.
-                child: AspectRatio(
-                  aspectRatio: 1.0,
-                  child: RemoteParticipantTile(
-                    key: ValueKey('${id}_$_remoteTilesKey'),
-                    participantId: id,
-                    stream: stream,
-                    username: user?.username ?? '???',
-                    onParticipantTap: (id, hasVideo) =>
-                        _presentationMode(id, hasVideo),
-                    speakerDeviceId: _callService.speakerDeviceId,
-                  ),
-                ),
-              );
-            }).toList(),
+            children: participants
+                .map(
+                  (id) => SizedBox(
+                    width: tileWidth,
+                    child: AspectRatio(
+                      aspectRatio: 1.0,
+                        child: RemoteParticipantTile(
+                          key: ValueKey('${id}_$_remoteTilesKey'),
+                          participantId: id,
+                          stream: streams[id]!,
+                          username: userInfoMap[id]?.username ?? '???',
+                          onParticipantTap: (id, hasVideo) =>
+                              _presentationMode(id, hasVideo),
+                          speakerDeviceId: _callService.speakerDeviceId,
+                          renderer: _remoteRenderers[id],
+                        ),
+                      ),
+                    ),
+                  )
+                .toList(),
           ),
         );
       },
     );
   }
 
-  void _toggleScreenSharing() async {
-    if (!kIsWeb &&
-        (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
-      if (_callService.isScreenSharingValue) {
-        _callService.toggleScreenShare().catchError((error) {
-          _logger.e('Error toggling screen share: $error');
-        });
-        return;
-      }
-
+  Future<void> _toggleScreenSharing() async {
+    if (_isDesktop && !_callService.isScreenSharingValue) {
       final selectedSource = await ScreenWindowPopupChooser.show(
         context: context,
       );
       if (selectedSource != null) {
-        _callService.toggleScreenShare(source: selectedSource).catchError((
-          error,
-        ) {
-          _logger.e('Error starting screen share: $error');
-        });
+        _callService
+            .toggleScreenShare(source: selectedSource)
+            .catchError((e) => _logger.e('Error starting screen share: $e'));
       }
-    } else {
-      _callService.toggleScreenShare().catchError((error) {
-        _logger.e('Error toggling screen share: $error');
-      });
+      return;
     }
+    _callService.toggleScreenShare().catchError(
+      (e) => _logger.e('Error toggling screen share: $e'),
+    );
   }
 
   bool get _isDesktop =>

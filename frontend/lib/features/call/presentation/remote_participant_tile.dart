@@ -18,6 +18,11 @@ class RemoteParticipantTile extends StatefulWidget {
   /// Output device for this participant's audio (desktop/web only).
   final String? speakerDeviceId;
 
+  /// When set, use this renderer for video (GetStream-style: one renderer per remote, owned by page).
+  /// Page sets srcObject when stream updates; tile just builds the view. Avoids freeze from
+  /// per-tile renderer + reattach logic.
+  final IVideoRenderer? renderer;
+
   const RemoteParticipantTile({
     super.key,
     required this.participantId,
@@ -27,6 +32,7 @@ class RemoteParticipantTile extends StatefulWidget {
     this.fitInRect,
     this.objectFit,
     this.speakerDeviceId,
+    this.renderer,
   });
 
   @override
@@ -35,6 +41,7 @@ class RemoteParticipantTile extends StatefulWidget {
 
 class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
   IVideoRenderer? _renderer;
+  bool _ownsRenderer = false;
   bool _isRendererReady = false;
   bool _hasActiveVideo = false;
   bool _hasActiveAudio = true;
@@ -43,18 +50,23 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
   int _videoTrackCount = 0;
   DateTime? _lastWebReattachAt;
   bool _rendererRecreateInProgress = false;
-  /// One-time reattach after first layout so the <video> element has size and displays (web).
   bool _didPostFrameReattach = false;
+
+  /// When using page-provided renderer (GetStream style), we don't create one.
+  bool get _useExternalRenderer => widget.renderer != null;
 
   @override
   void initState() {
     super.initState();
+    if (_useExternalRenderer) {
+      _updateTrackStatesInternal();
+      if (mounted) setState(() {});
+      return;
+    }
     _renderer = getWebRTCPlatform().createVideoRenderer();
+    _ownsRenderer = true;
     _initRenderer();
     _setupStreamListeners();
-
-    // Poll track states as a safety net for platforms where events are unreliable
-    // (e.g. Safari). Short interval at first, then backs off.
     _trackPollTimer = Timer.periodic(const Duration(seconds: 2), (_) {
       _checkAndUpdateTrackStates();
     });
@@ -247,6 +259,23 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
   @override
   void didUpdateWidget(covariant RemoteParticipantTile oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.renderer == null && widget.renderer != null) {
+      _trackPollTimer?.cancel();
+      _disposeStreamListeners();
+      if (_ownsRenderer) _renderer?.dispose();
+      _renderer = null;
+      _ownsRenderer = false;
+      _isRendererReady = false;
+    }
+    if (_useExternalRenderer) {
+      _updateTrackStatesInternal();
+      if (mounted) setState(() {});
+      if (oldWidget.speakerDeviceId != widget.speakerDeviceId &&
+          widget.speakerDeviceId != null) {
+        widget.renderer?.audioOutput(widget.speakerDeviceId!).catchError((_) {});
+      }
+      return;
+    }
     if (oldWidget.speakerDeviceId != widget.speakerDeviceId &&
         widget.speakerDeviceId != null) {
       _renderer?.audioOutput(widget.speakerDeviceId!).catchError((_) {});
@@ -256,10 +285,8 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
       _renderer?.srcObject = widget.stream;
       _setupStreamListeners();
       _updateTrackStates();
-      _didPostFrameReattach = false; // re-run post-frame reattach for new stream
+      _didPostFrameReattach = false;
     } else {
-      // Same stream — re-check tracks (new tracks may have been added via
-      // renegotiation without changing the stream object).
       _checkAndUpdateTrackStates();
     }
   }
@@ -268,17 +295,50 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
   void dispose() {
     _trackPollTimer?.cancel();
     _disposeStreamListeners();
-    _renderer?.dispose();
+    if (_ownsRenderer) _renderer?.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final hasVideo = _hasActiveVideo;
+    final hasVideo = _useExternalRenderer
+        ? (widget.stream.getVideoTracks().isNotEmpty &&
+            widget.stream.getVideoTracks().any((t) => t.enabled))
+        : _hasActiveVideo;
 
-    // Web: after first layout the <video> element has real size; reattach stream
-    // once so it actually displays (otherwise it can stay black until layout is
-    // recreated e.g. on window resize).
+    // GetStream-style: use page-owned renderer when provided (no reattach logic).
+    if (_useExternalRenderer && widget.renderer != null && hasVideo) {
+      return Material(
+        child: InkWell(
+          onTap: () => widget.onParticipantTap?.call(
+            widget.participantId,
+            hasVideo,
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                widget.renderer!.buildView(
+                  objectFit: widget.objectFit ??
+                      (widget.fitInRect == true
+                          ? VideoObjectFit.contain
+                          : VideoObjectFit.cover),
+                  mirror: false,
+                ),
+                ..._buildOverlays(
+                  hasVideo,
+                  widget.stream.getAudioTracks().isEmpty ||
+                      widget.stream.getAudioTracks().any((t) => t.enabled),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    // Tile-owned renderer path (legacy / fallback)
     if (kIsWeb &&
         _isRendererReady &&
         hasVideo &&
@@ -303,7 +363,6 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
           child: Stack(
             alignment: Alignment.center,
             children: [
-              // 1. Video Layer
               if (_isRendererReady && hasVideo && _renderer != null)
                 _renderer!.buildView(
                   objectFit: widget.objectFit ??
@@ -332,45 +391,43 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
                   ),
                 ),
 
-              // 2. Name Tag
-              Positioned(
-                bottom: 8,
-                left: 8,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.black54,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    widget.username,
-                    style: const TextStyle(color: Colors.white, fontSize: 12),
-                  ),
-                ),
-              ),
-
-              // 3. Audio Mute Indicator
-              if (!_hasActiveAudio)
-                const Positioned(
-                  top: 8,
-                  right: 8,
-                  child: Icon(Icons.mic_off, color: Colors.red, size: 20),
-                ),
-
-              // 4. Video Off Indicator (when in avatar mode)
-              if (!hasVideo)
-                const Positioned(
-                  top: 8,
-                  left: 8,
-                  child: Icon(Icons.videocam_off, color: Colors.red, size: 20),
-                ),
+              ..._buildOverlays(hasVideo, _hasActiveAudio),
             ],
           ),
         ),
       ),
     );
+  }
+
+  List<Widget> _buildOverlays(bool hasVideo, bool hasAudio) {
+    return [
+      Positioned(
+        bottom: 8,
+        left: 8,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: Colors.black54,
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Text(
+            widget.username,
+            style: const TextStyle(color: Colors.white, fontSize: 12),
+          ),
+        ),
+      ),
+      if (!hasAudio)
+        const Positioned(
+          top: 8,
+          right: 8,
+          child: Icon(Icons.mic_off, color: Colors.red, size: 20),
+        ),
+      if (!hasVideo)
+        const Positioned(
+          top: 8,
+          left: 8,
+          child: Icon(Icons.videocam_off, color: Colors.red, size: 20),
+        ),
+    ];
   }
 }

@@ -65,7 +65,10 @@ class MediaStreamWrapper implements IMediaStream {
 
   /// Get or create a wrapper for [s], preserving identity across onTrack calls.
   static MediaStreamWrapper wrap(webrtc.MediaStream s) {
-    return _streamCache.putIfAbsent(s.id, () => MediaStreamWrapper._internal(s));
+    return _streamCache.putIfAbsent(
+      s.id,
+      () => MediaStreamWrapper._internal(s),
+    );
   }
 
   void _wireNativeEvents() {
@@ -94,7 +97,8 @@ class MediaStreamWrapper implements IMediaStream {
   List<IMediaStreamTrack> getVideoTracks() =>
       _stream.getVideoTracks().map((t) => _wrapTrack(t)).toList();
 
-  static final Map<webrtc.MediaStreamTrack, MediaStreamTrackWrapper> _trackCache = {};
+  static final Map<webrtc.MediaStreamTrack, MediaStreamTrackWrapper>
+  _trackCache = {};
 
   static MediaStreamTrackWrapper _wrapTrack(webrtc.MediaStreamTrack t) {
     return _trackCache.putIfAbsent(t, () => MediaStreamTrackWrapper(t));
@@ -249,7 +253,9 @@ class PeerConnectionWrapper implements IPeerConnection {
   }
 
   @override
-  Future<void> setRemoteDescription(RTCSessionDescriptionDto description) async {
+  Future<void> setRemoteDescription(
+    RTCSessionDescriptionDto description,
+  ) async {
     await _pc.setRemoteDescription(
       webrtc.RTCSessionDescription(description.sdp, description.type),
     );
@@ -276,7 +282,9 @@ class PeerConnectionWrapper implements IPeerConnection {
   @override
   Future<RTCSessionDescriptionDto?> getRemoteDescription() async {
     final desc = await _pc.getRemoteDescription();
-    return desc == null ? null : RTCSessionDescriptionDto(desc.sdp, desc.type ?? '');
+    return desc == null
+        ? null
+        : RTCSessionDescriptionDto(desc.sdp, desc.type ?? '');
   }
 
   @override
@@ -319,8 +327,20 @@ class VideoRendererWrapper implements IVideoRenderer {
 
   @override
   set srcObject(IMediaStream? value) {
-    _renderer.srcObject =
-        value == null ? null : (value as MediaStreamWrapper).nativeStream;
+    _renderer.srcObject = value == null
+        ? null
+        : (value as MediaStreamWrapper).nativeStream;
+
+    if (value == null) {
+      print("remoteStream: null");
+      return;
+    }
+
+    var str = "remoteStream: ";
+    for (var t in (value as MediaStreamWrapper).nativeStream.getTracks()) {
+      str += "${t.label} ${t.kind}| ";
+    }
+    print(str);
   }
 
   @override
@@ -364,18 +384,26 @@ class FlutterWebRTCPlatform implements IWebRTCPlatform {
 
   @override
   Future<IMediaStream?> getUserMedia(Map<String, dynamic> constraints) async {
-    final stream = await webrtc.navigator.mediaDevices.getUserMedia(constraints);
+    final stream = await webrtc.navigator.mediaDevices.getUserMedia(
+      constraints,
+    );
     return MediaStreamWrapper(stream);
   }
 
   @override
-  Future<IMediaStream?> getDisplayMedia(Map<String, dynamic> constraints) async {
-    final stream = await webrtc.navigator.mediaDevices.getDisplayMedia(constraints);
+  Future<IMediaStream?> getDisplayMedia(
+    Map<String, dynamic> constraints,
+  ) async {
+    final stream = await webrtc.navigator.mediaDevices.getDisplayMedia(
+      constraints,
+    );
     return MediaStreamWrapper(stream);
   }
 
   @override
-  Future<IPeerConnection> createPeerConnection(Map<String, dynamic> config) async {
+  Future<IPeerConnection> createPeerConnection(
+    Map<String, dynamic> config,
+  ) async {
     final pc = await webrtc.createPeerConnection(config);
     final wrapper = PeerConnectionWrapper(pc);
 
@@ -393,11 +421,13 @@ class FlutterWebRTCPlatform implements IWebRTCPlatform {
     };
 
     pc.onIceCandidate = (candidate) {
-      wrapper.onIceCandidate?.call(RTCIceCandidateDto(
-        candidate.candidate,
-        candidate.sdpMid,
-        candidate.sdpMLineIndex,
-      ));
+      wrapper.onIceCandidate?.call(
+        RTCIceCandidateDto(
+          candidate.candidate,
+          candidate.sdpMid,
+          candidate.sdpMLineIndex,
+        ),
+      );
     };
 
     pc.onIceConnectionState = (state) {
@@ -411,11 +441,13 @@ class FlutterWebRTCPlatform implements IWebRTCPlatform {
   Future<List<MediaDeviceInfoDto>> enumerateDevices(String kind) async {
     final devices = await webrtc.Helper.enumerateDevices(kind);
     return devices
-        .map((d) => MediaDeviceInfoDto(
-              deviceId: d.deviceId,
-              label: d.label,
-              kind: d.kind ?? kind,
-            ))
+        .map(
+          (d) => MediaDeviceInfoDto(
+            deviceId: d.deviceId,
+            label: d.label,
+            kind: d.kind ?? kind,
+          ),
+        )
         .toList();
   }
 
@@ -432,11 +464,14 @@ class FlutterWebRTCPlatform implements IWebRTCPlatform {
         thumbnailSize: webrtc.ThumbnailSize(180, 80),
       );
       return sources
-          .map((s) => DesktopCapturerSourceDto(
-                id: s.id,
-                name: s.name,
-                thumbnailPath: '', // DesktopCapturerSource has thumbnail (bytes), not path
-              ))
+          .map(
+            (s) => DesktopCapturerSourceDto(
+              id: s.id,
+              name: s.name,
+              thumbnailPath:
+                  '', // DesktopCapturerSource has thumbnail (bytes), not path
+            ),
+          )
           .toList();
     } catch (_) {
       return [];
