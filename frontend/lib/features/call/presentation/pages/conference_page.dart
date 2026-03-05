@@ -232,11 +232,24 @@ class _ConferencePageState extends State<ConferencePage> {
 
     for (final id in activeIds) {
       final newStream = streams[id];
-      if (_remoteRenderers.containsKey(id)) {
-        try {
-          _remoteRenderers[id]!.srcObject = newStream;
-        } catch (e) {
-          _logger.e('Error updating stream for $id: $e');
+      if (newStream == null) continue;
+
+      final existingRenderer = _remoteRenderers[id];
+      if (existingRenderer != null) {
+        final currentStream = existingRenderer.srcObject;
+        if (identical(currentStream, newStream)) {
+          try {
+            existingRenderer.srcObject = newStream;
+          } catch (e) {
+            _logger.e('Error updating stream for $id: $e');
+            existingRenderer.dispose();
+            _remoteRenderers.remove(id);
+            _createAndAttachRemoteRenderer(id, newStream);
+          }
+        } else {
+          // New stream (e.g. same participant reconnected) — use a fresh renderer
+          // so the view doesn't stay black after disconnect/reconnect.
+          existingRenderer.dispose();
           _remoteRenderers.remove(id);
           _createAndAttachRemoteRenderer(id, newStream);
         }
