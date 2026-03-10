@@ -327,18 +327,22 @@ class VideoRendererWrapper implements IVideoRenderer {
 
   @override
   set srcObject(IMediaStream? value) {
+    final previous = _renderer.srcObject;
     _renderer.srcObject = value == null
         ? null
         : (value as MediaStreamWrapper).nativeStream;
 
+    final rendererId = _renderer.hashCode;
+    final prevId = previous?.id ?? 'null';
+
     if (value == null) {
-      print("remoteStream: null");
+      print('[diag-renderer] #$rendererId srcObject: $prevId -> null');
       return;
     }
 
-    var str = "remoteStream: ";
+    var str = '[diag-renderer] #$rendererId srcObject: $prevId -> ${value.id}; tracks=';
     for (var t in (value as MediaStreamWrapper).nativeStream.getTracks()) {
-      str += "${t.label} ${t.kind}| ";
+      str += '${t.label} ${t.kind}(enabled=${t.enabled},muted=${t.muted})| ';
     }
     print(str);
   }

@@ -30,6 +30,7 @@ class CallService {
   CallService._internal();
 
   final Logger _logger = Logger(output: ConsoleOutput());
+  int _remoteDiagSeq = 0;
   SignalingService? _signalingService;
   IWebRTCPlatform get _platform => getWebRTCPlatform();
 
@@ -983,7 +984,14 @@ class CallService {
   // =========================================================
 
   Future<void> _createPeerConnection(String participantId) async {
-    if (_peerConnections.containsKey(participantId)) return;
+    if (_peerConnections.containsKey(participantId)) {
+      _logger.i('[diag-pc] skip create for $participantId: already exists');
+      return;
+    }
+
+    _logger.i(
+      '[diag-pc] creating peer connection for $participantId (local=${_describeStream(_localStream)})',
+    );
 
     final config = {
       'iceServers': [
@@ -1024,24 +1032,19 @@ class CallService {
     pc.onTrack = (RTCTrackEventDto event) {
       final track = event.track;
       _logger.i(
-        'Received onTrack stream ${track.label} - ${event.streams.isNotEmpty}',
+        '[diag-onTrack] peer=$participantId streamCount=${event.streams.length} track=${_describeTrack(track)}',
       );
 
       if (event.streams.isNotEmpty) {
         final stream = event.streams.first;
         _logger.i(
-          'Received remote stream ${stream.id} track=${track.kind} '
-          '(stream tracks: ${stream.getTracks().length}, '
-          'trackEnabled=${track.enabled}, trackMuted=${track.muted})',
+          '[diag-onTrack] peer=$participantId with stream ${_describeStream(stream)}',
         );
         _onRemoteTrackWithStream(participantId, track, stream);
         return;
       }
 
-      _logger.i(
-        'Received remote stream {empty} track=${track.kind} '
-        '(trackEnabled=${track.enabled}, trackMuted=${track.muted})',
-      );
+      _logger.i('[diag-onTrack] peer=$participantId with empty streams list');
       _onRemoteTrackWithoutStream(participantId, track);
     };
 
@@ -1056,7 +1059,9 @@ class CallService {
     };
 
     pc.onIceConnectionState = (state) {
-      _logger.i('ICE connection state for $participantId: $state');
+      _logger.i(
+        '[diag-pc] ICE for $participantId: $state (remote=${_describeRemoteStreamsBrief()})',
+      );
 
       // Only reconnect on 'failed'. 'disconnected' is often temporary during renegotiation
       // (e.g. web turns on camera); tearing down the PC then causes black video for the receiver.
@@ -1083,6 +1088,9 @@ class CallService {
       for (var track in _localStream!.getTracks()) {
         try {
           await pc.addTrack(track, _localStream!);
+          _logger.i(
+            '[diag-pc] addTrack to $participantId: ${_describeTrack(track)} stream=${_localStream?.id}',
+          );
         } catch (e) {
           _logger.e('Failed to add track: $e');
         }
@@ -1103,13 +1111,21 @@ class CallService {
         (track.kind == 'video' && existing.getVideoTracks().isEmpty ||
             track.kind == 'audio' && existing.getAudioTracks().isEmpty);
 
+    _logger.i(
+      '[diag-remote] withStream peer=$participantId shouldMerge=$shouldMerge '
+      'incoming=${_describeStream(stream)} existing=${_describeStream(existing)}',
+    );
+
     if (shouldMerge) {
       _logger.i(
         'Merging new ${track.kind} track into existing stream for $participantId',
       );
       existing
           .addTrack(track)
-          .then((_) => _notifyRemoteStreamsUpdated(participantId));
+          .then((_) => _notifyRemoteStreamsUpdated(participantId))
+          .catchError((e) {
+            _logger.e('[diag-remote] merge failed for $participantId: $e');
+          });
       return;
     }
 
@@ -1132,6 +1148,10 @@ class CallService {
     final hasKindAlready = track.kind == 'video'
         ? existing.getVideoTracks().isNotEmpty
         : existing.getAudioTracks().isNotEmpty;
+    _logger.i(
+      '[diag-remote] withoutStream peer=$participantId track=${_describeTrack(track)} '
+      'hasKindAlready=$hasKindAlready existing=${_describeStream(existing)}',
+    );
     if (hasKindAlready) {
       _remoteStreamsController.add(Map.from(_remoteStreams));
       return;
@@ -1156,6 +1176,11 @@ class CallService {
   void _notifyRemoteStreamsUpdated(String participantId) {
     final current = _remoteStreams[participantId];
     if (current == null) return;
+    _remoteDiagSeq++;
+    _logger.i(
+      '[diag-remote] notify #$_remoteDiagSeq peer=$participantId current=${_describeStream(current)} '
+      'all={${_describeRemoteStreamsBrief()}}',
+    );
     for (final t in current.getAudioTracks()) {
       t.enabled = !_isSpeakerMuted;
     }
@@ -1782,5 +1807,25 @@ class CallService {
         await _pip.setup(options);
       }
     }
+  }
+
+  String _describeTrack(IMediaStreamTrack t) {
+    return '${t.kind}:${t.label ?? "?"}(enabled=${t.enabled},muted=${t.muted})';
+  }
+
+  String _describeStream(IMediaStream? s) {
+    if (s == null) return 'null';
+    final tracks = s.getTracks().map(_describeTrack).join(', ');
+    return 'id=${s.id} tracks=[${tracks.isEmpty ? '-' : tracks}]';
+  }
+
+  String _describeRemoteStreamsBrief() {
+    if (_remoteStreams.isEmpty) return '{}';
+    return _remoteStreams.entries
+        .map(
+          (e) =>
+              '${e.key}->{${e.value.id} a=${e.value.getAudioTracks().length} v=${e.value.getVideoTracks().length}}',
+        )
+        .join(' | ');
   }
 }

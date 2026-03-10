@@ -34,6 +34,7 @@ class WebSocketManager {
   bool _isConnecting = false;
   int _reconnectAttempts = 0;
   final Logger _logger = Logger(output: ConsoleOutput());
+  int _initializeSeq = 0;
   final ApiClient _apiClient = ApiClient();
   HubConnection? _hubConnection;
   Timer? _healthCheckTimer;
@@ -120,7 +121,11 @@ class WebSocketManager {
 
   /// Initialize WebSocket connection with SignalR
   Future<void> initialize() async {
-    _logger.i('Initializing WebSocket manager');
+    final initId = ++_initializeSeq;
+    _logger.i(
+      '[diag-ws] initialize#$initId start state=${_hubConnection?.state} isConnected=$_isConnected isConnecting=$_isConnecting',
+    );
+    _logger.i('[diag-ws] initialize#$initId caller=${_shortCallerStack()}');
 
     try {
       final deviceId = await _getOrCreateDeviceId();
@@ -130,13 +135,16 @@ class WebSocketManager {
       _logger.i('SignalR connection URL: $connectionUrl (deviceId: $deviceId)');
 
       if (_hubConnection?.state == HubConnectionState.Connected) {
-        _logger.i('SignalR already up');
+        _logger.i('[diag-ws] initialize#$initId SignalR already up');
         _startHealthCheckTimer();
         return;
       }
 
       if (_hubConnection != null &&
           (_hubConnection!.state != HubConnectionState.Connected)) {
+        _logger.i(
+          '[diag-ws] initialize#$initId stopping previous hub state=${_hubConnection!.state}',
+        );
         try {
           _hubConnection!.stop();
         } catch (_) {}
@@ -195,8 +203,10 @@ class WebSocketManager {
       _startHealthCheckTimer();
       _setupMessageHandlers();
       _notifyConnectionRestored();
+      _logger.i('[diag-ws] initialize#$initId done state=${_hubConnection?.state}');
     } catch (e) {
       _logger.e('Failed to initialize WebSocket: $e');
+      _logger.e('[diag-ws] initialize#$initId failed state=${_hubConnection?.state}');
     }
   }
 
@@ -995,6 +1005,12 @@ class WebSocketManager {
     _onOtherDevicesAvailableCallbacks.clear();
     _onConnectionRestoredCallbacks.clear();
     _conferenceParticipants.clear();
+  }
+
+  String _shortCallerStack() {
+    final lines = StackTrace.current.toString().split('\n');
+    if (lines.length <= 2) return lines.join(' | ');
+    return lines.skip(1).take(3).join(' | ');
   }
 }
 
