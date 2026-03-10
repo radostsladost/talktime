@@ -327,24 +327,9 @@ class VideoRendererWrapper implements IVideoRenderer {
 
   @override
   set srcObject(IMediaStream? value) {
-    final previous = _renderer.srcObject;
     _renderer.srcObject = value == null
         ? null
         : (value as MediaStreamWrapper).nativeStream;
-
-    final rendererId = _renderer.hashCode;
-    final prevId = previous?.id ?? 'null';
-
-    if (value == null) {
-      print('[diag-renderer] #$rendererId srcObject: $prevId -> null');
-      return;
-    }
-
-    var str = '[diag-renderer] #$rendererId srcObject: $prevId -> ${value.id}; tracks=';
-    for (var t in (value as MediaStreamWrapper).nativeStream.getTracks()) {
-      str += '${t.label} ${t.kind}(enabled=${t.enabled},muted=${t.muted})| ';
-    }
-    print(str);
   }
 
   @override
@@ -412,16 +397,12 @@ class FlutterWebRTCPlatform implements IWebRTCPlatform {
     final wrapper = PeerConnectionWrapper(pc);
 
     pc.onTrack = (webrtc.RTCTrackEvent event) {
-      final streams = event.streams;
-      final streamList = (streams ?? <webrtc.MediaStream>[])
+      final streamList = event.streams
           .map((s) => MediaStreamWrapper.wrap(s))
           .toList();
-      final track = event.track;
-      if (track != null) {
-        wrapper.onTrack?.call(
-          RTCTrackEventDto(streamList, MediaStreamWrapper._wrapTrack(track)),
-        );
-      }
+      wrapper.onTrack?.call(
+        RTCTrackEventDto(streamList, MediaStreamWrapper._wrapTrack(event.track)),
+      );
     };
 
     pc.onIceCandidate = (candidate) {

@@ -39,9 +39,6 @@ class ConferencePage extends StatefulWidget {
 class _ConferencePageState extends State<ConferencePage> {
   final CallService _callService = CallService(); // Singleton instance
   final Logger _logger = Logger(output: ConsoleOutput());
-  int _remoteUpdateSeq = 0;
-  int _rendererInitSeq = 0;
-  String? _lastGridDiag;
   final Set<String> _rendererInitPending = <String>{};
 
   // UI Specific Renderers (must be disposed when page closes)
@@ -230,17 +227,10 @@ class _ConferencePageState extends State<ConferencePage> {
   }
 
   void _handleRemoteStreamsUpdate(Map<String, IMediaStream> streams) {
-    _remoteUpdateSeq++;
     final activeIds = streams.keys.toSet();
     final currentIds = _remoteRenderers.keys.toSet();
-    _logger.i(
-      '[diag-ui] remote update #$_remoteUpdateSeq active=$activeIds currentRenderers=$currentIds key=$_remoteTilesKey pending=$_rendererInitPending',
-    );
 
     for (final id in currentIds.difference(activeIds)) {
-      _logger.i(
-        '[diag-ui] dispose renderer for removed participant $id renderer=${_diagRenderer(_remoteRenderers[id])}',
-      );
       _remoteRenderers[id]?.dispose();
       _remoteRenderers.remove(id);
       _rendererInitPending.remove(id);
@@ -251,20 +241,11 @@ class _ConferencePageState extends State<ConferencePage> {
       if (newStream == null) continue;
 
       final existingRenderer = _remoteRenderers[id];
-      _logger.i(
-        '[diag-ui] participant=$id stream=${_diagStream(newStream)} renderer=${_diagRenderer(existingRenderer)}',
-      );
-
       if (existingRenderer != null) {
         final currentStream = existingRenderer.srcObject;
         if (_sameStreamById(currentStream, newStream)) {
           try {
-            // Keep one renderer per participant, but rebind same stream id to recover
-            // after WebGL/context hiccups without recreating renderer.
             existingRenderer.srcObject = newStream;
-            _logger.i(
-              '[diag-ui] same stream id participant=$id stream=${newStream.id}; rebind renderer=#${existingRenderer.hashCode}',
-            );
           } catch (e) {
             _logger.e('Error rebinding same stream for $id: $e');
           }
@@ -272,9 +253,6 @@ class _ConferencePageState extends State<ConferencePage> {
         }
         try {
           existingRenderer.srcObject = newStream;
-          _logger.i(
-            '[diag-ui] updated renderer stream participant=$id renderer=#${existingRenderer.hashCode} new=${_diagStream(newStream)}',
-          );
         } catch (e) {
           _logger.e('Error updating stream for $id: $e');
           existingRenderer.dispose();
@@ -285,9 +263,6 @@ class _ConferencePageState extends State<ConferencePage> {
       }
 
       if (_rendererInitPending.contains(id)) {
-        _logger.i(
-          '[diag-ui] skip create renderer for $id: initialization already pending',
-        );
         continue;
       }
       _createAndAttachRemoteRenderer(id, newStream);
@@ -298,35 +273,21 @@ class _ConferencePageState extends State<ConferencePage> {
 
   void _createAndAttachRemoteRenderer(String id, IMediaStream? stream) {
     if (_rendererInitPending.contains(id)) {
-      _logger.i('[diag-ui] create skipped for $id: already pending');
       return;
     }
     _rendererInitPending.add(id);
 
-    final requestId = ++_rendererInitSeq;
     final newRenderer = getWebRTCPlatform().createVideoRenderer();
-    _logger.i(
-      '[diag-ui] create renderer request#$requestId participant=$id renderer=#${newRenderer.hashCode} stream=${_diagStream(stream)}',
-    );
     newRenderer.initialize().then((_) {
-      _logger.i(
-        '[diag-ui] renderer initialized request#$requestId participant=$id renderer=#${newRenderer.hashCode} mounted=$mounted',
-      );
       try {
         // If renderer was already attached while this one initialized, drop the late one.
         if (_remoteRenderers.containsKey(id)) {
-          _logger.i(
-            '[diag-ui] drop late renderer request#$requestId participant=$id renderer=#${newRenderer.hashCode}',
-          );
           newRenderer.dispose();
           return;
         }
 
         newRenderer.srcObject = stream;
         _remoteRenderers[id] = newRenderer;
-        _logger.i(
-          '[diag-ui] renderer attached request#$requestId participant=$id renderer=${_diagRenderer(newRenderer)} mapSize=${_remoteRenderers.length}',
-        );
         if (mounted) setState(() {});
       } catch (e) {
         _logger.e('Error setting srcObject for $id: $e');
@@ -335,9 +296,7 @@ class _ConferencePageState extends State<ConferencePage> {
         _rendererInitPending.remove(id);
       }
     }).catchError((e) {
-      _logger.e(
-        '[diag-ui] renderer init failed request#$requestId participant=$id renderer=#${newRenderer.hashCode}: $e',
-      );
+      _logger.e('Renderer init failed for $id: $e');
       _rendererInitPending.remove(id);
       newRenderer.dispose();
     });
@@ -398,12 +357,8 @@ class _ConferencePageState extends State<ConferencePage> {
             builder: (context, snapshot) {
               final streams = snapshot.data ?? {};
               if (kIsWeb && streams.isNotEmpty && _remoteTilesKey == 0) {
-                _logger.i(
-                  '[diag-ui] scheduling remoteTilesKey bump (web first layout) participants=${streams.keys.toList()}',
-                );
                 WidgetsBinding.instance.addPostFrameCallback((_) {
                   if (mounted && _remoteTilesKey == 0) {
-                    _logger.i('[diag-ui] apply remoteTilesKey bump 0->1');
                     setState(() => _remoteTilesKey = 1);
                   }
                 });
@@ -610,14 +565,6 @@ class _ConferencePageState extends State<ConferencePage> {
       builder: (context, constraints) {
         final maxWidth = constraints.maxWidth - (columns + 1) * spacing;
         final tileWidth = min(maxWidth / columns, 400.0);
-        final diag =
-            'participants=${participants.length} columns=$columns '
-            'constraints=${constraints.maxWidth.toStringAsFixed(1)}x${constraints.maxHeight.toStringAsFixed(1)} '
-            'tileWidth=${tileWidth.toStringAsFixed(1)} key=$_remoteTilesKey';
-        if (diag != _lastGridDiag) {
-          _lastGridDiag = diag;
-          _logger.i('[diag-ui] grid $diag');
-        }
 
         return Center(
           child: Wrap(
@@ -877,21 +824,6 @@ class _ConferencePageState extends State<ConferencePage> {
         ],
       ),
     );
-  }
-
-  String _diagStream(IMediaStream? stream) {
-    if (stream == null) return 'null';
-    final tracks = stream
-        .getTracks()
-        .map((t) => '${t.kind}:${t.label ?? "?"}(en=${t.enabled},m=${t.muted})')
-        .join(',');
-    return 'id=${stream.id}[${tracks.isEmpty ? '-' : tracks}]';
-  }
-
-  String _diagRenderer(IVideoRenderer? renderer) {
-    if (renderer == null) return 'null';
-    final src = renderer.srcObject;
-    return '#${renderer.hashCode} src=${src?.id ?? "null"}';
   }
 }
 

@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:talktime/features/call/webrtc/types.dart';
 import 'package:talktime/features/call/webrtc/webrtc_platform.dart';
 
 class RemoteParticipantTile extends StatefulWidget {
@@ -51,61 +50,13 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
   DateTime? _lastWebReattachAt;
   bool _rendererRecreateInProgress = false;
   bool _didPostFrameReattach = false;
-  String? _lastBuildDiag;
-  String? _lastLayoutDiag;
-  String? _lastPaintSizeDiag;
 
   /// When using page-provided renderer (GetStream style), we don't create one.
   bool get _useExternalRenderer => widget.renderer != null;
 
-  String _diagPrefix() =>
-      '[diag-tile] ${widget.participantId} stream=${widget.stream.id}';
-
-  String _diagRenderer(IVideoRenderer? renderer) {
-    if (renderer == null) return 'null';
-    return '#${renderer.hashCode} src=${renderer.srcObject?.id ?? "null"}';
-  }
-
-  void _diagBuild(String phase, bool hasVideo) {
-    final targetRenderer = _useExternalRenderer ? widget.renderer : _renderer;
-    final videoTracks = widget.stream.getVideoTracks();
-    final audioTracks = widget.stream.getAudioTracks();
-    final state =
-        '$phase ext=$_useExternalRenderer hasVideo=$hasVideo '
-        'ready=$_isRendererReady activeVideo=$_hasActiveVideo mutedAll=$_allVideoTracksMuted '
-        'vTracks=${videoTracks.length} aTracks=${audioTracks.length} '
-        'renderer=${_diagRenderer(targetRenderer)}';
-    if (state == _lastBuildDiag) return;
-    _lastBuildDiag = state;
-    debugPrint('${_diagPrefix()} build $state');
-  }
-
-  void _diagLayout(String phase, BoxConstraints constraints) {
-    final state =
-        '$phase constraints=${constraints.maxWidth.toStringAsFixed(1)}x${constraints.maxHeight.toStringAsFixed(1)}';
-    if (state == _lastLayoutDiag) return;
-    _lastLayoutDiag = state;
-    debugPrint('${_diagPrefix()} layout $state');
-  }
-
-  void _diagPaintSize(String phase) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      final size = context.size;
-      final state =
-          '$phase paintSize=${size == null ? 'null' : '${size.width.toStringAsFixed(1)}x${size.height.toStringAsFixed(1)}'}';
-      if (state == _lastPaintSizeDiag) return;
-      _lastPaintSizeDiag = state;
-      debugPrint('${_diagPrefix()} $state');
-    });
-  }
-
   @override
   void initState() {
     super.initState();
-    debugPrint(
-      '${_diagPrefix()} initState externalRenderer=$_useExternalRenderer renderer=${_diagRenderer(widget.renderer)}',
-    );
     if (_useExternalRenderer) {
       _updateTrackStatesInternal();
       if (mounted) setState(() {});
@@ -123,12 +74,8 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
   Future<void> _initRenderer() async {
     final renderer = _renderer;
     if (renderer == null) return;
-    debugPrint('${_diagPrefix()} init renderer start #${renderer.hashCode}');
     await renderer.initialize();
     renderer.srcObject = widget.stream;
-    debugPrint(
-      '${_diagPrefix()} init renderer attached ${_diagRenderer(renderer)} hasVideo=${widget.stream.getVideoTracks().isNotEmpty}',
-    );
     if (widget.speakerDeviceId != null) {
       try {
         if ((kIsWeb || !Platform.isAndroid) && widget.speakerDeviceId != null) {
@@ -145,11 +92,7 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
   }
 
   void _setupStreamListeners() {
-    debugPrint('${_diagPrefix()} setup stream listeners');
     widget.stream.onAddTrack = (_, track) {
-      debugPrint(
-        '${_diagPrefix()} onAddTrack kind=${track.kind} label=${track.label} enabled=${track.enabled} muted=${track.muted}',
-      );
       _setupTrackListeners(track);
       _checkAndUpdateTrackStates();
       // Force re-assign srcObject so the renderer picks up the new track.
@@ -165,9 +108,6 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
     };
 
     widget.stream.onRemoveTrack = (_, track) {
-      debugPrint(
-        '${_diagPrefix()} onRemoveTrack kind=${track.kind} label=${track.label}',
-      );
       _checkAndUpdateTrackStates();
     };
 
@@ -178,18 +118,10 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
 
   void _setupTrackListeners(IMediaStreamTrack track) {
     track.onMute = () {
-      debugPrint(
-        '[diag-tile] ${widget.participantId} ${track.kind} onMute '
-        'enabled=${track.enabled} muted=${track.muted}',
-      );
       if (mounted) _checkAndUpdateTrackStates();
     };
 
     track.onUnMute = () {
-      debugPrint(
-        '[diag-tile] ${widget.participantId} ${track.kind} onUnMute '
-        'enabled=${track.enabled} muted=${track.muted}',
-      );
       if (mounted) _checkAndUpdateTrackStates();
     };
 
@@ -210,10 +142,6 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
         oldAudio != _hasActiveAudio ||
         oldCount != _videoTrackCount;
     if (trackConfigChanged || oldMuted != _allVideoTracksMuted) {
-      debugPrint(
-        '[diag-tile] ${widget.participantId} state changed: '
-        'video=$_hasActiveVideo audio=$_hasActiveAudio videoCount=$_videoTrackCount',
-      );
       // Re-assign srcObject only when track configuration actually changed (new
       // track or count). Do NOT bounce srcObject when only muted state changes:
       // the <video> element can show frames while the track is still "muted"
@@ -244,9 +172,6 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
           now.difference(_lastWebReattachAt!) > const Duration(seconds: 8);
       if (canReattach) {
         _lastWebReattachAt = now;
-        debugPrint(
-          '[diag-tile] ${widget.participantId} web muted-video renderer recreate (delayed fallback)',
-        );
         unawaited(_recreateRenderer());
       }
     }
@@ -257,9 +182,6 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
     _rendererRecreateInProgress = true;
     final oldRenderer = _renderer;
     final newRenderer = getWebRTCPlatform().createVideoRenderer();
-    debugPrint(
-      '${_diagPrefix()} recreate renderer old=${_diagRenderer(oldRenderer)} new=#${newRenderer.hashCode}',
-    );
     try {
       await newRenderer.initialize();
       newRenderer.srcObject = widget.stream;
@@ -274,10 +196,8 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
       _isRendererReady = true;
       setState(() {});
       oldRenderer?.dispose();
-      debugPrint('${_diagPrefix()} recreate renderer success ${_diagRenderer(newRenderer)}');
     } catch (_) {
       newRenderer.dispose();
-      debugPrint('${_diagPrefix()} recreate renderer failed');
     } finally {
       _rendererRecreateInProgress = false;
     }
@@ -323,11 +243,6 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
   @override
   void didUpdateWidget(covariant RemoteParticipantTile oldWidget) {
     super.didUpdateWidget(oldWidget);
-    debugPrint(
-      '${_diagPrefix()} didUpdateWidget oldStream=${oldWidget.stream.id} newStream=${widget.stream.id} '
-      'oldExternal=${oldWidget.renderer != null} newExternal=${widget.renderer != null} '
-      'localRenderer=${_diagRenderer(_renderer)} externalRenderer=${_diagRenderer(widget.renderer)}',
-    );
     if (oldWidget.renderer == null && widget.renderer != null) {
       _trackPollTimer?.cancel();
       _disposeStreamListeners();
@@ -343,9 +258,6 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
           widget.speakerDeviceId != null) {
         widget.renderer?.audioOutput(widget.speakerDeviceId!).catchError((_) {});
       }
-      debugPrint(
-        '${_diagPrefix()} external renderer path active renderer=${_diagRenderer(widget.renderer)} hasVideo=${widget.stream.getVideoTracks().isNotEmpty}',
-      );
       return;
     }
     if (oldWidget.speakerDeviceId != widget.speakerDeviceId &&
@@ -365,7 +277,6 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
 
   @override
   void dispose() {
-    debugPrint('${_diagPrefix()} dispose ownsRenderer=$_ownsRenderer renderer=${_diagRenderer(_renderer)}');
     _trackPollTimer?.cancel();
     _disposeStreamListeners();
     if (_ownsRenderer) _renderer?.dispose();
@@ -379,43 +290,35 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
             widget.stream.getVideoTracks().any((t) => t.enabled))
         : _hasActiveVideo;
 
-    _diagBuild('enter', hasVideo);
-
     // GetStream-style: use page-owned renderer when provided (no reattach logic).
     if (_useExternalRenderer && widget.renderer != null && hasVideo) {
-      return LayoutBuilder(
-        builder: (context, constraints) {
-          _diagLayout('external', constraints);
-          _diagPaintSize('external');
-          return Material(
-            child: InkWell(
-              onTap: () => widget.onParticipantTap?.call(
-                widget.participantId,
-                hasVideo,
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    widget.renderer!.buildView(
-                      objectFit: widget.objectFit ??
-                          (widget.fitInRect == true
-                              ? VideoObjectFit.contain
-                              : VideoObjectFit.cover),
-                      mirror: false,
-                    ),
-                    ..._buildOverlays(
-                      hasVideo,
-                      widget.stream.getAudioTracks().isEmpty ||
-                          widget.stream.getAudioTracks().any((t) => t.enabled),
-                    ),
-                  ],
+      return Material(
+        child: InkWell(
+          onTap: () => widget.onParticipantTap?.call(
+            widget.participantId,
+            hasVideo,
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                widget.renderer!.buildView(
+                  objectFit: widget.objectFit ??
+                      (widget.fitInRect == true
+                          ? VideoObjectFit.contain
+                          : VideoObjectFit.cover),
+                  mirror: false,
                 ),
-              ),
+                ..._buildOverlays(
+                  hasVideo,
+                  widget.stream.getAudioTracks().isEmpty ||
+                      widget.stream.getAudioTracks().any((t) => t.enabled),
+                ),
+              ],
             ),
-          );
-        },
+          ),
+        ),
       );
     }
 
@@ -433,56 +336,50 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
       });
     }
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        _diagLayout('local', constraints);
-        _diagPaintSize('local');
-        return Material(
-          child: InkWell(
-            onTap: () => widget.onParticipantTap?.call(
-              widget.participantId,
-              _isRendererReady && hasVideo,
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  if (_isRendererReady && hasVideo && _renderer != null)
-                    _renderer!.buildView(
-                      objectFit: widget.objectFit ??
-                          (widget.fitInRect == true
-                              ? VideoObjectFit.contain
-                              : VideoObjectFit.cover),
-                      mirror: false,
-                    )
-                  else
-                    Container(
-                      color: Colors.grey[800],
-                      child: Center(
-                        child: CircleAvatar(
-                          radius: 30,
-                          backgroundColor: Colors.deepPurple,
-                          child: Text(
-                            widget.username.isNotEmpty
-                                ? widget.username.substring(0, 1).toUpperCase()
-                                : '?',
-                            style: const TextStyle(
-                              fontSize: 24,
-                              color: Colors.white,
-                            ),
-                          ),
+    return Material(
+      child: InkWell(
+        onTap: () => widget.onParticipantTap?.call(
+          widget.participantId,
+          _isRendererReady && hasVideo,
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              if (_isRendererReady && hasVideo && _renderer != null)
+                _renderer!.buildView(
+                  objectFit: widget.objectFit ??
+                      (widget.fitInRect == true
+                          ? VideoObjectFit.contain
+                          : VideoObjectFit.cover),
+                  mirror: false,
+                )
+              else
+                Container(
+                  color: Colors.grey[800],
+                  child: Center(
+                    child: CircleAvatar(
+                      radius: 30,
+                      backgroundColor: Colors.deepPurple,
+                      child: Text(
+                        widget.username.isNotEmpty
+                            ? widget.username.substring(0, 1).toUpperCase()
+                            : '?',
+                        style: const TextStyle(
+                          fontSize: 24,
+                          color: Colors.white,
                         ),
                       ),
                     ),
+                  ),
+                ),
 
-                  ..._buildOverlays(hasVideo, _hasActiveAudio),
-                ],
-              ),
-            ),
+              ..._buildOverlays(hasVideo, _hasActiveAudio),
+            ],
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 
