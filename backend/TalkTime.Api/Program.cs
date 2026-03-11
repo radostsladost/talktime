@@ -154,15 +154,22 @@ app.UseHttpsRedirection();
 // Serve static files from wwwroot (uploads/images/... served at /uploads/images/...)
 // When API is behind a base path (e.g. /api), also serve at /api/uploads/images/...
 var webRootPath = Path.Combine(builder.Environment.ContentRootPath, "wwwroot");
-if (!Directory.Exists(webRootPath))
-    Directory.CreateDirectory(webRootPath);
+var uploadsImagesPath = Path.Combine(webRootPath, "uploads", "images");
+if (!Directory.Exists(uploadsImagesPath))
+    Directory.CreateDirectory(uploadsImagesPath);
 
-app.UseStaticFiles(); // /uploads/images/x.png -> wwwroot/uploads/images/x.png
+var webRootFileProvider = new PhysicalFileProvider(webRootPath);
+
+app.UseStaticFiles(new StaticFileOptions
+{
+    FileProvider = webRootFileProvider,
+    RequestPath = ""
+}); // /uploads/images/x.png -> wwwroot/uploads/images/x.png
 
 app.UseStaticFiles(new StaticFileOptions
 {
     RequestPath = "/api",
-    FileProvider = new PhysicalFileProvider(webRootPath)
+    FileProvider = webRootFileProvider
 }); // /api/uploads/images/x.png -> wwwroot/uploads/images/x.png
 
 // Use CORS before authentication
