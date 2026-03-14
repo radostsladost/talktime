@@ -393,7 +393,6 @@ class _ChatSplitViewState extends State<ChatSplitView>
           if (_callRoomId != null && _callConversation != null)
             _buildInCallBanner(),
           _buildSavedMessagesEntry(),
-          const Divider(height: 1),
           Expanded(child: _buildConversationList()),
         ],
       ),
@@ -428,7 +427,6 @@ class _ChatSplitViewState extends State<ChatSplitView>
             _buildInCallBanner(),
           // Saved Messages entry
           _buildSavedMessagesEntry(),
-          const Divider(height: 1),
           // Conversations list
           Expanded(child: _buildConversationList()),
         ],
@@ -494,29 +492,9 @@ class _ChatSplitViewState extends State<ChatSplitView>
 
     return Material(
       color: isSelected
-          ? Theme.of(context).colorScheme.primaryContainer.withOpacity(0.3)
-          : null,
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        leading: CircleAvatar(
-          backgroundColor: Theme.of(
-            context,
-          ).colorScheme.primary.withOpacity(0.1),
-          foregroundColor: Theme.of(context).colorScheme.primary,
-          child: const Icon(Icons.bookmark),
-        ),
-        title: Text(
-          'Saved Messages',
-          style: Theme.of(
-            context,
-          ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
-        ),
-        subtitle: Text(
-          'Your bookmarks and notes',
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
-          ),
-        ),
+          ? Theme.of(context).colorScheme.primaryContainer.withOpacity(0.35)
+          : Colors.transparent,
+      child: InkWell(
         onTap: () {
           if (_isWideScreen) {
             setState(() {
@@ -527,6 +505,63 @@ class _ChatSplitViewState extends State<ChatSplitView>
             NavigationManager().openSavedMessages();
           }
         },
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  CircleAvatar(
+                    radius: 28,
+                    backgroundColor:
+                        Theme.of(context).colorScheme.primaryContainer,
+                    foregroundColor:
+                        Theme.of(context).colorScheme.onPrimaryContainer,
+                    child: const Icon(Icons.bookmark, size: 22),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'Saved Messages',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w600),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          'Your bookmarks and notes',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodyMedium
+                              ?.copyWith(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant,
+                              ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Divider(
+              height: 1,
+              thickness: 0.5,
+              indent: 72,
+              color: Theme.of(context).dividerColor,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -560,7 +595,7 @@ class _ChatSplitViewState extends State<ChatSplitView>
 
         return ListView.builder(
           itemCount: conversations.length,
-          padding: const EdgeInsets.symmetric(vertical: 8),
+          padding: EdgeInsets.zero,
           itemBuilder: (context, index) {
             final convo = conversations[index];
             final name =
@@ -587,114 +622,181 @@ class _ChatSplitViewState extends State<ChatSplitView>
             final inCallParticipants = WebSocketManager()
                 .getConferenceParticipants(convo.id);
 
-            return Card(
-              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-              color: isSelected
-                  ? Theme.of(
-                      context,
-                    ).colorScheme.primaryContainer.withOpacity(0.3)
-                  : null,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-                side: BorderSide(
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Material(
                   color: isSelected
-                      ? Theme.of(context).colorScheme.primary.withOpacity(0.5)
-                      : Theme.of(context).dividerColor.withOpacity(0.2),
-                ),
-              ),
-              clipBehavior: Clip.hardEdge,
-              child: ListTile(
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 14,
-                ),
-                leading: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    CircleAvatar(
-                      backgroundColor: Theme.of(
-                        context,
-                      ).colorScheme.primary.withOpacity(0.1),
-                      foregroundColor: Theme.of(context).colorScheme.primary,
-                      child: Text(
-                        name.isEmpty ? "?" : name[0].toUpperCase(),
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(
-                              fontWeight: FontWeight.w600,
-                              fontSize: 18,
-                            ),
+                      ? Theme.of(context)
+                          .colorScheme
+                          .primaryContainer
+                          .withOpacity(0.35)
+                      : Colors.transparent,
+                  child: InkWell(
+                    onTap: () => _openChat(convo),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 10,
                       ),
-                    ),
-                    if (unreadCount > 0)
-                      Positioned(
-                        right: -4,
-                        top: -4,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Theme.of(context).colorScheme.error,
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: Theme.of(context).colorScheme.surface,
-                              width: 1.5,
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          // Avatar
+                          CircleAvatar(
+                            radius: 28,
+                            backgroundColor: Theme.of(context)
+                                .colorScheme
+                                .primaryContainer,
+                            foregroundColor: Theme.of(context)
+                                .colorScheme
+                                .onPrimaryContainer,
+                            child: Text(
+                              name.isEmpty ? '?' : name[0].toUpperCase(),
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleLarge
+                                  ?.copyWith(fontWeight: FontWeight.w600),
                             ),
                           ),
-                          constraints: const BoxConstraints(
-                            minWidth: 20,
-                            minHeight: 20,
-                          ),
-                          alignment: Alignment.center,
-                          child: Text(
-                            unreadCount > 99 ? '99+' : '$unreadCount',
-                            style: Theme.of(context).textTheme.labelSmall
-                                ?.copyWith(
-                                  color: Theme.of(context).colorScheme.onError,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 11,
+                          const SizedBox(width: 12),
+                          // Content
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                // Row 1: name + time
+                                Row(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.baseline,
+                                  textBaseline: TextBaseline.alphabetic,
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        name,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .titleMedium
+                                            ?.copyWith(
+                                              fontWeight: unreadCount > 0
+                                                  ? FontWeight.w700
+                                                  : FontWeight.w600,
+                                            ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      _formatTimeAgo(lastMessage.sentAt),
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.copyWith(
+                                            color: unreadCount > 0
+                                                ? Theme.of(context)
+                                                    .colorScheme
+                                                    .primary
+                                                : Theme.of(context)
+                                                    .colorScheme
+                                                    .onSurfaceVariant,
+                                            fontWeight: unreadCount > 0
+                                                ? FontWeight.w600
+                                                : FontWeight.normal,
+                                          ),
+                                    ),
+                                  ],
                                 ),
+                                const SizedBox(height: 3),
+                                // Row 2: in-call + preview + unread badge
+                                if (inCallParticipants.isNotEmpty)
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: 3),
+                                    child: _buildInCallAvatars(
+                                        context, inCallParticipants),
+                                  ),
+                                Row(
+                                  crossAxisAlignment: CrossAxisAlignment.center,
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        lastMessage.content,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodyMedium
+                                            ?.copyWith(
+                                              color: unreadCount > 0
+                                                  ? Theme.of(context)
+                                                      .colorScheme
+                                                      .onSurface
+                                                  : Theme.of(context)
+                                                      .colorScheme
+                                                      .onSurfaceVariant,
+                                              fontWeight: unreadCount > 0
+                                                  ? FontWeight.w500
+                                                  : FontWeight.normal,
+                                            ),
+                                      ),
+                                    ),
+                                    if (unreadCount > 0)
+                                      Padding(
+                                        padding:
+                                            const EdgeInsets.only(left: 8),
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 7,
+                                            vertical: 3,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .primary,
+                                            borderRadius:
+                                                BorderRadius.circular(20),
+                                          ),
+                                          constraints: const BoxConstraints(
+                                            minWidth: 22,
+                                            minHeight: 22,
+                                          ),
+                                          alignment: Alignment.center,
+                                          child: Text(
+                                            unreadCount > 99
+                                                ? '99+'
+                                                : '$unreadCount',
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .labelSmall
+                                                ?.copyWith(
+                                                  color: Theme.of(context)
+                                                      .colorScheme
+                                                      .onPrimary,
+                                                  fontWeight: FontWeight.bold,
+                                                  fontSize: 11,
+                                                ),
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
-                      ),
-                  ],
-                ),
-                title: Text(
-                  name,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                subtitle: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (inCallParticipants.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 4),
-                        child: _buildInCallAvatars(context, inCallParticipants),
-                      ),
-                    Text(
-                      lastMessage.content,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ],
                       ),
                     ),
-                  ],
-                ),
-                trailing: Text(
-                  _formatTimeAgo(lastMessage.sentAt),
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(
-                      context,
-                    ).colorScheme.onSurface.withOpacity(0.6),
                   ),
                 ),
-                onTap: () => _openChat(convo),
-              ),
+                // Indented divider aligned with text content
+                Divider(
+                  height: 1,
+                  thickness: 0.5,
+                  indent: 72, // 16 padding + 56 avatar
+                  color: Theme.of(context).dividerColor,
+                ),
+              ],
             );
           },
         );
