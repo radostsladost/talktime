@@ -57,18 +57,22 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
   @override
   void initState() {
     super.initState();
+
+    // Keep track state fresh for both external and local renderer paths.
+    _setupStreamListeners();
+    _trackPollTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      _checkAndUpdateTrackStates();
+    });
+
     if (_useExternalRenderer) {
       _updateTrackStatesInternal();
       if (mounted) setState(() {});
       return;
     }
+
     _renderer = getWebRTCPlatform().createVideoRenderer();
     _ownsRenderer = true;
     _initRenderer();
-    _setupStreamListeners();
-    _trackPollTimer = Timer.periodic(const Duration(seconds: 2), (_) {
-      _checkAndUpdateTrackStates();
-    });
   }
 
   Future<void> _initRenderer() async {
@@ -244,7 +248,6 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
   void didUpdateWidget(covariant RemoteParticipantTile oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.renderer == null && widget.renderer != null) {
-      _trackPollTimer?.cancel();
       _disposeStreamListeners();
       if (_ownsRenderer) _renderer?.dispose();
       _renderer = null;
@@ -252,6 +255,7 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
       _isRendererReady = false;
     }
     if (_useExternalRenderer) {
+      _setupStreamListeners();
       _updateTrackStatesInternal();
       if (mounted) setState(() {});
       if (oldWidget.speakerDeviceId != widget.speakerDeviceId &&
@@ -285,10 +289,7 @@ class _RemoteParticipantTileState extends State<RemoteParticipantTile> {
 
   @override
   Widget build(BuildContext context) {
-    final hasVideo = _useExternalRenderer
-        ? (widget.stream.getVideoTracks().isNotEmpty &&
-            widget.stream.getVideoTracks().any((t) => t.enabled))
-        : _hasActiveVideo;
+    final hasVideo = _hasActiveVideo && !_allVideoTracksMuted;
 
     // GetStream-style: use page-owned renderer when provided (no reattach logic).
     if (_useExternalRenderer && widget.renderer != null && hasVideo) {

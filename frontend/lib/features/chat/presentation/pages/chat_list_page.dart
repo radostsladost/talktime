@@ -104,7 +104,7 @@ class _ChatListPageState extends State<ChatListPage>
         if (lastMessage != null) _lastMessageMap[conversation.id] = lastMessage;
       });
     }
-    WebSocketManager().initialize().then((_) {
+    WebSocketManager().onConnectionRestored(() {
       for (final c in conversations) {
         WebSocketManager().requestRoomParticipants(c.id);
       }
@@ -381,7 +381,9 @@ class _ChatListPageState extends State<ChatListPage>
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       border: Border.all(
-                          color: theme.colorScheme.surface, width: 1.2),
+                        color: theme.colorScheme.surface,
+                        width: 1.2,
+                      ),
                     ),
                     child: CircleAvatar(
                       radius: _inCallAvatarSize / 2,

@@ -178,6 +178,11 @@ class RTPTransceiverWrapper implements IRTPTransceiver {
   Future<void> setDirectionToSendRecv() async {
     await _transceiver.setDirection(webrtc.TransceiverDirection.SendRecv);
   }
+
+  @override
+  Future<void> setDirectionToRecvOnly() async {
+    await _transceiver.setDirection(webrtc.TransceiverDirection.RecvOnly);
+  }
 }
 
 // ============== State mapping ==============

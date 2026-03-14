@@ -121,6 +121,19 @@ class WebSocketManager {
 
   /// Initialize WebSocket connection with SignalR
   Future<void> initialize() async {
+    if ((_isConnected &&
+        _hubConnection?.state == HubConnectionState.Connected)) {
+      _logger.i(
+        'Initialize called but already connecting/connected - ignoring',
+      );
+      return;
+    }
+
+    if (_isConnecting) {
+      _logger.i('Initialize called but already connecting - ignoring');
+      return Future.delayed(const Duration(seconds: 1), initialize);
+    }
+
     final initId = ++_initializeSeq;
     _logger.i(
       '[diag-ws] initialize#$initId start state=${_hubConnection?.state} isConnected=$_isConnected isConnecting=$_isConnecting',
@@ -137,6 +150,7 @@ class WebSocketManager {
       if (_hubConnection?.state == HubConnectionState.Connected) {
         _logger.i('[diag-ws] initialize#$initId SignalR already up');
         _startHealthCheckTimer();
+        // _isConnecting = false;
         return;
       }
 
@@ -203,10 +217,14 @@ class WebSocketManager {
       _startHealthCheckTimer();
       _setupMessageHandlers();
       _notifyConnectionRestored();
-      _logger.i('[diag-ws] initialize#$initId done state=${_hubConnection?.state}');
+      _logger.i(
+        '[diag-ws] initialize#$initId done state=${_hubConnection?.state}',
+      );
     } catch (e) {
       _logger.e('Failed to initialize WebSocket: $e');
-      _logger.e('[diag-ws] initialize#$initId failed state=${_hubConnection?.state}');
+      _logger.e(
+        '[diag-ws] initialize#$initId failed state=${_hubConnection?.state}',
+      );
     }
   }
 
@@ -977,6 +995,10 @@ class WebSocketManager {
   /// (automatic reconnect, force reconnect, or full reinitialize).
   void onConnectionRestored(void Function() callback) {
     _onConnectionRestoredCallbacks.add(callback);
+
+    if (_isConnected) {
+      callback();
+    }
   }
 
   void removeConnectionRestoredCallback(void Function() callback) {

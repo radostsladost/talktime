@@ -102,6 +102,10 @@ abstract class IRTPTransceiver {
   /// Set direction to sendrecv so the next offer will include sending (e.g. after replaceTrack with non-null video).
   /// No-op on platforms that don't support it (e.g. Android bridge).
   Future<void> setDirectionToSendRecv() async {}
+
+  /// Set direction to recvonly when local video is off (replaceTrack(null)) but remote video should still be received.
+  /// No-op on platforms that don't support it (e.g. Android bridge).
+  Future<void> setDirectionToRecvOnly() async {}
 }
 
 /// Signaling state.

@@ -2,6 +2,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:signalr_netcore/utils.dart';
 import 'package:talktime/core/config/environment.dart';
 import 'package:talktime/core/global_key.dart';
 import 'package:talktime/core/websocket/websocket_manager.dart';
@@ -9,7 +10,6 @@ import 'package:talktime/features/auth/data/auth_service.dart';
 import 'package:talktime/features/auth/presentation/pages/login_page.dart';
 import 'package:talktime/features/call/data/call_service.dart';
 import 'package:talktime/features/call/presentation/pages/guest_name_page.dart';
-import 'package:talktime/features/chat/data/device_sync_service.dart';
 import 'package:talktime/features/chat/presentation/pages/chat_split_view.dart';
 import 'package:talktime/features/settings/data/settings_service.dart';
 import 'package:logger/logger.dart';
@@ -141,22 +141,45 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   Future<void> _checkAuthentication() async {
-    await Future.delayed(const Duration(seconds: 1));
+    await Future.delayed(const Duration(milliseconds: 20));
 
     if (!mounted) return;
 
     final inviteKey = _getDeepLinkInviteKey();
 
     try {
-      final isAuthenticated = await _authService.isAuthenticated();
+      final isAuthenticated = !isStringEmpty(
+        await _authService.getAccessToken(),
+      );
 
       if (!mounted) return;
 
       if (isAuthenticated) {
         // Authenticated user flow
-        try {
+        Future.microtask(() async {
+          var authInfo = await _authService.isAuthenticated();
+
+          if (!authInfo) {
+            Logger().w('User is not authenticated after token check');
+
+            if (inviteKey != null) {
+              // Guest flow: show name prompt, then join call directly via invite key
+              Navigator.of(navigatorKey.currentContext!).pushReplacement(
+                MaterialPageRoute(
+                  builder: (_) => GuestNamePage(inviteKey: inviteKey),
+                ),
+              );
+            } else {
+              Navigator.of(navigatorKey.currentContext!).pushReplacement(
+                MaterialPageRoute(builder: (_) => const LoginPage()),
+              );
+            }
+
+            return;
+          }
+
           if (!kIsWeb) {
-            final notificationsEnabled = await _settingsService
+            var notificationsEnabled = await _settingsService
                 .getNotificationsEnabled();
             if (notificationsEnabled) {
               final messagePreview = await _settingsService.getMessagePreview();
@@ -167,10 +190,10 @@ class _SplashScreenState extends State<SplashScreen> {
           }
 
           await WebSocketManager().initialize();
-          DeviceSyncService().initialize();
-        } catch (e) {
-          Logger().e('Failed to register Firebase token: $e');
-        }
+          // DeviceSyncService().initialize();
+        }).catchError((e) {
+          Logger().e('Failed to initialize services: $e');
+        });
 
         // Authenticated users always go to the main chat view.
         // If they have an invite key they can use the share link themselves,

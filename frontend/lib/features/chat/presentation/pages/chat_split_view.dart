@@ -224,7 +224,7 @@ class _ChatSplitViewState extends State<ChatSplitView>
     }
     setState(() {});
     // Request voice-call participants for each chat so we can show "in call" avatars
-    WebSocketManager().initialize().then((_) {
+    WebSocketManager().onConnectionRestored(() {
       for (final c in conversations) {
         WebSocketManager().requestRoomParticipants(c.id);
       }
@@ -267,7 +267,9 @@ class _ChatSplitViewState extends State<ChatSplitView>
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       border: Border.all(
-                          color: theme.colorScheme.surface, width: 1.2),
+                        color: theme.colorScheme.surface,
+                        width: 1.2,
+                      ),
                     ),
                     child: CircleAvatar(
                       radius: _inCallAvatarSize / 2,

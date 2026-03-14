@@ -559,6 +559,8 @@ class CallService {
       await videoTransceiver.sender.replaceTrack(newTrack);
       if (newTrack != null) {
         await videoTransceiver.setDirectionToSendRecv();
+      } else {
+        await videoTransceiver.setDirectionToRecvOnly();
       }
       return;
     }
@@ -1367,6 +1369,70 @@ class CallService {
         'sendrecv=$sendrecv sendonly=$sendonly recvonly=$recvonly inactive=$inactive';
   }
 
+  bool _offerIndicatesPeerSendsVideo(String sdp) {
+    final normalized = sdp.replaceAll('\r\n', '\n');
+    final videoSections = RegExp(
+      r'm=video[\s\S]*?(?=\nm=|$)',
+      multiLine: true,
+    ).allMatches(normalized);
+
+    if (videoSections.isEmpty) return false;
+
+    for (final match in videoSections) {
+      final section = match.group(0) ?? '';
+      if (section.isEmpty) continue;
+
+      final lines = section.split('\n');
+      final mLine = lines.isNotEmpty ? lines.first.trim() : '';
+      final mLineParts = mLine.split(RegExp(r'\s+'));
+      if (mLineParts.length > 1 && mLineParts[1] == '0') {
+        continue;
+      }
+
+      final directionMatch = RegExp(
+        r'^a=(sendrecv|sendonly|recvonly|inactive)$',
+        multiLine: true,
+      ).firstMatch(section);
+
+      if (directionMatch == null) {
+        return true;
+      }
+
+      final direction = directionMatch.group(1);
+      if (direction == 'sendrecv' || direction == 'sendonly') {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  Future<void> _syncRemoteVideoStateFromOfferSdp(
+    String participantId,
+    String sdp,
+  ) async {
+    if (_offerIndicatesPeerSendsVideo(sdp)) {
+      return;
+    }
+
+    final existing = _remoteStreams[participantId];
+    if (existing == null) return;
+
+    final videoTracks = [...existing.getVideoTracks()];
+    if (videoTracks.isEmpty) return;
+
+    for (final track in videoTracks) {
+      try {
+        await existing.removeTrack(track);
+      } catch (_) {}
+      try {
+        track.stop();
+      } catch (_) {}
+    }
+
+    _notifyRemoteStreamsUpdated(participantId);
+  }
+
   Future<void> _handleOffer(SignalingOfferEvent event) async {
     _logger.i('_handleOffer from ${event.fromDeviceId} to ${event.toDeviceId}');
     _logger.i('[diag] incoming offer summary: ${_summarizeSdp(event.sdp)}');
@@ -1389,6 +1455,7 @@ class CallService {
       await _applyOfferCollisionRollbackIfNeeded(pc, peerId);
       final offer = RTCSessionDescriptionDto(event.sdp, 'offer');
       await pc.setRemoteDescription(offer);
+      await _syncRemoteVideoStateFromOfferSdp(peerId, event.sdp);
 
       final stateAfterRemote = await pc.getSignalingState();
       final canAnswer =
