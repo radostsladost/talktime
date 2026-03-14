@@ -29,14 +29,34 @@ class LocalMessageStorage {
     }
 
     var db = await _getDb();
-    for (var message in messages) {
-      var id = await db.insert(
-        'message',
-        message.toMap(),
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
-      print('Inserted message with ID: $id');
-    }
+    await db.transaction((txn) async {
+      for (var message in messages) {
+        final current = await txn.query(
+          'message',
+          columns: ['id', 'readAt'],
+          where: 'externalId = ?',
+          whereArgs: [message.externalId],
+          limit: 1,
+        );
+
+        final map = message.toMap();
+        if (current.isNotEmpty) {
+          final existingReadAt = current.first['readAt'] as int?;
+          final incomingReadAt = map['readAt'] as int?;
+          // Backend does not own client read state, so never downgrade local readAt.
+          if (existingReadAt != null &&
+              (incomingReadAt == null || incomingReadAt < existingReadAt)) {
+            map['readAt'] = existingReadAt;
+          }
+        }
+
+        await txn.insert(
+          'message',
+          map,
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
+    });
   }
 
   /// Get messages for a conversation from LOCAL storage

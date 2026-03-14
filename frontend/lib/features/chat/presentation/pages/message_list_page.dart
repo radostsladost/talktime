@@ -100,15 +100,13 @@ class _MessageListPageState extends State<MessageListPage> {
       _syncMessagesWithPaginationAndPending();
     });
 
-    // On open: sync full history with pagination and pending, then load from local
-    _syncMessagesWithPaginationAndPending();
-
-    // Mark all messages in this conversation as read when user opens the chat
-    _messageService.markConversationAsRead(widget.conversation.id).then((_) {
+    // On open: sync history first, then mark as read locally.
+    // Backend does not own read state, so read/unread is finalized on client.
+    _syncMessagesWithPaginationAndPending().then((_) async {
+      await _messageService.markConversationAsRead(widget.conversation.id);
       if (!mounted) return;
-      _loadMessagesWithReactions().then((_) {
-        if (mounted) widget.onConversationActivity?.call();
-      });
+      await _loadMessagesWithReactions();
+      if (mounted) widget.onConversationActivity?.call();
     });
 
     WebSocketManager()
@@ -290,6 +288,14 @@ class _MessageListPageState extends State<MessageListPage> {
         .syncPendingMessages(widget.conversation.id)
         .catchError((error) {
           _logger.e('Error syncing pending messages: $error');
+        });
+
+    // Chat is currently open, so any messages from others in this conversation
+    // should become read in local storage after sync inserts/upserts.
+    await _messageService
+        .markConversationAsRead(widget.conversation.id)
+        .catchError((error) {
+          _logger.e('Error marking conversation as read after sync: $error');
         });
 
     if (!mounted) return;
