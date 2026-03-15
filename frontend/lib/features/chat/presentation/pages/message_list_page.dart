@@ -73,6 +73,8 @@ class _MessageListPageState extends State<MessageListPage> {
   final Map<String, Message> _newMessages = {};
   int _upperBound = 50;
   bool _isSendingMedia = false;
+  // True while the background network sync is running
+  bool _isSyncing = false;
 
   // Reactions cache - stored separately since messages are ephemeral on backend
   Map<String, List<Reaction>> _messageReactions = {};
@@ -86,27 +88,23 @@ class _MessageListPageState extends State<MessageListPage> {
     _messageService = MessageService();
     _reactionService = ReactionService();
     _mediaService = MediaService();
-    _loadMessagesWithReactions();
-    _myId = '';
-    (AuthService().getCurrentUser()).then(
-      (user) => setState(() {
-        _myId = user.id;
-      }),
-    );
 
-    // Start periodic sync: fetch all messages with pagination + pending
+    // ── Step 1: Show local cache IMMEDIATELY (pure SQLite, zero network) ──
+    _loadLocalMessagesOnly();
+
+    _myId = '';
+    // Use cached user if available, fall back to network silently
+    AuthService().getCurrentUser().then(
+      (user) { if (mounted) setState(() => _myId = user.id); },
+    ).catchError((_) {});
+
+    // ── Step 2: Background sync – does NOT block the initial render ──
+    _startBackgroundSync();
+
+    // Periodic sync every 30 s
     _syncTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (!mounted) return;
       _syncMessagesWithPaginationAndPending();
-    });
-
-    // On open: sync history first, then mark as read locally.
-    // Backend does not own read state, so read/unread is finalized on client.
-    _syncMessagesWithPaginationAndPending().then((_) async {
-      await _messageService.markConversationAsRead(widget.conversation.id);
-      if (!mounted) return;
-      await _loadMessagesWithReactions();
-      if (mounted) widget.onConversationActivity?.call();
     });
 
     WebSocketManager()
@@ -169,6 +167,41 @@ class _MessageListPageState extends State<MessageListPage> {
       _logger.e('Error loading messages: $e');
     }
   }
+
+  /// Reads messages from local SQLite only – no network involved.
+  /// Called in initState so the user sees cached content instantly.
+  Future<void> _loadLocalMessagesOnly() async {
+    try {
+      final messages = await _messageService.getMessages(
+        widget.conversation.id,
+        take: _upperBound,
+      );
+      if (!mounted) return;
+      setState(() => _messages = messages);
+    } catch (e) {
+      _logger.e('Error loading local messages: $e');
+    }
+  }
+
+  /// Background sync: fetch from server, update local DB, refresh UI.
+  /// Runs asynchronously so it never blocks the initial local-cache render.
+  Future<void> _startBackgroundSync() async {
+    if (mounted) setState(() => _isSyncing = true);
+    try {
+      await _syncMessagesWithPaginationAndPending();
+      if (!mounted) return;
+      await _messageService.markConversationAsRead(widget.conversation.id);
+      if (!mounted) return;
+      // Reload messages + reactions now that the DB is up-to-date.
+      await _loadMessagesWithReactions();
+      if (mounted) widget.onConversationActivity?.call();
+    } catch (e) {
+      _logger.e('Background sync error: $e');
+    } finally {
+      if (mounted) setState(() => _isSyncing = false);
+    }
+  }
+
 
   Future<void> _fetchReactionsForMessages(List<String> messageIds) async {
     if (messageIds.isEmpty) return;
@@ -738,6 +771,14 @@ class _MessageListPageState extends State<MessageListPage> {
       ),
       body: Column(
         children: [
+          // Thin progress bar while background sync is running
+          if (_isSyncing)
+            LinearProgressIndicator(
+              minHeight: 2,
+              backgroundColor: Colors.transparent,
+              color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.6),
+            ),
+
           // Conference indicator
           if (_conferenceParticipants.isNotEmpty) _buildConferenceIndicator(),
 

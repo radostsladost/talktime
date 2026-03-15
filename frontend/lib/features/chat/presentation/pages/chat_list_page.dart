@@ -374,14 +374,14 @@ class _ChatListPageState extends State<ChatListPage>
   }
 
   Future<void> _openChat(Conversation conversation) async {
-    final auth = new AuthService();
-    final user = await auth.getCurrentUser();
-    conversation.participants?.sort((a, b) {
-      if (a.id == user.id) return 1;
-      if (b.id == user.id) return -1;
-      return 0;
-    });
-
+    // Sort using the already-cached _myId – no network call needed.
+    if (_myId.isNotEmpty) {
+      conversation.participants?.sort((a, b) {
+        if (a.id == _myId) return 1;
+        if (b.id == _myId) return -1;
+        return 0;
+      });
+    }
     if (!mounted) return;
 
     NavigationManager().openMessagesList(conversation);
