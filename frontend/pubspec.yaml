@@ -49,6 +49,7 @@ dependencies:
   hotkey_manager: ^0.2.3
   system_tray: ^2.0.3   # System tray icon (Windows, macOS; Linux needs appindicator)
   window_manager: ^0.5.1  # Show/focus window from tray
+  audioplayers: ^6.1.0
 
 dependency_overrides:
   uuid: ^3.0.6
@@ -65,3 +66,6 @@ flutter:
     - .env
     - assets/app_icon.ico
     - assets/app_icon.png
+    - assets/ui_enter_call.ogg
+    - assets/ui_mute.ogg
+    - assets/ui_unmute.ogg

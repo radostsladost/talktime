@@ -10,6 +10,7 @@ import 'package:talktime/core/navigation_manager.dart';
 import 'package:talktime/features/call/data/call_service.dart';
 import 'package:talktime/features/call/data/signaling_service.dart';
 import 'package:talktime/features/call/presentation/utils/call_url_helper.dart';
+import 'package:talktime/features/call/presentation/utils/ui_sound_player.dart';
 import 'package:talktime/features/settings/data/settings_service.dart';
 import 'package:talktime/features/call/presentation/remote_participant_tile.dart';
 import 'package:talktime/features/call/presentation/widgets/audio_chooser_popup.dart';
@@ -37,9 +38,14 @@ class ConferencePage extends StatefulWidget {
 }
 
 class _ConferencePageState extends State<ConferencePage> {
+  static const String _uiEnterCallSound = 'ui_enter_call.ogg';
+  static const String _uiMuteSound = 'ui_mute.ogg';
+  static const String _uiUnmuteSound = 'ui_unmute.ogg';
+
   final CallService _callService = CallService(); // Singleton instance
   final Logger _logger = Logger(output: ConsoleOutput());
   final Set<String> _rendererInitPending = <String>{};
+  late final UiSoundPlayer _uiSoundPlayer;
 
   // UI Specific Renderers (must be disposed when page closes)
   late final IVideoRenderer _localRenderer;
@@ -69,8 +75,10 @@ class _ConferencePageState extends State<ConferencePage> {
   void initState() {
     super.initState();
     _localRenderer = getWebRTCPlatform().createVideoRenderer();
+    _uiSoundPlayer = createUiSoundPlayer();
 
     _initCall();
+    unawaited(_playUiSound(_uiEnterCallSound));
 
     // Timer.periodic(Duration(seconds: 5), (timer) {
     //   if (_callService.remoteStreams.values.any(
@@ -322,6 +330,22 @@ class _ConferencePageState extends State<ConferencePage> {
     });
   }
 
+  Future<void> _playUiSound(String assetName) async {
+    try {
+      await _uiSoundPlayer.play(assetName);
+    } catch (error) {
+      _logger.w('Failed to play UI sound $assetName: $error');
+    }
+  }
+
+  void _toggleMicWithSound() {
+    final wasMuted = _callService.isMuted;
+    _callService.toggleMic();
+    final isMuted = _callService.isMuted;
+    if (isMuted == wasMuted) return;
+    unawaited(_playUiSound(isMuted ? _uiMuteSound : _uiUnmuteSound));
+  }
+
   @override
   void dispose() {
     _stateSubscription?.cancel();
@@ -340,6 +364,7 @@ class _ConferencePageState extends State<ConferencePage> {
     for (var r in _remoteRenderers.values) {
       r.dispose();
     }
+    unawaited(_uiSoundPlayer.dispose());
     _rendererInitPending.clear();
     super.dispose();
   }
@@ -715,6 +740,7 @@ class _ConferencePageState extends State<ConferencePage> {
         callService: _callService,
         isDesktop: _isDesktop,
         isMobile: _isMobile,
+        onToggleMic: _toggleMicWithSound,
         onSelectMic: _showAudioDeviceSelector,
         onSelectSpeaker: _showSpeakerDeviceSelector,
         onSelectSpeakerToggle: _showSpeakerToggleForMobile,
@@ -763,7 +789,7 @@ class _ConferencePageState extends State<ConferencePage> {
               return IconButton(
                 icon: Icon(isMuted ? Icons.mic_off : Icons.mic),
                 color: isMuted ? Colors.red : Colors.white,
-                onPressed: () => _callService.toggleMic(),
+                onPressed: _toggleMicWithSound,
               );
             },
           ),
@@ -832,6 +858,7 @@ class _AudioSettingsSheet extends StatefulWidget {
     required this.callService,
     required this.isDesktop,
     required this.isMobile,
+    required this.onToggleMic,
     required this.onSelectMic,
     required this.onSelectSpeaker,
     required this.onSelectSpeakerToggle,
@@ -840,6 +867,7 @@ class _AudioSettingsSheet extends StatefulWidget {
   final CallService callService;
   final bool isDesktop;
   final bool isMobile;
+  final VoidCallback onToggleMic;
   final VoidCallback onSelectMic;
   final VoidCallback onSelectSpeaker;
   final VoidCallback onSelectSpeakerToggle;
@@ -911,7 +939,7 @@ class _AudioSettingsSheetState extends State<_AudioSettingsSheet> {
                     subtitle: Text(micOn ? 'On' : 'Muted'),
                     trailing: Switch(
                       value: micOn,
-                      onChanged: (_) => callService.toggleMic(),
+                      onChanged: (_) => widget.onToggleMic(),
                     ),
                   );
                 },
