@@ -67,6 +67,7 @@ class _ChatSplitViewState extends State<ChatSplitView>
       _rightPanelOverride = null;
       _callPanelTabController ??= TabController(length: 2, vsync: this);
     });
+    _requestParticipantsNowAndSoon(conversation.id);
   }
 
   void _disposeCallPanel() {
@@ -119,6 +120,14 @@ class _ChatSplitViewState extends State<ChatSplitView>
     _callStateSubscription = CallService().callStateStream.listen((state) {
       if (state == CallState.idle && mounted) {
         setState(() => _disposeCallPanel());
+        return;
+      }
+
+      // Proactively refresh room participants during call connect/join to reduce UI delay.
+      final roomId = CallService().currentRoomId;
+      if (roomId != null) {
+        _requestParticipantsNowAndSoon(roomId);
+        if (mounted) setState(() {});
       }
     });
 
@@ -231,6 +240,19 @@ class _ChatSplitViewState extends State<ChatSplitView>
     });
   }
 
+  void _requestParticipantsNowAndSoon(String roomId) {
+    final ws = WebSocketManager();
+    ws.requestRoomParticipants(roomId);
+    Future.delayed(const Duration(milliseconds: 250), () {
+      if (!mounted) return;
+      ws.requestRoomParticipants(roomId);
+    });
+    Future.delayed(const Duration(milliseconds: 900), () {
+      if (!mounted) return;
+      ws.requestRoomParticipants(roomId);
+    });
+  }
+
   /// Small avatars row for "in voice call" indicator under chat name
   static const double _inCallAvatarSize = 18;
   static const double _inCallAvatarOverlapPx = 5;
@@ -302,6 +324,24 @@ class _ChatSplitViewState extends State<ChatSplitView>
             ),
           ),
         const SizedBox(width: 6),
+        Icon(Icons.mic, size: 14, color: theme.colorScheme.primary),
+        const SizedBox(width: 2),
+        Text(
+          'In call',
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: theme.colorScheme.primary,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildInCallIndicatorOnly(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
         Icon(Icons.mic, size: 14, color: theme.colorScheme.primary),
         const SizedBox(width: 2),
         Text(
@@ -621,6 +661,9 @@ class _ChatSplitViewState extends State<ChatSplitView>
             final unreadCount = _unreadCountMap[convo.id] ?? 0;
             final inCallParticipants = WebSocketManager()
                 .getConferenceParticipants(convo.id);
+            final isCurrentCallRoom =
+                CallService().currentRoomId == convo.id &&
+                CallService().currentState != CallState.idle;
 
             return Column(
               mainAxisSize: MainAxisSize.min,
@@ -710,11 +753,16 @@ class _ChatSplitViewState extends State<ChatSplitView>
                                 ),
                                 const SizedBox(height: 3),
                                 // Row 2: in-call + preview + unread badge
-                                if (inCallParticipants.isNotEmpty)
+                                if (inCallParticipants.isNotEmpty ||
+                                    isCurrentCallRoom)
                                   Padding(
                                     padding: const EdgeInsets.only(bottom: 3),
-                                    child: _buildInCallAvatars(
-                                        context, inCallParticipants),
+                                    child: inCallParticipants.isNotEmpty
+                                        ? _buildInCallAvatars(
+                                            context,
+                                            inCallParticipants,
+                                          )
+                                        : _buildInCallIndicatorOnly(context),
                                   ),
                                 Row(
                                   crossAxisAlignment: CrossAxisAlignment.center,
